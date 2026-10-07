@@ -1,0 +1,21 @@
+CouchDoom - play your DoomRunner presets from the couch with a gamepad
+https://github.com/KrisEnigma/couch-doom
+
+1. Set up your presets in DoomRunner first (https://github.com/Youda008/DoomRunner).
+2. Double-click CouchDoom.exe. That's it.
+
+CouchDoom finds DoomRunner's settings on its own. If you use the portable DoomRunner,
+you can also put this CouchDoom folder inside the DoomRunner folder.
+If it can't find them, it tells you where it looked.
+
+Controls (Xbox names; PlayStation and Switch pads work too)
+  A / Start   Play          B   Quit (press twice) or close
+  X           Info sheet    Y   Search
+  LB / RB     Jump section  R3  Add to favorites
+  Keyboard: arrows, Enter to play, Esc to quit, or just type to search.
+
+Windows may warn that the app is from an unknown publisher (it isn't code-signed).
+Click "More info" then "Run anyway".
+
+MIDI title music needs a SoundFont: drop any .sf2 file into a "soundfonts" folder next
+to CouchDoom.exe. Without one, MIDI music stays silent and everything else works.

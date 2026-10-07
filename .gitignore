@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 state/
 soundfonts/
+build/
+dist/

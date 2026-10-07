@@ -2,7 +2,23 @@
 
 Fullscreen gamepad launcher for [DoomRunner](https://github.com/Youda008/DoomRunner) presets. It reads DoomRunner's `options.json` and launches the engine with the same IWAD, mods, map packs and arguments. It never writes to `options.json`; keep editing presets in DoomRunner itself.
 
-## Setup
+![CouchDoom on Valiant: the WAD's own title art, logo and readme, tinted green to match](docs/screenshots/valiant.jpg)
+
+<p>
+  <img src="docs/screenshots/eviternity-2.jpg" width="32%" alt="Eviternity II with its title art and logo">
+  <img src="docs/screenshots/axolotl.jpg" width="32%" alt="Axolotl Regenerated, tinted blue from its art">
+  <img src="docs/screenshots/endoom.jpg" width="32%" alt="The ENDOOM tab of Ashes Afterglow">
+</p>
+
+Title art, logos, readmes and ENDOOM screens shown here belong to their WAD authors; CouchDoom reads them from your own files.
+
+## Download
+
+Windows: grab `CouchDoom-…-windows-x64.zip` from the [latest release](https://github.com/KrisEnigma/couch-doom/releases/latest), unzip it anywhere and double-click `CouchDoom.exe`. No Python needed. You'll need DoomRunner with at least one preset.
+
+The app isn't code-signed, so Windows SmartScreen may warn about an unknown publisher: click **More info**, then **Run anyway**.
+
+## Run from source
 
 ```powershell
 python -m venv .venv
@@ -11,8 +27,6 @@ python -m venv .venv
 ```
 
 Uses `pygame-ce` (imports as `pygame`), which ships wheels for current Python versions. `tinysoundfont` renders MIDI title music; install it with `--no-deps` because its optional live-playback dependency (PyAudio) has no wheel for new Pythons and isn't used here. Without it, MIDI title tracks are skipped and everything else works.
-
-## Run
 
 | Command | What it does |
 | --- | --- |
@@ -29,7 +43,9 @@ set "PYTHONPATH=%COUCH%\src"
 start "" "%COUCH%\.venv\Scripts\pythonw.exe" -m couch_doom %*
 ```
 
-Options file: `--options <path>` or the `DOOMRUNNER_OPTIONS` env var if set. Otherwise the first one that exists of `D:\Standalone\UZDoom\DoomRunner\options.json` (portable install), `%LOCALAPPDATA%\DoomRunner\options.json`, then `%APPDATA%\DoomRunner\options.json`.
+To build the `.exe` yourself: `pip install pyinstaller`, then `pyinstaller packaging/CouchDoom.spec` (output in `dist/CouchDoom/`). Pushing a `v*` tag does the same on GitHub Actions and publishes the zip as a release.
+
+Options file: `--options <path>` or the `DOOMRUNNER_OPTIONS` env var if set. Otherwise the first one that exists of: next to `CouchDoom.exe` or one folder up (release build only, so the folder can sit inside a portable DoomRunner), `D:\Standalone\UZDoom\DoomRunner\options.json`, `%LOCALAPPDATA%\DoomRunner\options.json`, then `%APPDATA%\DoomRunner\options.json`.
 
 If the file is missing, can't be parsed, or has no presets, the launcher opens on a notice explaining what's wrong and listing the paths it tried, instead of closing. Press A / Enter to reload once it's fixed (for example after saving a preset in DoomRunner); B / Esc quits. The problem is also written to the log, and `--dry-run` prints it and exits with code 2 (or 1 when there are no presets).
 
