@@ -1,0 +1,16 @@
+[project]
+name = "couch-doom"
+version = "0.1.0"
+description = "Gamepad couch launcher for DoomRunner presets"
+requires-python = ">=3.11"
+dependencies = ["pygame-ce>=2.5"]
+
+[project.scripts]
+couch-doom = "couch_doom.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
