@@ -17,14 +17,17 @@ from typing import Callable
 import pygame
 
 from . import draw
+from .filedialog import open_file
 from .gamepad import Action, Input
 from .glyphs import BUTTON_NAMES, Glyphs
 from .launch import LaunchCommand, build_command, load_order, split_args
+from .launchers import Launchers
 from .music import DWELL_SECONDS, MusicPlayer, find_soundfont
-from .options import Options, OptionsError, Preset
+from .options import Options, OptionsError, Preset, unpack
 from .endoom import COLS, ROWS, Endoom, find_endoom
 from .readme import Readme, find_readme
 from .sfx import Sfx
+from .sources import SOURCES, Choice
 from .state import State
 from .theme import HOUSE, Theme, from_art
 from .titleart import Art, find_logo, find_title_art
@@ -116,6 +119,7 @@ def _reset_alpha(surf: pygame.Surface) -> None:
 
 
 def _load_extras(preset: Preset) -> tuple[Art | None, Readme | None, Endoom | None, Art | None]:
+    unpack(preset)
     files = load_order(preset)
     try:
         art = find_title_art(preset.iwad, files)
@@ -189,12 +193,18 @@ class App:
         soundfont: str | None = None,
         problem: OptionsError | None = None,
         reload: Callable[[], Options] | None = None,
+        launchers: Launchers | None = None,
+        pick: bool = False,
     ):
         self.opts = opts
         self.state = state
         self.windowed = windowed
         self.problem = problem  # options.json missing/unreadable: the notice screen replaces the list
-        self.reload = reload
+        self.launchers = launchers
+        self.reload = reload or (launchers.load if launchers else None)
+        self.picker: list[Choice | None] = []  # None is the "find it myself" row
+        self.picker_sel = 0
+        self.picker_opened = 0.0
         self.soundfont_choice = soundfont
 
         _set_dpi_aware()
@@ -263,6 +273,8 @@ class App:
         self.scroll = self._target_scroll()
         self.bar_y = self.row_y[self._sel_row()] if self.rows else 0
         self.detail_changed = time.monotonic()
+        if pick:
+            self._open_picker()
 
     def _pick_start(self) -> None:
         names = {p.name: i for i, p in enumerate(self.opts.presets)}
@@ -283,9 +295,16 @@ class App:
             opts = self.reload()
         except OptionsError as exc:
             self.problem = exc
+            if self.launchers and self.launchers.must_pick:
+                self._open_picker()  # the second look found several: the player has to say which
+                return
             self._sound("error")
             self._notify(f"Still the same: {exc.title[0].lower()}{exc.title[1:]}", ERROR)
             return
+        self._apply(opts)
+
+    def _apply(self, opts: Options) -> None:
+        """Show a freshly loaded set of presets: a reload, or another launcher picked."""
         for job in self.art_jobs.values():
             job.cancel()
         for cache in (self.art_jobs, self.art_cache, self.readmes, self.endooms, self.logos, self.themes, self.row_offset):
@@ -304,9 +323,91 @@ class App:
         self.detail_changed = time.monotonic()
         if opts.presets:
             self._sound("open")
-            self._notify(f"Loaded {len(opts.presets)} presets", MUTED)
+            source = f" from {opts.launcher}" if opts.launcher else ""
+            self._notify(f"Loaded {len(opts.presets)} presets{source}", MUTED)
         else:
             self._sound("error")
+
+    # ---------- launcher picker ----------
+
+    def _open_picker(self) -> None:
+        if not self.launchers:
+            return
+        choices = self.launchers.refresh()
+        for c in choices:
+            self.launchers.preview(c)  # the counts shown; loading here keeps the stall on the button press
+        self.picker = [*choices, None]
+        current = self.launchers.current
+        self.picker_sel = next((i for i, c in enumerate(choices) if current and c.id == current.id), 0)
+        self.picker_opened = time.monotonic()
+        self.mode = "launcher"
+        self._sound("open")
+
+    def _on_picker_action(self, action: Action) -> None:
+        if action in (Action.UP, Action.DOWN):
+            step = -1 if action == Action.UP else 1
+            sel = max(0, min(len(self.picker) - 1, self.picker_sel + step))
+            if sel != self.picker_sel:
+                self.picker_sel = sel
+                self._sound("move")
+        elif action in (Action.CONFIRM, Action.MENU):
+            self._picker_pick(self.picker_sel)
+        elif action in (Action.BACK, Action.LAUNCHER):
+            self._close_overlay()
+
+    def _picker_hover(self, i: int) -> None:
+        if i != self.picker_sel:
+            self.picker_sel = i
+            self._sound("move")
+
+    def _picker_pick(self, i: int) -> None:
+        self.picker_sel = i
+        choice = self.picker[i]
+        if choice is None:
+            self._browse()
+            return
+        current = self.launchers.current
+        if current and choice.id == current.id and not self.problem:
+            self._close_overlay()
+            return
+        self._choose(choice)
+
+    def _choose(self, choice: Choice, added: bool = False) -> None:
+        try:
+            opts = self.launchers.choose(choice, added)
+        except OptionsError as exc:
+            self._notify(exc.title, ERROR)
+            self._sound("error")
+            return
+        self.mode = "list"
+        self._apply(opts)
+
+    def _browse(self) -> None:
+        patterns = ";".join([*(e for s in SOURCES for e in s.module.EXES), *(n for s in SOURCES for n in s.module.SETTINGS_NAMES), "*.zdl"])
+        owner = pygame.display.get_wm_info().get("window")
+        path = open_file("Find your Doom launcher", [("Doom launchers and their settings", patterns), ("All files", "*.*")], owner)
+        # The dialog swallowed the presses that closed it; don't let their releases act on the list.
+        pygame.event.clear()
+        self.input.reset()
+        self.ignore_until = time.monotonic() + INPUT_COOLDOWN
+        _force_foreground()
+        if path:
+            self._on_drop(path)
+
+    def _on_drop(self, path: Path) -> None:
+        """A file or folder dropped on the window, or picked in the dialog: use the launcher it belongs to."""
+        if not self.launchers:
+            return
+        choice = self.launchers.add(path)
+        if choice is None:
+            exe = next((s for s in SOURCES if path.name.lower() in s.module.EXES), None)
+            if exe:
+                self._notify(f"{exe.name} hasn't saved any settings yet. Set up a game in it first.", ERROR)
+            else:
+                self._notify(f"{path.name} isn't a DoomRunner, ZDL or Doom Launcher file", ERROR)
+            self._sound("error")
+            return
+        self._choose(choice, added=True)
 
     # ---------- audio ----------
 
@@ -783,9 +884,19 @@ class App:
         self.toast = Toast(text, color, time.monotonic())
 
     def _on_action(self, action: Action, now: float) -> None:
+        if self.mode == "launcher":
+            self._on_picker_action(action)
+            return
+        if action == Action.LAUNCHER:
+            if self.mode == "list":
+                self._open_picker()
+            return
         if self.blocked:
             if action in (Action.CONFIRM, Action.MENU):
-                self._reload()
+                if self.launchers and self.launchers.must_pick:
+                    self._open_picker()  # several launchers found and none picked yet: reloading can't help
+                else:
+                    self._reload()
             elif action == Action.BACK:
                 self.running = False  # nothing to lose here, so no press-twice guard
             return
@@ -1061,6 +1172,10 @@ class App:
             self._notify(cmd.issues[0], ERROR)
             self._sound("error")
             return
+        if error := unpack(preset):
+            self._notify(error, ERROR)
+            self._sound("error")
+            return
 
         self._sound("confirm")
         if self.music:
@@ -1270,6 +1385,8 @@ class App:
             self._draw_osk(now)
         elif self.mode == "info":
             self._draw_info(now)
+        elif self.mode == "launcher":
+            self._draw_picker(now)
         self._draw_toast(now)
 
     def _draw_header(self) -> None:
@@ -1278,8 +1395,11 @@ class App:
         self.screen.blit(brand, (m - int(4 * s), m - int(18 * s)))
         stripe_y = m + brand.get_height() - int(14 * s)
         pygame.draw.rect(self.screen, self.theme.accent, (m, stripe_y, int(150 * s), int(7 * s)))
-        tag = self._tracked("For DoomRunner", 18, self.theme.accent, tracking=0.3)
-        self.screen.blit(tag, (m + int(168 * s), stripe_y + int(4 * s) - tag.get_height() // 2))
+        tag = self._tracked(f"For {self.opts.launcher}" if self.opts.launcher else "Couch launcher", 18, self.theme.accent, tracking=0.3)
+        tag_pos = (m + int(168 * s), stripe_y + int(4 * s) - tag.get_height() // 2)
+        self.screen.blit(tag, tag_pos)
+        if self.launchers and self.mode == "list":
+            self.hits.append(Hit(tag.get_rect(topleft=tag_pos).inflate(int(24 * s), int(20 * s)), self._open_picker))
 
         if self.blocked:
             return
@@ -1302,16 +1422,21 @@ class App:
     def _draw_notice(self) -> None:
         """Stands in for list and details when there's nothing to pick: say what's wrong and how to fix it."""
         s, m = self.s, self.margin
+        pick = "L3" if self.input.pad_count else "F4"
         if self.problem:
             title, detail, paths = self.problem.title, self.problem.detail, self.problem.tried
-            if len(paths) > 1:
-                hint = ("Open DoomRunner and save a preset so it writes its settings, or point to the file "
-                        "with --options PATH or the DOOMRUNNER_OPTIONS environment variable.")
+            if self.problem.hint:
+                hint = self.problem.hint.format(pick=pick)
+            elif len(paths) > 1:
+                hint = ("Set up a game in DoomRunner, ZDL or Doom Launcher so it saves its settings, then reload. "
+                        f"Using a portable one that isn't listed? Press {pick} to point CouchDoom at it.")
             else:
-                hint = "If DoomRunner was saving, reload. Otherwise open DoomRunner and check its settings."
+                who = self.problem.launcher or "the launcher"
+                hint = f"If {who} was saving, reload. Otherwise open {who} and check its settings."
         else:
-            title, detail, paths = "No presets yet", "DoomRunner's settings have no presets in them:", [self.opts.path]
-            hint = "Create presets in DoomRunner, then reload."
+            who = self.opts.launcher or "The launcher"
+            title, detail, paths = "No presets yet", f"{who}'s settings have no presets in them:", [self.opts.path]
+            hint = f"Create presets in {who}, then reload."
         width = self.w - 2 * m
         y = self.list_rect.top
         for line in self._wrap(title, self._font(56, bold=True), width, 2):
@@ -1487,9 +1612,13 @@ class App:
         """(glyphs, label, actions): one action for the whole hint, or one per glyph (LB = previous, RB = next)."""
         pad = self.input.pad_count > 0
         A = Action
+        launcher = [(("L3",) if pad else ("KEY:F4",), "Launcher", (A.LAUNCHER,))] if self.launchers else []
+        if self.mode == "launcher":
+            return [(("A",) if pad else ("KEY:ENTER",), "Choose", (A.CONFIRM,)), (("B",) if pad else ("KEY:ESC",), "Close", (A.BACK,))]
         if self.blocked:
-            reload = [(("A",) if pad else ("KEY:ENTER",), "Reload", (A.CONFIRM,))]
-            return [*(reload if self.reload else []), (("B",) if pad else ("KEY:ESC",), "Quit", (A.BACK,))]
+            picking = self.launchers is not None and self.launchers.must_pick
+            reload = [(("A",) if pad else ("KEY:ENTER",), "Choose" if picking else "Reload", (A.CONFIRM,))]
+            return [*(reload if self.reload else []), *([] if picking else launcher), (("B",) if pad else ("KEY:ESC",), "Quit", (A.BACK,))]
         music = "Mute" if self.state.music else "Music"
         if self.mode == "search":
             if pad:
@@ -1510,10 +1639,10 @@ class App:
         if pad:
             return [(("A",), "Play", (A.CONFIRM,)), (("X",), "Info", (A.ALT,)), (("Y",), "Search", (A.SEARCH,)),
                     (("LB", "RB"), "Section", section), (("R3",), fav, (A.FAVORITE,)), (("BACK",), music, (A.MUSIC,)),
-                    (("B",), *back)]
+                    *launcher, (("B",), *back)]
         return [(("KEY:ENTER",), "Play", (A.CONFIRM,)), (("KEY:TAB",), "Info", (A.ALT,)), (("KEY:/",), "Search", (A.SEARCH,)),
                 (("KEY:LEFT", "KEY:RIGHT"), "Section", section), (("KEY:F3",), fav, (A.FAVORITE,)),
-                (("KEY:F2",), music, (A.MUSIC,)), (("KEY:ESC",), *back)]
+                (("KEY:F2",), music, (A.MUSIC,)), *launcher, (("KEY:ESC",), *back)]
 
     def _draw_footer(self) -> None:
         s = self.s
@@ -1545,6 +1674,64 @@ class App:
             elif actions:
                 self.hits.append(Hit(whole, self._act(actions[0])))
             x += gap
+
+    def _draw_picker(self, now: float) -> None:
+        s = self.s
+        t = _ease_out((now - self.picker_opened) / 0.25)
+        pad, row_h, head_h, note_h = int(34 * s), int(84 * s), int(104 * s), int(58 * s)
+        width = min(self.w - 2 * self.margin, int(1040 * s))
+        box = pygame.Rect(0, 0, width, 2 * pad + head_h + len(self.picker) * row_h + note_h)
+        box.center = (self.w // 2, (self.h - self.footer_h) // 2 + int(24 * s * (1 - t)))
+
+        shade = pygame.Surface((self.w, self.h - self.footer_h), pygame.SRCALPHA)
+        shade.fill((0, 0, 0, int(150 * t)))
+        self.screen.blit(shade, (0, 0))
+        self.screen.blit(draw.rounded_rect(box.width, box.height, 18 * s, (*PANEL, 248), (78, 62, 55), 1.5 * s), box)
+        self.hits.append(Hit(shade.get_rect(), self._act(Action.BACK)))
+        self.hits.append(Hit(box, lambda: None))
+
+        x, y = box.x + pad, box.y + pad
+        inner = box.width - 2 * pad
+        self.screen.blit(self._tracked("Launcher", 16, self.theme.label, tracking=0.3), (x, y))
+        title_font = self._font(40, bold=True)
+        self.screen.blit(self._text("Where do your presets live?", title_font, TEXT), (x, y + int(28 * s)))
+        y += head_h
+
+        current = self.launchers.current if self.launchers else None
+        name_font, sel_font, side_font, mono = self._font(31), self._font(31, bold=True), self._font(21), self._font(17, mono=True)
+        for i, choice in enumerate(self.picker):
+            rect = pygame.Rect(box.x + int(12 * s), y, box.width - int(24 * s), row_h - int(6 * s))
+            selected = i == self.picker_sel
+            if selected:
+                self.screen.blit(draw.rounded_rect(rect.width, rect.height, 10 * s, (255, 255, 255, 16)), rect)
+                pygame.draw.rect(self.screen, self.theme.accent, (rect.x, rect.y + int(10 * s), int(5 * s), rect.height - int(20 * s)))
+            self.hits.append(Hit(rect, lambda i=i: self._picker_pick(i), lambda i=i: self._picker_hover(i)))
+            if choice is None:
+                name, sub, side, side_color = "Find it myself…", "Pick a launcher's .exe or its settings file", "", MUTED
+            else:
+                result = self.launchers.preview(choice)
+                name, sub = choice.source.name, str(choice.path)
+                if isinstance(result, OptionsError):
+                    side, side_color = "Can't read", ERROR
+                else:
+                    n = len(result.presets)
+                    side, side_color = (f"{n} preset{'s' if n != 1 else ''}" if n else "No presets"), (MUTED if n else DIM)
+            side_surf = self._text(side, side_font, side_color) if side else None
+            right = rect.right - int(22 * s)
+            if side_surf:
+                self.screen.blit(side_surf, (right - side_surf.get_width(), self._text_top(side_font, rect.y + int(30 * s))))
+                right -= side_surf.get_width() + int(18 * s)
+            if current and choice is not None and choice.id == current.id:
+                tag = self._tracked("Current", 15, self.theme.label, tracking=0.25)
+                self.screen.blit(tag, (right - tag.get_width(), self._text_top(self._font(15, bold=True), rect.y + int(30 * s))))
+            font = sel_font if selected else name_font
+            self.screen.blit(self._text(name, font, TEXT if selected else MUTED), (x, self._text_top(font, rect.y + int(30 * s))))
+            self.screen.blit(self._text(self._fit(sub, mono, inner), mono, DIM), (x, rect.y + int(52 * s)))
+            y += row_h
+
+        note = "Not listed? Drag its .exe or settings file onto this window."
+        note_font = self._font(21)
+        self.screen.blit(self._text(self._fit(note, note_font, inner), note_font, DIM), (x, y + int(18 * s)))
 
     def _draw_osk(self, now: float) -> None:
         s = self.s
@@ -1820,6 +2007,9 @@ class App:
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         self.running = False
+                        continue
+                    if event.type == pygame.DROPFILE:
+                        self._on_drop(Path(event.file))
                         continue
                     actions = self.input.handle(event, now)
                     if now < self.ignore_until:

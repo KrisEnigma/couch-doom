@@ -116,8 +116,14 @@ def _option_args(preset: Preset) -> list[str]:
     return args
 
 
+def _present(preset: Preset, path: Path) -> bool:
+    if path.exists():
+        return True
+    return any(dest == path and archive.exists() for archive, _, dest in preset.unpack)
+
+
 def build_command(opts: Options, preset: Preset) -> LaunchCommand:
-    issues: list[str] = []
+    issues: list[str] = list(preset.issues)
     engine = opts.engine_for(preset)
     env = {**os.environ, **opts.global_env, **preset.env_vars}
 
@@ -136,7 +142,7 @@ def build_command(opts: Options, preset: Preset) -> LaunchCommand:
         argv += ["-config", str(cfg)]
 
     if preset.iwad:
-        if not preset.iwad.exists():
+        if not _present(preset, preset.iwad):
             issues.append(f"IWAD missing: {preset.iwad.name}")
         argv += ["-iwad", str(preset.iwad)]
 
@@ -144,7 +150,7 @@ def build_command(opts: Options, preset: Preset) -> LaunchCommand:
         if not mp.exists():
             issues.append(f"Map pack missing: {mp.name}")
     for mod in preset.mods:
-        if not mod.exists():
+        if not _present(preset, mod):
             issues.append(f"Mod missing: {mod.name}")
     argv += _file_args(load_order(preset))
 

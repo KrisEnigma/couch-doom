@@ -23,6 +23,7 @@ class Action(Enum):
     MENU = auto()  # Start: alias for Play
     MUSIC = auto()  # Back/View: title music on/off
     FAVORITE = auto()  # R3: add/remove from Favorites
+    LAUNCHER = auto()  # L3: pick which launcher's presets to show
 
 
 DIRECTIONS = {Action.UP, Action.DOWN, Action.LEFT, Action.RIGHT, Action.PAGE_UP, Action.PAGE_DOWN}
@@ -42,6 +43,7 @@ _CONTROLLER_BUTTONS = {
     pygame.CONTROLLER_BUTTON_BACK: Action.MUSIC,
     pygame.CONTROLLER_BUTTON_START: Action.MENU,
     pygame.CONTROLLER_BUTTON_RIGHTSTICK: Action.FAVORITE,
+    pygame.CONTROLLER_BUTTON_LEFTSTICK: Action.LAUNCHER,
     pygame.CONTROLLER_BUTTON_LEFTSHOULDER: Action.PREV_SECTION,
     pygame.CONTROLLER_BUTTON_RIGHTSHOULDER: Action.NEXT_SECTION,
     pygame.CONTROLLER_BUTTON_DPAD_UP: Action.UP,
@@ -60,6 +62,7 @@ _JOY_BUTTONS = {
     5: Action.NEXT_SECTION,
     6: Action.MUSIC,
     7: Action.MENU,
+    8: Action.LAUNCHER,
     9: Action.FAVORITE,
 }
 
@@ -76,6 +79,7 @@ _KEYS = {
     pygame.K_PAGEDOWN: Action.PAGE_DOWN,
     pygame.K_F2: Action.MUSIC,
     pygame.K_F3: Action.FAVORITE,
+    pygame.K_F4: Action.LAUNCHER,
 }
 
 

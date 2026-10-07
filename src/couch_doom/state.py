@@ -13,6 +13,8 @@ class State:
         self.history: list[str] = []
         self.music = True
         self.favorites: list[str] = []
+        self.launcher: tuple[str, str] | None = None  # (source key, settings path) the player last picked
+        self.added: list[tuple[str, str]] = []  # launchers dropped onto the window, kept for the picker
         self._load()
 
     def _load(self) -> None:
@@ -24,6 +26,9 @@ class State:
         self.history = list(data.get("history") or [])
         self.music = bool(data.get("music", True))
         self.favorites = [f for f in data.get("favorites") or [] if isinstance(f, str)]
+        if (pick := _pair(data.get("launcher"))) is not None:
+            self.launcher = pick
+        self.added = [p for item in data.get("added_launchers") or [] if (p := _pair(item)) is not None]
 
     def record(self, preset_name: str) -> None:
         self.last_played = preset_name
@@ -32,6 +37,12 @@ class State:
 
     def set_music(self, on: bool) -> None:
         self.music = on
+        self._save()
+
+    def set_launcher(self, key: str, path: str, added: bool = False) -> None:
+        self.launcher = (key, path)
+        if added and (key, path) not in self.added:
+            self.added.append((key, path))
         self._save()
 
     def toggle_favorite(self, preset_name: str) -> bool:
@@ -47,9 +58,19 @@ class State:
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
-        data = {"last_played": self.last_played, "history": self.history, "music": self.music, "favorites": self.favorites}
-        tmp.write_text(
-            json.dumps(data, indent=2),
-            encoding="utf-8",
-        )
+        data = {
+            "last_played": self.last_played,
+            "history": self.history,
+            "music": self.music,
+            "favorites": self.favorites,
+            "launcher": {"source": self.launcher[0], "path": self.launcher[1]} if self.launcher else None,
+            "added_launchers": [{"source": k, "path": p} for k, p in self.added],
+        }
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp.replace(self.path)
+
+
+def _pair(item) -> tuple[str, str] | None:
+    if isinstance(item, dict) and isinstance(item.get("source"), str) and isinstance(item.get("path"), str):
+        return item["source"], item["path"]
+    return None

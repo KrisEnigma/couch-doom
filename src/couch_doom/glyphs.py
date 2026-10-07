@@ -24,7 +24,7 @@ _PAD_FILES = {
         "X": "xbox/xbox_button_color_x", "Y": "xbox/xbox_button_color_y",
         "LB": "xbox/xbox_lb", "RB": "xbox/xbox_rb", "LT": "xbox/xbox_lt", "RT": "xbox/xbox_rt",
         "START": "xbox/xbox_button_menu", "BACK": "xbox/xbox_button_view",
-        "RS": "xbox/xbox_stick_r_vertical", "R3": "xbox/xbox_stick_r_press",
+        "RS": "xbox/xbox_stick_r_vertical", "R3": "xbox/xbox_stick_r_press", "L3": "xbox/xbox_stick_l_press",
     },
     "playstation": {
         "A": "playstation/playstation_button_color_cross", "B": "playstation/playstation_button_color_circle",
@@ -33,6 +33,7 @@ _PAD_FILES = {
         "LT": "playstation/playstation_trigger_l2", "RT": "playstation/playstation_trigger_r2",
         "START": "playstation/playstation5_button_options", "BACK": "playstation/playstation5_button_create",
         "RS": "playstation/playstation_stick_r_vertical", "R3": "playstation/playstation_stick_r_press",
+        "L3": "playstation/playstation_stick_l_press",
     },
     # SDL maps Nintendo pads by printed label, so "A" really is the A button here.
     "switch": {
@@ -41,7 +42,7 @@ _PAD_FILES = {
         "LB": "switch/switch_button_l", "RB": "switch/switch_button_r",
         "LT": "switch/switch_button_zl", "RT": "switch/switch_button_zr",
         "START": "switch/switch_button_plus", "BACK": "switch/switch_button_minus",
-        "RS": "switch/switch_stick_r_vertical", "R3": "switch/switch_stick_r_press",
+        "RS": "switch/switch_stick_r_vertical", "R3": "switch/switch_stick_r_press", "L3": "switch/switch_stick_l_press",
     },
 }
 _KEY_FILES = {
@@ -55,6 +56,7 @@ _KEY_FILES = {
     "DOWN": "keyboard_mouse/keyboard_arrow_down",
     "F2": "keyboard_mouse/keyboard_f2",
     "F3": "keyboard_mouse/keyboard_f3",
+    "F4": "keyboard_mouse/keyboard_f4",
     "BKSP": "keyboard_mouse/keyboard_backspace_icon",
     "A-Z": "keyboard_mouse/keyboard_a",
 }
@@ -158,7 +160,7 @@ class Glyphs:
             return self._menu_button(self._back_icon)
         if spec.startswith("KEY:"):
             return self._keycap(spec[4:])
-        if spec in ("RS", "R3"):
+        if spec in ("RS", "R3", "L3"):
             return self._keycap(spec)
         raise ValueError(f"Unknown glyph {spec}")
 

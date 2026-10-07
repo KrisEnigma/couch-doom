@@ -1,6 +1,6 @@
 # CouchDoom
 
-Fullscreen gamepad launcher for [DoomRunner](https://github.com/Youda008/DoomRunner) presets. It reads DoomRunner's `options.json` and launches the engine with the same IWAD, mods, map packs and arguments. It never writes to `options.json`; keep editing presets in DoomRunner itself.
+Fullscreen gamepad front end for the Doom launcher you already use: [DoomRunner](https://github.com/Youda008/DoomRunner), [ZDL](https://github.com/lcferrum/qzdl) or [Doom Launcher](https://github.com/nstlaurent/DoomLauncher) (classic or [Doom Launcher 667](https://github.com/Realm667/DoomLauncher667)). It reads that launcher's saved setups and starts the engine with the same IWAD, mods and arguments the launcher would use. It never writes to the launcher's settings; keep setting games up in the launcher itself.
 
 ![CouchDoom on Valiant: the WAD's own title art, logo and readme, tinted green to match](docs/screenshots/valiant.jpg)
 
@@ -14,7 +14,7 @@ Title art, logos, readmes and ENDOOM screens shown here belong to their WAD auth
 
 ## Download
 
-Windows: grab `CouchDoom-…-windows-x64.zip` from the [latest release](https://github.com/KrisEnigma/couch-doom/releases/latest), unzip it anywhere and double-click `CouchDoom.exe`. No Python needed. You'll need DoomRunner with at least one preset.
+Windows: grab `CouchDoom-…-windows-x64.zip` from the [latest release](https://github.com/KrisEnigma/couch-doom/releases/latest), unzip it anywhere and double-click `CouchDoom.exe`. No Python needed. You'll need DoomRunner, ZDL or Doom Launcher with at least one game set up in it.
 
 The app isn't code-signed, so Windows SmartScreen may warn about an unknown publisher: click **More info**, then **Run anyway**.
 
@@ -34,7 +34,7 @@ Uses `pygame-ce` (imports as `pygame`), which ships wheels for current Python ve
 | `.\run.bat --windowed` | Windowed, with console output |
 | `.\run.bat --dry-run [--preset text]` | Print the launch command for each preset and exit |
 
-For the couch, launch it without a console from a shortcut or a `.bat` anywhere (for example next to DoomRunner):
+For the couch, launch it without a console from a shortcut or a `.bat` anywhere (for example next to your launcher):
 
 ```bat
 @echo off
@@ -45,9 +45,34 @@ start "" "%COUCH%\.venv\Scripts\pythonw.exe" -m couch_doom %*
 
 To build the `.exe` yourself: `pip install pyinstaller`, then `pyinstaller packaging/CouchDoom.spec` (output in `dist/CouchDoom/`). Pushing a `v*` tag does the same on GitHub Actions and publishes the zip as a release.
 
-Options file: `--options <path>` or the `DOOMRUNNER_OPTIONS` env var if set. Otherwise the first one that exists of: next to `CouchDoom.exe` or one folder up (release build only, so the folder can sit inside a portable DoomRunner), `D:\Standalone\UZDoom\DoomRunner\options.json`, `%LOCALAPPDATA%\DoomRunner\options.json`, then `%APPDATA%\DoomRunner\options.json`.
+## Which launcher
 
-If the file is missing, can't be parsed, or has no presets, the launcher opens on a notice explaining what's wrong and listing the paths it tried, instead of closing. Press A / Enter to reload once it's fixed (for example after saving a preset in DoomRunner); B / Esc quits. The problem is also written to the log, and `--dry-run` prints it and exits with code 2 (or 1 when there are no presets).
+On first run CouchDoom looks for each launcher's settings:
+
+| Launcher | Settings | Looked for in |
+| --- | --- | --- |
+| DoomRunner | `options.json` | `%LOCALAPPDATA%` / `%APPDATA%\DoomRunner`, or the `DOOMRUNNER_OPTIONS` env var |
+| ZDL | `qZDL.ini` (plus saved `.zdl` setups near it) | `%APPDATA%\Vectec Software` |
+| Doom Launcher | `DoomLauncher.sqlite` | `%APPDATA%\DoomLauncher` (installed) |
+| Doom Launcher 667 | `DoomLauncher.sqlite` | beside `DoomLauncher667.exe`, `%LOCALAPPDATA%\DoomLauncher667`, or the `DOOMLAUNCHER_DATABASE` env var |
+
+Both Doom Launchers use the same database file; CouchDoom tells them apart by the tables Doom Launcher 667 adds on its first start. It also follows your Start Menu, Desktop and taskbar shortcuts to `DoomRunner.exe`, `zdl.exe`, `DoomLauncher.exe` or `DoomLauncher667.exe`, which is how portable installs get found. Settings beside `CouchDoom.exe` or one folder up count too, so the CouchDoom folder can also sit inside a portable launcher's folder.
+
+- **One found:** it opens straight on that launcher's presets.
+- **Several found:** a picker asks which one, showing each launcher's preset count. The choice is remembered.
+- **Switch any time:** L3 (click the left stick) or F4, or click the "For …" tag under the logo.
+- **Not found:** pick **Find it myself…** in the picker to browse to the launcher's `.exe` or settings file, or drag either one (or the launcher's folder) onto the window. CouchDoom remembers it.
+
+How each launcher's setups show up:
+
+- **DoomRunner:** every preset, grouped by DoomRunner's own separators, with its launch options (map, skill, gameplay and compat flags, video, audio).
+- **ZDL:** the setup currently loaded in ZDL, plus the `.zdl` files in the folders ZDL last used and next to its `.ini` (subfolders become sections).
+- **Doom Launcher:** every game with saved settings, and each of its profiles as a separate entry; tags become sections, and untagged games go last. Zipped (managed) files are unpacked into `state/unpacked/` the first time they're shown or played.
+- **Doom Launcher 667:** every game, sectioned by its collections in name order. It has no profiles, so each game is one entry, and its own file always loads first. Mods it keeps as `.7z`/`.rar` only play from Doom Launcher 667 itself.
+
+On the command line, `--options <file>` reads one settings file and `--launcher doomrunner|zdl|doomlauncher|doomlauncher667` only considers that launcher.
+
+If the settings are missing, can't be parsed, or have no presets, CouchDoom opens on a notice explaining what's wrong and listing the paths it tried, instead of closing. Press A / Enter to look again once it's fixed (for example after saving a preset); B / Esc quits. The problem is also written to the log, and `--dry-run` prints it and exits with code 2 (or 1 when there are no presets).
 
 ## Controls
 
@@ -59,6 +84,7 @@ If the file is missing, can't be parsed, or has no presets, the launcher opens o
 | Y | `/` or just type | Open search | Done |
 | R3 (click right stick) | F3 | Add to / remove from Favorites | |
 | Back / View | F2 | Title music on/off (remembered) | |
+| L3 (click left stick) | F4 | Choose launcher | |
 | B | Esc | Clear filter, else quit (press twice) | Cancel and clear |
 | LB / RB, D-pad left/right | Left / Right | Previous / next section | |
 | LT / RT | PgUp / PgDn | Jump 8 presets | |
@@ -88,10 +114,11 @@ Nothing here depends on a particular engine; it all comes from the preset's own 
 
 - The backdrop is each preset's own title screen, read from its files in engine override order: a MAPINFO `titlepage`, then `TITLEPIC`, then Heretic/Hexen's raw `TITLE`. WAD and PK3/IPK3 are supported; PK7 is not.
 - Button prompts are [Kenney's Input Prompts](https://kenney.nl/assets/input-prompts) (CC0, `assets/prompts/`). The style follows the pad you last pressed a button on: Xbox, PlayStation (detected by name) or Switch.
-- Last played preset and the music toggle are stored in `state/last_played.json`.
+- Last played preset, favorites, the music toggle and the chosen launcher are stored in `state/last_played.json`.
 - Crashes under `pythonw` (no console) are written to `state/couch-doom.log`.
 - Map packs that point at a folder load every game file inside it, sorted by name.
-- Supported option groups: launch mode (map/save), gameplay flags, compat flags, video resolution/FPS, audio mute. Multiplayer and demo options are ignored.
+- DoomRunner option groups supported: launch mode (map/save), gameplay flags, compat flags, video resolution/FPS, audio mute. Multiplayer and demo options are ignored.
+- Doom Launcher: `.7z`/`.rar` files it doesn't manage, Doomsday's special `-game` argument and ports with a custom file flag aren't supported yet.
 
 ## License
 
