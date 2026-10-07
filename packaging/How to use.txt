@@ -13,6 +13,8 @@ Controls (Xbox names; PlayStation and Switch pads work too)
   X           Info sheet    Y   Search
   LB / RB     Jump section  R3  Add to favorites
   Keyboard: arrows, Enter to play, Esc to quit, or just type to search.
+  Mouse: click a preset to select it, click again to play. Wheel scrolls,
+  right-click goes back, and the button hints at the bottom are clickable.
 
 Windows may warn that the app is from an unknown publisher (it isn't code-signed).
 Click "More info" then "Run anyway".

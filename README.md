@@ -63,6 +63,8 @@ If the file is missing, can't be parsed, or has no presets, the launcher opens o
 | LB / RB, D-pad left/right | Left / Right | Previous / next section | |
 | LT / RT | PgUp / PgDn | Jump 8 presets | |
 
+Mouse: click a preset to select it, click it again (or double-click) to play. The wheel scrolls the list without changing the selection (the next pad or keyboard move brings the selection back into view) or scrolls the info sheet, and both scrollbars can be dragged (click the track to jump). Right-click (or the mouse's back button) works like B, and every footer prompt, info tab and on-screen key is clickable. Clicking outside the info sheet or search keyboard closes it. The pointer only appears once you move the mouse, and hides again when you use the pad or keyboard.
+
 In the info sheet: LB/RB or Left/Right switch tabs (each tab keeps its scroll position until the sheet closes), right stick or Up/Down scroll, LT/RT or PgUp/PgDn page, A/Start/Enter plays, B/Esc closes.
 
 Favorites get their own section at the top of the list (they stay in their own section too, marked with a star), and the launcher opens on them: on the last-played one if it's a favorite, otherwise on the first.

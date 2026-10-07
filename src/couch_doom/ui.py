@@ -58,6 +58,7 @@ LOGO_MAX_H = 168  # design px; menu logos are compact, so they need more height 
 INFO_SLIDE_SECONDS = 0.22
 INFO_STICK_LINES_PER_SEC = 48
 MUSIC_CHANNELS, MOVE_CHANNEL = (0, 1), 2
+MOUSE_EVENTS = {pygame.MOUSEMOTION, pygame.MOUSEWHEEL, pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP}
 FONT_DIR = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
 
 
@@ -76,6 +77,14 @@ class Toast:
     color: tuple[int, int, int]
     born: float
     ttl: float = 3.2
+
+
+@dataclass
+class Hit:
+    """A clickable area, recorded while drawing so clicks use exactly what's on screen."""
+    rect: pygame.Rect
+    click: Callable[[], None]
+    hover: Callable[[], None] | None = None
 
 
 def _lerp(a: float, b: float, k: float) -> float:
@@ -217,6 +226,13 @@ class App:
         self.toast: Toast | None = None
         self.quit_armed_until = 0.0
         self.ignore_until = 0.0
+        self.hits: list[Hit] = []
+        self.mouse_on = False
+        self.mouse_travel = 0
+        self.free_scroll: float | None = None  # set by the wheel; pad/keyboard moves hand scrolling back to the selection
+        self.scrollbars: dict[str, tuple[pygame.Rect, int, float]] = {}  # kind -> (track on screen, thumb height, max scroll)
+        self.drag: tuple[str, int] | None = None  # scrollbar being dragged, and where on the thumb it was grabbed
+        self.mouse_pos = (0, 0)
         self.running = True
         self.row_offset: dict[tuple[bool, int], float] = {}
 
@@ -364,7 +380,7 @@ class App:
             self.screen = pygame.display.set_mode((1440, 810))
         else:
             self.screen = pygame.display.set_mode(pygame.display.get_desktop_sizes()[0], pygame.NOFRAME)
-        pygame.mouse.set_visible(False)
+        self._mouse_off()
         pygame.key.start_text_input()
         self._layout()
         _force_foreground()
@@ -542,6 +558,7 @@ class App:
                 rows += [Row("preset", self.opts.presets[i].name, i) for i in hits]
         self.rows = rows
         self.cur_row = -1
+        self.free_scroll = None
         visible = [r.preset for r in rows if r.kind == "preset"]
         if visible and self.current not in visible:
             self.current = visible[0]
@@ -581,6 +598,7 @@ class App:
         rows = self._preset_rows()
         if not rows:
             return
+        self.free_scroll = None
         sel = self._sel_row()
         pos = rows.index(sel) if sel in rows else 0
         self._select_row(rows[max(0, min(len(rows) - 1, pos + delta))])
@@ -589,6 +607,7 @@ class App:
         headers = [i for i, r in enumerate(self.rows) if r.kind == "header"]
         if not headers:
             return
+        self.free_scroll = None
         sel = self._sel_row()
         current_header = max((h for h in headers if h < sel), default=headers[0])
         if direction < 0:
@@ -607,10 +626,13 @@ class App:
     def _target_scroll(self) -> float:
         if not self.rows:
             return 0.0
-        sel = self._sel_row()
-        target = self.row_y[sel] - self.list_rect.height * 0.38
-        if sel > 0 and self.rows[sel - 1].kind == "header":
-            target = min(target, self.row_y[sel - 1])
+        if self.free_scroll is not None:
+            target = self.free_scroll
+        else:
+            sel = self._sel_row()
+            target = self.row_y[sel] - self.list_rect.height * 0.38
+            if sel > 0 and self.rows[sel - 1].kind == "header":
+                target = min(target, self.row_y[sel - 1])
         return max(0.0, min(target, max(0, self.content_h - self.list_rect.height)))
 
     def _set_filter(self, text: str) -> None:
@@ -842,16 +864,128 @@ class App:
             self.info_scroll = max(0.0, min(self._info_max_scroll(), self.info_scroll + steps[action]))
         elif action in (Action.LEFT, Action.RIGHT, Action.PREV_SECTION, Action.NEXT_SECTION):
             step = -1 if action in (Action.LEFT, Action.PREV_SECTION) else 1
-            self.info_scrolls[self.info_tab] = self.info_scroll
             tabs = self._info_tabs()
-            self.info_tab = tabs[(tabs.index(self.info_tab) + step) % len(tabs)]
-            self.info_scroll = self.info_view = self.info_scrolls[self.info_tab]
-            self._sound("move")
+            self._set_info_tab(tabs[(tabs.index(self.info_tab) + step) % len(tabs)])
         elif action in (Action.CONFIRM, Action.MENU):
             self.mode = "list"
             self._launch_selected()
         elif action in (Action.BACK, Action.ALT):
             self._close_overlay()
+
+    def _set_info_tab(self, tab: int) -> None:
+        if tab == self.info_tab:
+            return
+        self.info_scrolls[self.info_tab] = self.info_scroll
+        self.info_tab = tab
+        self.info_scroll = self.info_view = self.info_scrolls[tab]
+        self._sound("move")
+
+    # ---------- mouse ----------
+
+    def _mouse_on(self) -> None:
+        if not self.mouse_on:
+            self.mouse_on = True
+            pygame.mouse.set_visible(True)
+
+    def _mouse_off(self) -> None:
+        """The pad or keyboard took over: a pointer parked over the art is just clutter."""
+        self.mouse_on = False
+        self.mouse_travel = 0
+        pygame.mouse.set_visible(False)
+
+    def _hit_at(self, pos: tuple[int, int]) -> Hit | None:
+        return next((h for h in reversed(self.hits) if h.rect.collidepoint(pos)), None)
+
+    def _act(self, action: Action) -> Callable[[], None]:
+        return lambda: self._on_action(action, time.monotonic())
+
+    def _on_mouse(self, event: pygame.event.Event, now: float) -> None:
+        t = event.type
+        if hasattr(event, "pos"):
+            self.mouse_pos = event.pos
+        if t == pygame.MOUSEMOTION:
+            if not self.mouse_on:
+                # Windows nudges the pointer on focus changes; only a deliberate move brings it back.
+                self.mouse_travel += abs(event.rel[0]) + abs(event.rel[1])
+                if self.mouse_travel < 12 * self.s:
+                    return
+                self._mouse_on()
+            if self.drag and not event.buttons[0]:
+                self.drag = None  # the release happened outside the window or while it lost focus
+            if self.drag:
+                self._drag_to(event.pos[1])
+                return
+            hit = self._hit_at(event.pos)
+            pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_HAND if hit else pygame.SYSTEM_CURSOR_ARROW)
+            if hit and hit.hover:
+                hit.hover()
+        elif t == pygame.MOUSEWHEEL:
+            self._mouse_on()
+            notches = event.y if event.flipped else -event.y
+            if self.blocked or not notches:
+                return
+            if self.mode == "list" and self.rows:
+                self.free_scroll = self._target_scroll() + notches * 3 * self.preset_h
+                self.free_scroll = self._target_scroll()  # clamped, so scrolling back from an end responds at once
+            elif self.mode == "info":
+                self.info_scroll = max(0.0, min(self._info_max_scroll(), self.info_scroll + 3 * notches))
+        elif t == pygame.MOUSEBUTTONDOWN:
+            self._mouse_on()
+            if event.button == pygame.BUTTON_LEFT:
+                if hit := self._hit_at(event.pos):
+                    hit.click()
+            elif event.button in (pygame.BUTTON_RIGHT, pygame.BUTTON_X1):
+                self._on_action(Action.BACK, now)
+        elif t == pygame.MOUSEBUTTONUP and event.button == pygame.BUTTON_LEFT:
+            self.drag = None
+
+    def _scrollbar(self, kind: str, track: pygame.Rect, thumb_h: int, max_scroll: float) -> None:
+        self.scrollbars[kind] = (track, thumb_h, max_scroll)
+        # The bar is a few pixels wide; give the pointer a fair target, mostly outward so rows keep their clicks.
+        area = pygame.Rect(track.x - int(6 * self.s), track.y, track.width + int(22 * self.s), track.height)
+        self.hits.append(Hit(area, lambda: self._start_drag(kind)))
+
+    def _scroll_value(self, kind: str) -> float:
+        return self.scroll if kind == "list" else self.info_view
+
+    def _start_drag(self, kind: str) -> None:
+        track, thumb_h, max_scroll = self.scrollbars[kind]
+        y = self.mouse_pos[1]
+        thumb_y = track.y + (track.height - thumb_h) * min(1.0, self._scroll_value(kind) / max_scroll)
+        # On the thumb: keep the grab point. On the track: jump so the thumb centres under the pointer.
+        grab = int(y - thumb_y) if thumb_y <= y <= thumb_y + thumb_h else thumb_h // 2
+        self.drag = (kind, grab)
+        self._drag_to(y)
+
+    def _drag_to(self, y: int) -> None:
+        kind, grab = self.drag
+        if kind not in self.scrollbars:  # the sheet closed or the list emptied mid-drag
+            self.drag = None
+            return
+        track, thumb_h, max_scroll = self.scrollbars[kind]
+        frac = (y - grab - track.y) / max(1, track.height - thumb_h)
+        value = max(0.0, min(1.0, frac)) * max_scroll
+        if kind == "list":
+            self.free_scroll = self.scroll = value
+        else:
+            self.info_scroll = self.info_view = value
+
+    def _click_row(self, row: int) -> None:
+        """First click selects (title art and music follow), a click on the selected preset plays it."""
+        if row == self._sel_row():
+            self._launch_selected()
+        else:
+            self._select_row(row)
+
+    def _osk_hover(self, r: int, c: int) -> None:
+        if self.osk != [r, c]:
+            self.osk = [r, c]
+            self.osk_moved = time.monotonic()
+            self._sound("move")
+
+    def _osk_click(self, r: int, c: int) -> None:
+        self.osk = [r, c]
+        self._osk_press(OSK_ROWS[r][c])
 
     def _on_search_action(self, action: Action, now: float) -> None:
         r, c = self.osk
@@ -1119,6 +1253,8 @@ class App:
     # ---------- drawing ----------
 
     def _draw(self, now: float) -> None:
+        self.hits = []
+        self.scrollbars = {}
         self.glyphs.family = self.input.family
         self._update_theme(now)
         self._blit_layer("bg")
@@ -1223,6 +1359,9 @@ class App:
             h = self.header_h if row.kind == "header" else self.preset_h
             if y + h < lr.y or y > lr.bottom:
                 continue
+            if row.kind == "preset":
+                area = pygame.Rect(bar_x, y, self.list_edge - self.scroll_w - bar_x, h).clip(lr.x - int(28 * s), lr.y, self.w, lr.height)
+                self.hits.append(Hit(area, lambda i=i: self._click_row(i)))
             if row.kind == "header":
                 t = self._tracked(row.text, 18, self.theme.label, tracking=0.22)
                 ty = y + h - t.get_height() - int(12 * s)
@@ -1269,8 +1408,10 @@ class App:
             track_x = self.list_edge - tw
             thumb_h = max(int(48 * s), int(lr.height * lr.height / self.content_h))
             thumb_y = lr.y + int((lr.height - thumb_h) * (self.scroll / max_scroll))
+            grabbed = self.drag is not None and self.drag[0] == "list"
             self.screen.blit(draw.rounded_rect(tw, lr.height, tw / 2, (255, 255, 255, 18)), (track_x, lr.y))
-            self.screen.blit(draw.rounded_rect(tw, thumb_h, tw / 2, MUTED), (track_x, thumb_y))
+            self.screen.blit(draw.rounded_rect(tw, thumb_h, tw / 2, TEXT if grabbed else MUTED), (track_x, thumb_y))
+            self._scrollbar("list", pygame.Rect(track_x, lr.y, tw, lr.height), thumb_h, max_scroll)
 
     def _draw_detail(self, now: float) -> None:
         if not self.rows:
@@ -1342,32 +1483,37 @@ class App:
         panel.set_alpha(int(255 * t))
         self.screen.blit(panel, (dr.x + int(32 * s * (1 - t)), dr.y))
 
-    def _footer_hints(self) -> list[tuple[tuple[str, ...], str]]:
+    def _footer_hints(self) -> list[tuple[tuple[str, ...], str, tuple[Action, ...]]]:
+        """(glyphs, label, actions): one action for the whole hint, or one per glyph (LB = previous, RB = next)."""
         pad = self.input.pad_count > 0
+        A = Action
         if self.blocked:
-            reload = [(("A",), "Reload")] if pad else [(("KEY:ENTER",), "Reload")]
-            return [*(reload if self.reload else []), (("B",) if pad else ("KEY:ESC",), "Quit")]
+            reload = [(("A",) if pad else ("KEY:ENTER",), "Reload", (A.CONFIRM,))]
+            return [*(reload if self.reload else []), (("B",) if pad else ("KEY:ESC",), "Quit", (A.BACK,))]
         music = "Mute" if self.state.music else "Music"
         if self.mode == "search":
             if pad:
-                return [(("A",), "Type"), (("X",), "Delete"), (("Y",), "Done"), (("B",), "Cancel")]
-            return [(("KEY:A-Z",), "Type"), (("KEY:BKSP",), "Delete"), (("KEY:ENTER",), "Done"), (("KEY:ESC",), "Cancel")]
+                return [(("A",), "Type", (A.CONFIRM,)), (("X",), "Delete", (A.ALT,)), (("Y",), "Done", (A.SEARCH,)), (("B",), "Cancel", (A.BACK,))]
+            return [(("KEY:A-Z",), "Type", ()), (("KEY:BKSP",), "Delete", (A.ALT,)), (("KEY:ENTER",), "Done", (A.SEARCH,)),
+                    (("KEY:ESC",), "Cancel", (A.BACK,))]
         # A prompt shown elsewhere on screen (the sheet's tab glyphs) is not repeated here.
         if self.mode == "info":
             scrolls = self._info_max_scroll() > 0
             if pad:
-                scroll = [(("RS",), "Scroll"), (("LT", "RT"), "Page")] if scrolls else []
-                return [(("A",), "Play"), *scroll, (("B",), "Close")]
-            scroll = [(("KEY:UP", "KEY:DOWN"), "Scroll")] if scrolls else []
-            return [(("KEY:ENTER",), "Play"), *scroll, (("KEY:ESC",), "Close")]
+                scroll = [(("RS",), "Scroll", ()), (("LT", "RT"), "Page", (A.PAGE_UP, A.PAGE_DOWN))] if scrolls else []
+                return [(("A",), "Play", (A.CONFIRM,)), *scroll, (("B",), "Close", (A.BACK,))]
+            scroll = [(("KEY:UP", "KEY:DOWN"), "Scroll", (A.UP, A.DOWN))] if scrolls else []
+            return [(("KEY:ENTER",), "Play", (A.CONFIRM,)), *scroll, (("KEY:ESC",), "Close", (A.BACK,))]
         fav = "Unfavorite" if self.rows and self.opts.presets[self.current].name in self.state.favorites else "Favorite"
+        back = ("Clear filter" if self.filter else "Quit", (A.BACK,))
+        section = (A.PREV_SECTION, A.NEXT_SECTION)
         if pad:
-            hints = [(("A",), "Play"), (("X",), "Info"), (("Y",), "Search"), (("LB", "RB"), "Section"), (("R3",), fav), (("BACK",), music)]
-            hints.append((("B",), "Clear filter" if self.filter else "Quit"))
-            return hints
-        hints = [(("KEY:ENTER",), "Play"), (("KEY:TAB",), "Info"), (("KEY:/",), "Search"), (("KEY:LEFT", "KEY:RIGHT"), "Section"), (("KEY:F3",), fav), (("KEY:F2",), music)]
-        hints.append((("KEY:ESC",), "Clear filter" if self.filter else "Quit"))
-        return hints
+            return [(("A",), "Play", (A.CONFIRM,)), (("X",), "Info", (A.ALT,)), (("Y",), "Search", (A.SEARCH,)),
+                    (("LB", "RB"), "Section", section), (("R3",), fav, (A.FAVORITE,)), (("BACK",), music, (A.MUSIC,)),
+                    (("B",), *back)]
+        return [(("KEY:ENTER",), "Play", (A.CONFIRM,)), (("KEY:TAB",), "Info", (A.ALT,)), (("KEY:/",), "Search", (A.SEARCH,)),
+                (("KEY:LEFT", "KEY:RIGHT"), "Section", section), (("KEY:F3",), fav, (A.FAVORITE,)),
+                (("KEY:F2",), music, (A.MUSIC,)), (("KEY:ESC",), *back)]
 
     def _draw_footer(self) -> None:
         s = self.s
@@ -1380,13 +1526,25 @@ class App:
         cy = top + self.footer_h // 2
         x = self.margin
         font = self._font(23)
-        for specs, label in self._footer_hints():
+        gap = int(38 * s)
+        for specs, label, actions in self._footer_hints():
+            start = x
             g = self.glyphs.row(specs)
             self.screen.blit(g, (x, cy - g.get_height() // 2))
             x += g.get_width() + int(12 * s)
             t = self._text(label, font, MUTED)
             self.screen.blit(t, (x, self._text_top(font, cy)))
-            x += t.get_width() + int(38 * s)
+            x += t.get_width()
+            whole = pygame.Rect(start - gap // 2, top, x - start + gap, self.footer_h)
+            if len(actions) > 1:
+                # Each glyph is its own button; the label repeats the last one (RB, RT: next).
+                part = g.get_width() // len(actions)
+                self.hits.append(Hit(whole, self._act(actions[-1])))
+                for n, action in enumerate(actions):
+                    self.hits.append(Hit(pygame.Rect(start + n * part, top, part, self.footer_h), self._act(action)))
+            elif actions:
+                self.hits.append(Hit(whole, self._act(actions[0])))
+            x += gap
 
     def _draw_osk(self, now: float) -> None:
         s = self.s
@@ -1404,6 +1562,8 @@ class App:
         shade.fill((0, 0, 0, 130))
         self.screen.blit(shade, (0, 0))
         self.screen.blit(draw.rounded_rect(box.width, box.height, 18 * s, (*PANEL, 248), (78, 62, 55), 1.5 * s), box)
+        self.hits.append(Hit(shade.get_rect(), self._act(Action.SEARCH)))  # click outside: done, keep the filter
+        self.hits.append(Hit(box, lambda: None))
 
         fx, fy = box.x + pad, box.y + pad
         self.screen.blit(self._tracked("Search", 16, self.theme.label, tracking=0.3), (fx, fy))
@@ -1421,6 +1581,7 @@ class App:
             row_cell_w = (grid_w - (len(row) - 1) * gap) // len(row)
             for c, key in enumerate(row):
                 rect = pygame.Rect(fx + c * (row_cell_w + gap), gy + r * (cell_h + gap), row_cell_w, cell_h)
+                self.hits.append(Hit(rect.inflate(gap, gap), lambda r=r, c=c: self._osk_click(r, c), lambda r=r, c=c: self._osk_hover(r, c)))
                 selected = [r, c] == self.osk
                 if selected:
                     big = rect.inflate(int(rect.width * (pop - 1)), int(rect.height * (pop - 1)))
@@ -1546,8 +1707,16 @@ class App:
         pad_mode = self.input.pad_count > 0
         left = self.glyphs.get("LB" if pad_mode else "KEY:LEFT")
         right = self.glyphs.get("RB" if pad_mode else "KEY:RIGHT")
+        self.hits.append(Hit(shade.get_rect(), self._close_overlay))  # click outside the sheet closes it
+        self.hits.append(Hit(rect, lambda: None))
+        band = int(36 * s)
+
+        def tab_hit(x0: int, width: int, click: Callable[[], None]) -> None:
+            self.hits.append(Hit(pygame.Rect(rect.x + x0 - int(10 * s), rect.y + tab_cy - band, width + int(20 * s), 2 * band), click))
+
         x = pad
         sheet.blit(left, (x, tab_cy - left.get_height() // 2))
+        tab_hit(x, left.get_width(), self._act(Action.PREV_SECTION))
         x += left.get_width() + int(22 * s)
         tab_font = self._font(20, bold=True)
         for i in self._info_tabs():
@@ -1555,11 +1724,13 @@ class App:
             active = i == self.info_tab
             label = self._tracked(name, 20, TEXT if active else DIM, tracking=0.22)
             sheet.blit(label, (x, self._text_top(tab_font, tab_cy)))
+            tab_hit(x, label.get_width(), lambda i=i: self._set_info_tab(i))
             if active:
                 pygame.draw.rect(sheet, self.theme.accent, (x, tab_cy + int(22 * s), label.get_width(), max(2, int(3 * s))))
             x += label.get_width() + int(34 * s)
         x -= int(12 * s)
         sheet.blit(right, (x, tab_cy - right.get_height() // 2))
+        tab_hit(x, right.get_width(), self._act(Action.NEXT_SECTION))
         x += right.get_width() + int(30 * s)
 
         readme = self.readmes.get(self.current)
@@ -1606,8 +1777,10 @@ class App:
                 tw = max(2, int(4 * s))
                 thumb_h = max(int(40 * s), int(body.height * self._info_visible_lines() / len(lines)))
                 thumb_y = body.y + int((body.height - thumb_h) * min(1.0, self.info_view / max_scroll))
+                grabbed = self.drag is not None and self.drag[0] == "info"
                 sheet.blit(draw.rounded_rect(tw, body.height, tw / 2, (255, 255, 255, 18)), (track_x, body.y))
-                sheet.blit(draw.rounded_rect(tw, thumb_h, tw / 2, MUTED), (track_x, thumb_y))
+                sheet.blit(draw.rounded_rect(tw, thumb_h, tw / 2, TEXT if grabbed else MUTED), (track_x, thumb_y))
+                self._scrollbar("info", pygame.Rect(rect.x + track_x, rect.y + body.y, tw, body.height), thumb_h, max_scroll)
 
         sheet.set_alpha(int(255 * t))
         self.screen.blit(sheet, (rect.x + int(60 * s * (1 - t)), rect.y))
@@ -1651,6 +1824,11 @@ class App:
                     actions = self.input.handle(event, now)
                     if now < self.ignore_until:
                         continue
+                    if event.type in MOUSE_EVENTS:
+                        self._on_mouse(event, now)
+                        continue
+                    if self.mouse_on and (actions or event.type == pygame.KEYDOWN):
+                        self._mouse_off()
                     if event.type == pygame.KEYDOWN and self._on_key(event):
                         continue
                     if event.type == pygame.TEXTINPUT:
@@ -1662,6 +1840,8 @@ class App:
                             break
                 if now >= self.ignore_until:
                     for action in self.input.update(now):
+                        if self.mouse_on:
+                            self._mouse_off()
                         self._on_action(action, now)
 
                 self.tick(now, dt)
