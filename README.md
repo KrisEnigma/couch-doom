@@ -1,6 +1,6 @@
 # CouchDoom
 
-Fullscreen gamepad front end for the Doom launcher you already use: [DoomRunner](https://github.com/Youda008/DoomRunner), [ZDL](https://github.com/lcferrum/qzdl) or [Doom Launcher](https://github.com/nstlaurent/DoomLauncher) (classic or [Doom Launcher 667](https://github.com/Realm667/DoomLauncher667)). It reads that launcher's saved setups and starts the engine with the same IWAD, mods and arguments the launcher would use. It never writes to the launcher's settings; keep setting games up in the launcher itself.
+Fullscreen gamepad front end for the Doom launcher you already use: [DoomRunner](https://github.com/Youda008/DoomRunner), [ZDL](https://github.com/lcferrum/qzdl) or [Doom Launcher](https://github.com/nstlaurent/DoomLauncher) (classic or [Doom Launcher 667](https://github.com/Realm667/DoomLauncher667)). It reads that launcher's saved setups and starts the engine with the same IWAD, mods and arguments the launcher would use. That includes DoomRunner's per-engine rules, so DSDA-Doom, Woof, Chocolate Doom and other non-ZDoom ports get the flags they understand. It never writes to the launcher's settings; keep setting games up in the launcher itself.
 
 ![CouchDoom on Valiant: the WAD's own title art, logo and readme, tinted green to match](docs/screenshots/valiant.jpg)
 

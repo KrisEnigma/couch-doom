@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 
+from .. import engine_traits
 from ..config import DEV_LAUNCHERS, FROZEN, PROJECT_ROOT
 from ..options import Engine, Options, Preset
 
@@ -69,7 +70,7 @@ def load(path: Path) -> Options:
             name=e.get("name") or exe.stem,
             path=exe,
             config_dir=_path(base, e.get("config_dir")),
-            family=e.get("family") or "ZDoom",
+            family=engine_traits.detect(e.get("family"), exe),
         )
 
     storage = data.get("options_storage") or {}
@@ -98,17 +99,23 @@ def load(path: Path) -> Options:
             else:
                 groups[group] = {}
 
+        entries: list[Path | str] = []
+        for m in raw.get("mods") or []:
+            if m.get("separator") or not m.get("checked", True):
+                continue
+            if m.get("cmd_argument"):
+                entries.append(m.get("value") or "")
+            elif p := _path(base, m.get("path")):
+                entries.append(p)
+
         presets.append(
             Preset(
                 name=raw.get("name", "Unnamed"),
                 section=section,
                 engine_id=raw.get("selected_engine") or "",
                 iwad=_path(base, raw.get("selected_IWAD")),
-                mods=[
-                    p
-                    for m in raw.get("mods") or []
-                    if m.get("checked", True) and (p := _path(base, m.get("path")))
-                ],
+                mods=[e for e in entries if isinstance(e, Path)],
+                mod_entries=entries,
                 mappacks=[
                     p for v in raw.get("selected_mappacks") or [] if (p := _path(base, v))
                 ],

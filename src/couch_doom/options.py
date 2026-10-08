@@ -30,6 +30,8 @@ class Preset:
     alternative_paths: dict[str, str] = field(default_factory=dict)
     env_vars: dict[str, str] = field(default_factory=dict)
     groups: dict[str, dict] = field(default_factory=dict)
+    # The checked mod list in order, where a str is a custom command-line argument rather than a file.
+    mod_entries: list[Path | str] = field(default_factory=list)
     # (archive, member, destination): files that only exist once unpacked, done lazily by unpack().
     unpack: list[tuple[Path, str, Path]] = field(default_factory=list)
     issues: list[str] = field(default_factory=list)  # problems the source found while reading the preset

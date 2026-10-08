@@ -8,12 +8,15 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .engine_traits import FAMILIES, Traits, compat_flag_args
 from .options import Options, Preset
 
-GAME_EXTS = {".wad", ".pk3", ".pk7", ".ipk3", ".pke", ".zip", ".deh", ".bex"}
+GAME_EXTS = {".wad", ".pk3", ".pk7", ".ipk3", ".pke", ".zip", ".deh", ".hhe", ".bex"}
 
 # DoomRunner LaunchMode enum.
-LAUNCH_DEFAULT, LAUNCH_MAP, LAUNCH_SAVE = 0, 1, 2
+LAUNCH_DEFAULT, LAUNCH_MAP, LAUNCH_SAVE, LAUNCH_RECORD_DEMO = 0, 1, 2, 3
+
+_FILES = object()  # where the load-file group goes
 
 
 @dataclass
@@ -69,50 +72,82 @@ def _file_args(files: list[Path]) -> list[str]:
     return args
 
 
-def _option_args(preset: Preset) -> list[str]:
+def _doomrunner_file_args(preset: Preset, traits: Traits) -> list[str]:
+    """DoomRunner's ordering: dehacked files and custom arguments stay where they are in the lists,
+    every other file goes into one load-file group placed where the first of them appeared."""
+    args: list = []
+    maps: list[str] = []
+    mods: list[str] = []
+
+    def add(group: list[str], f: Path) -> None:
+        ext = f.suffix.lower()
+        if ext in (".deh", ".hhe"):
+            args.extend(["-deh", str(f)])
+        elif ext == ".bex":
+            args.extend(["-bex", str(f)])
+        else:
+            if not maps and not mods:
+                args.extend([traits.spec.load_param, _FILES])
+            group.append(str(f))
+
+    for mp in preset.mappacks:
+        if mp.exists():
+            for f in _expand_mappack(mp):
+                add(maps, f)
+    for entry in preset.mod_entries or preset.mods:
+        if isinstance(entry, str):
+            args += split_args(entry)
+        else:
+            add(mods, entry)
+
+    files = [*mods, *maps] if preset.load_maps_after_mods else [*maps, *mods]
+    return [a for arg in args for a in (files if arg is _FILES else [arg])]
+
+
+def _doomrunner_option_args(preset: Preset, traits: Traits) -> list[str]:
     g = preset.groups
+    launch, gameplay, compat = g.get("launch", {}), g.get("gameplay", {}), g.get("compat", {})
+    video, audio = g.get("video", {}), g.get("audio", {})
     args: list[str] = []
 
-    launch = g.get("launch", {})
     mode = launch.get("launch_mode", LAUNCH_DEFAULT)
-    gameplay = g.get("gameplay", {})
-    if mode == LAUNCH_MAP and launch.get("map_name"):
-        args += ["+map", launch["map_name"], "-skill", str(gameplay.get("skill_num", 3))]
-    elif mode == LAUNCH_SAVE and launch.get("save_file"):
-        args += ["-loadgame", launch["save_file"]]
+    if mode == LAUNCH_MAP:
+        args += traits.map_args(launch.get("map_name") or "")
+    elif mode == LAUNCH_SAVE:
+        args += traits.load_game_args(launch.get("save_file") or "", preset.alternative_paths.get("save_dir"))
 
-    if gameplay.get("fast_monsters"):
-        args.append("-fast")
-    if gameplay.get("monsters_respawn"):
-        args.append("-respawn")
-    if gameplay.get("no_monsters"):
-        args.append("-nomonsters")
-    if gameplay.get("allow_cheats"):
-        args += ["+sv_cheats", "1"]
-    for key, cvar in (("dmflags1", "+dmflags"), ("dmflags2", "+dmflags2"), ("dmflags3", "+dmflags3")):
-        if gameplay.get(key):
-            args += [cvar, str(gameplay[key])]
+    direct = mode in (LAUNCH_MAP, LAUNCH_RECORD_DEMO)
+    if direct:
+        args += ["-skill", str(gameplay.get("skill_num", 3))]
+    if direct or mode == LAUNCH_DEFAULT:
+        for key, flag in (("no_monsters", "-nomonsters"), ("fast_monsters", "-fast"), ("monsters_respawn", "-respawn")):
+            if gameplay.get(key):
+                args.append(flag)
+        if gameplay.get("pistol_start") and traits.pistol_start:
+            args.append(traits.pistol_start)
+        if gameplay.get("allow_cheats"):
+            args += traits.cheats
+        if traits.detailed_options:
+            for key, cvar in (("dmflags1", "+dmflags"), ("dmflags2", "+dmflags2"), ("dmflags3", "+dmflags3")):
+                if gameplay.get(key):
+                    args += [cvar, str(gameplay[key])]
+        if (compat_mode := compat.get("compat_mode", -1)) >= 0:
+            args += traits.compat_mode_args(compat_mode)
+        if traits.detailed_options:
+            args += compat_flag_args(compat.get("compatflags1", 0), compat.get("compatflags2", 0))
 
-    compat = g.get("compat", {})
-    if compat.get("compatflags1"):
-        args += ["+compatflags", str(compat["compatflags1"])]
-    if compat.get("compatflags2"):
-        args += ["+compatflags2", str(compat["compatflags2"])]
-
-    video = g.get("video", {})
-    if video.get("resolution_x") and video.get("resolution_y"):
-        args += ["-width", str(video["resolution_x"]), "-height", str(video["resolution_y"])]
+    if (monitor := video.get("monitor_idx", 0)) > 0:
+        args += ["+vid_adapter", traits.monitor_index(monitor - 1)]
+    if video.get("resolution_x"):
+        args += ["-width", str(video["resolution_x"])]
+    if video.get("resolution_y"):
+        args += ["-height", str(video["resolution_y"])]
     if video.get("show_fps"):
         args += ["+vid_fps", "1"]
 
-    audio = g.get("audio", {})
-    if audio.get("no_sound"):
-        args.append("-nosound")
-    else:
-        if audio.get("no_music"):
-            args.append("-nomusic")
-        if audio.get("no_sfx"):
-            args.append("-nosfx")
+    for key, flag in (("no_sound", "-nosound"), ("no_sfx", "-nosfx"), ("no_music", "-nomusic")):
+        if audio.get(key):
+            args.append(flag)
     return args
 
 
@@ -152,14 +187,18 @@ def build_command(opts: Options, preset: Preset) -> LaunchCommand:
     for mod in preset.mods:
         if not _present(preset, mod):
             issues.append(f"Mod missing: {mod.name}")
-    argv += _file_args(load_order(preset))
+    if engine.family in FAMILIES:
+        traits = Traits(engine.family, engine.path)
+        argv += _doomrunner_file_args(preset, traits)
+        # Ports that don't know these flags can refuse to start, so they're only passed where supported.
+        if (save_dir := preset.alternative_paths.get("save_dir")) and traits.spec.save_dir_param:
+            argv += [traits.spec.save_dir_param, save_dir]
+        if (shot_dir := preset.alternative_paths.get("screenshot_dir")) and traits.screenshot_dir_param:
+            argv += [traits.screenshot_dir_param, shot_dir]
+        argv += _doomrunner_option_args(preset, traits)
+    else:
+        argv += _file_args(load_order(preset))
 
-    if save_dir := preset.alternative_paths.get("save_dir"):
-        argv += ["-savedir", save_dir]
-    if shot_dir := preset.alternative_paths.get("screenshot_dir"):
-        argv += ["+screenshot_dir", shot_dir]
-
-    argv += _option_args(preset)
     argv += split_args(opts.global_args)
     argv += split_args(preset.additional_args)
 
