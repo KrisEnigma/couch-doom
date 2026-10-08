@@ -18,9 +18,11 @@ jobs:
             target: windows-x64
           - os: macos-latest
             target: macos-arm64
+            deploy: "11.0"
           # GitHub's Intel Mac runner; Intel Macs top out at macOS 26, so this target has a limited lifespan.
           - os: macos-15-intel
             target: macos-x64
+            deploy: "10.15"
           - os: ubuntu-latest
             target: linux-x64
             image: quay.io/pypa/manylinux_2_28_x86_64
@@ -28,6 +30,9 @@ jobs:
             target: linux-arm64
             image: quay.io/pypa/manylinux_2_28_aarch64
     runs-on: ${{ matrix.os }}
+    env:
+      # tinysoundfont compiles on the runner and would otherwise target the runner's own macOS (15 or 26), failing to load on older Macs.
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deploy }}
     steps:
       - uses: actions/checkout@v7
 

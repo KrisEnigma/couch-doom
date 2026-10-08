@@ -68,8 +68,8 @@ If the settings can't be read or have no presets, CouchDoom shows what went wron
 Downloads are on the [latest release](https://github.com/KrisEnigma/couch-doom/releases/latest). No Python needed. The app isn't code-signed, so the first start needs one extra click.
 
 - **Windows:** `CouchDoom-…-windows-x64.zip`. Unzip it anywhere and run `CouchDoom.exe`. If SmartScreen warns you, click **More info**, then **Run anyway**.
-- **macOS (Apple Silicon):** `CouchDoom-…-macos-arm64.zip`. Unzip it and open `CouchDoom.app`. If macOS says it can't be opened, go to **System Settings → Privacy & Security** and click **Open Anyway**.
-- **Linux (x86-64):** `CouchDoom-…-linux-x64.tar.gz`. Extract it and run `./CouchDoom`. It needs glibc 2.35 or newer (Ubuntu 22.04, Fedora 36 or later).
+- **macOS:** `CouchDoom-…-macos-arm64.zip` for Apple Silicon, `CouchDoom-…-macos-x64.zip` for Intel Macs (macOS 10.15 or newer). Unzip it and open `CouchDoom.app`. If macOS says it can't be opened, go to **System Settings → Privacy & Security** and click **Open Anyway**.
+- **Linux:** `CouchDoom-…-linux-x64.tar.gz` for PCs, `CouchDoom-…-linux-arm64.tar.gz` for ARM boards such as the Raspberry Pi 4 and 5. Extract it and run `./CouchDoom`. It needs glibc 2.28 or newer (Ubuntu 20.04, Debian 10, RHEL 8 and later); 32-bit systems aren't supported.
 
 **Arch Linux:** an AUR package is coming soon. Until then, build it from this repo after installing `python-pygame-ce` from the AUR (for example `yay -S python-pygame-ce`):
 
@@ -81,7 +81,7 @@ makepkg -si
 
 It needs the regular `python-pygame-ce`, not `python-pygame-ce-sdl3`, which is built without sound or controller support.
 
-**From source** (any OS, including Intel Macs): Python 3.11 or newer. On macOS, Apple's built-in Python is too old; get it from [python.org](https://www.python.org/downloads/macos/) or Homebrew.
+**From source** (any OS): Python 3.11 or newer. On macOS, Apple's built-in Python is too old; get it from [python.org](https://www.python.org/downloads/macos/) or Homebrew.
 
 ```bash
 git clone https://github.com/KrisEnigma/couch-doom.git
