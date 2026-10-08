@@ -1,6 +1,6 @@
 pkgbase = couch-doom
-	pkgdesc = Fullscreen gamepad front end for DoomRunner, ZDL and Doom Launcher presets
-	pkgver = 0.4.0
+	pkgdesc = Fullscreen gamepad front end for DoomRunner, ZDL and Doom Launcher presets, or GZDoom's IWADs
+	pkgver = 0.5.0
 	pkgrel = 1
 	url = https://github.com/KrisEnigma/couch-doom
 	arch = any
@@ -11,12 +11,12 @@ pkgbase = couch-doom
 	makedepends = python-wheel
 	depends = python
 	depends = python-pygame-ce
-	depends = ttf-dejavu
 	optdepends = doomrunner: a launcher whose presets CouchDoom lists
 	optdepends = qzdl: a launcher whose setups CouchDoom lists
+	optdepends = gzdoom: lists its IWADs when no launcher is set up
 	optdepends = zenity: "Find it myself" file picker
 	optdepends = kdialog: "Find it myself" file picker on KDE
-	source = couch-doom-0.4.0.tar.gz::https://github.com/KrisEnigma/couch-doom/archive/refs/tags/v0.4.0.tar.gz
-	sha256sums = 41b948d240e785c45d466e71ae2ce2239e791f9630b57b27670795adb429a622
+	source = couch-doom-0.5.0.tar.gz::https://github.com/KrisEnigma/couch-doom/archive/refs/tags/v0.5.0.tar.gz
+	sha256sums = 06726888d2e8c38b35eac43fc985960569b0f7ed18aca40b7489935b0a41e090
 
 pkgname = couch-doom
