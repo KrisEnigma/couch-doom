@@ -14,7 +14,7 @@ from pathlib import Path
 from . import log
 from .archive import Zip, open_archive
 from .config import STATE_DIR
-from .known import KNOWN
+from .known import lookup
 from .launch import _expand_mappack
 from .options import Preset
 
@@ -317,7 +317,7 @@ def _override_readme(files: list[Path], table: dict[str, dict]) -> Readme | None
     return None
 
 
-def find_readme(preset: Preset) -> Readme | None:
+def _find_readme(preset: Preset) -> Readme | None:
     maps = [f for mp in preset.mappacks if mp.exists() for f in _expand_mappack(mp)]
     if table := _load_overrides():
         if found := _override_readme([*maps, *preset.mods] or ([preset.iwad] if preset.iwad else []), table):
@@ -348,10 +348,23 @@ def _known_readme(preset: Preset, files: list[Path]) -> Readme | None:
     """The official IWADs and add-ons ship without readmes. The IWAD only speaks for a preset that loads nothing else,
     so a mod on top of Doom II never gets Doom II's blurb."""
     candidates = files if files else [preset.iwad] if preset.iwad else []
-    info = next((k for f in candidates if (k := KNOWN.get(f.name.lower()))), None)
+    info = next((k for f in candidates if (k := lookup(f.name))), None)
     if info is None:
         return None
     rows = [("Title", info.title), ("Author", info.author), ("Release date", info.year)]
     head = "\n".join(f"{k:<13}: {v}" for k, v in rows if v)
     fields = {"title": info.title, "author": info.author, "date": info.year, "description": info.description}
     return Readme(info.source, f"{head}\n\n{info.description}", {k: v for k, v in fields.items() if v})
+
+
+def find_readme(preset: Preset) -> Readme | None:
+    found = _find_readme(preset)
+    if found is None or found.source == "descriptions.json" or found.fields.get("description"):
+        return found
+    # A readme with no description (often just credits): a known entry supplies one, and the original text follows it.
+    maps = [f for mp in preset.mappacks if mp.exists() for f in _expand_mappack(mp)]
+    known = _known_readme(preset, [*maps, *preset.mods])
+    if known is None or not known.fields.get("description"):
+        return found
+    rule = "-" * 60
+    return Readme(known.source, f"{known.text}\n\n{rule}\n{found.source}\n\n{found.text}", {**found.fields, **known.fields})

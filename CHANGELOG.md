@@ -7,6 +7,7 @@ Each release's notes on GitHub are its own section below, behind the download in
 - Readmes are found more often: a readme beside the file with a slightly different name (spacing or a version number) now matches, a lone "readme" next to a single game file is used, and inside a pk3 the readme is chosen over the credits file.
 - Descriptions for mods downloaded through the in-game mod browser: its `metadata` file (title, author, date and the full English description) is now read, and a text file a WAD carries inside itself (such as BTSX's) is used when there is no other readme.
 - Readmes in the newer idgames layout for single maps (Map creator, Map description, Commentary) now show their author, title and description.
+- Built-in descriptions for popular community projects (Harmony, Abysm, Ashes, Bloom, Elementalism, DoomRL Arsenal and more). They fill in when a mod's own readme has no description, and the readme's text stays below.
 - Your own descriptions: put a `descriptions.json` in the state folder to give any mod a title, author, year and description. It takes priority over every other source (see the README).
 
 **New in 0.7.2**

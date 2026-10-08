@@ -320,4 +320,14 @@ try:
 finally:
     rdm.OVERRIDES_FILE = real_file
     rdm._overrides = None
+from couch_doom.known import lookup  # noqa: E402
+
+assert lookup("Elementalism_Phase1_Full_Release_v1.9.pk3").title == "Elementalism: Phase 1"  # a newer download still matches
+assert lookup("rr.pk3").title == "Refracted Reality" and lookup("rr2.pk3") is None  # exact keys don't act as prefixes
+assert lookup("hacx.wad").title and lookup("unknown.wad") is None
+r = _readme_for("kn", {"Bloom.pk3": b"x", "readme.txt": b"Just thanks to everyone"}, "Bloom.pk3")
+assert r and r.source != "readme.txt" and r.author == "Bloom Team" and "Crossover" not in r.blurb and r.blurb.startswith("A Doom and Blood")
+assert "Just thanks to everyone" in r.text  # the readme's own text stays below the entry
+r = _readme_for("kn2", {"Bloom.pk3": b"x", "Bloom.txt": b"Title : B\nAuthor : A\nDescription : the readme's own words are used when it has them"}, "Bloom.pk3")
+assert r and r.source == "Bloom.txt", r
 print("smoke ok:", ", ".join(sorted(found)), "| UI", app.screen.get_size())
