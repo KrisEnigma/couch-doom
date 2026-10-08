@@ -6,6 +6,12 @@
 
 You need [DoomRunner](https://github.com/Youda008/DoomRunner), [ZDL](https://github.com/lcferrum/qzdl) or [Doom Launcher](https://github.com/nstlaurent/DoomLauncher) with at least one game set up, or just GZDoom, UZDoom or VKDoom with an IWAD. CouchDoom finds its settings automatically; if you have more than one launcher, it asks which to use (switch later with L3 / F4).
 
+**New in 0.6.0**
+- The official games now have credits and a description in the info sheet: Doom, Doom II, Final Doom, No Rest for the Living, Master Levels, Legacy of Rust, SIGIL, Heretic, Hexen, Strife, Freedoom, Hacx, Chex Quest 3, Blasphemer and The Adventures of Square. The texts come from their store pages, readmes and official sites.
+- The info sheet always opens on the readme, and the command-line tab is gone. The file path is no longer shown.
+- Title music now plays for games that rename their tracks through Dehacked (Hacx) or set it in an included MAPINFO file (The Adventures of Square).
+- Music starts faster: title tracks are capped at 30 seconds and fade out at the cut, so long MIDI songs no longer take seconds to start.
+
 **New in 0.5.0**
 - macOS and Linux downloads, alongside Windows.
 - No launcher needed: point it at GZDoom, UZDoom or VKDoom (or let it find them) and it lists your IWADs exactly like the port's own startup picker, including Steam, GOG and Bethesda.net copies.
