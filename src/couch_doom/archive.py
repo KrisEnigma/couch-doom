@@ -47,6 +47,9 @@ class Wad:
         self.f.seek(entry[0])
         return self.f.read(entry[1])
 
+    def music_names(self) -> list[str]:
+        return []  # WAD lumps are found by name; only pk3 folders can be searched blind
+
     def mapinfo_value(self, pattern: re.Pattern) -> str | None:
         for name in _MAPINFO:
             data = self.lump(name)
@@ -78,6 +81,9 @@ class Zip:
                 if n.startswith(folder) and "/" not in n[len(folder):] and Path(n).stem == stem:
                     return self.read(real)
         return None
+
+    def music_names(self) -> list[str]:
+        return sorted(n for n in self.names if n.startswith("music/") and "/" not in n[6:])
 
     def mapinfo_value(self, pattern: re.Pattern) -> str | None:
         for n, real in self.names.items():
@@ -124,6 +130,14 @@ class Archives:
 
     def mapinfo_value(self, pattern: re.Pattern) -> str | None:
         return next((v for a in self.items if (v := a.mapinfo_value(pattern))), None)
+
+    def guess_music(self, pattern: re.Pattern) -> bytes | None:
+        """A track in a pk3's music folder whose name matches pattern, in override order."""
+        for a in self.items:
+            for n in a.music_names():
+                if pattern.search(Path(n).stem) and (data := a.read(a.names[n])):
+                    return data
+        return None
 
     def find(self, names: list[str], folders: tuple[str, ...] = ("",)) -> bytes | None:
         """First name (in priority order) that any archive provides, honoring override order per name."""

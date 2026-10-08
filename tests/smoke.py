@@ -213,4 +213,15 @@ pyi = {"PATH": "/usr/bin", "LD_LIBRARY_PATH": "/app/_internal:/mine", "LD_LIBRAR
 assert engine_environ(pyi, True) == {"PATH": "/usr/bin", "LD_LIBRARY_PATH": "/mine", "LANG": "C"}
 assert "LD_LIBRARY_PATH" not in engine_environ({"LD_LIBRARY_PATH": "/app/_internal"}, True)  # there was none originally
 assert engine_environ(pyi, False) == pyi  # running from source: untouched
+from couch_doom.music import find_title_music  # noqa: E402
+
+pk3 = root / "tc.pk3"
+with zipfile.ZipFile(pk3, "w") as z:
+    z.writestr("music/LVL1.ogg", b"OggS" + b"\0" * 20)
+    z.writestr("music/TITMUS.ogg", b"OggS" + b"\1" * 20)
+guess = find_title_music(None, [pk3])
+assert guess and guess.name == "TITLE" and guess.kind == "stream" and guess.data[4] == 1, guess
+with zipfile.ZipFile(root / "plain.pk3", "w") as z:
+    z.writestr("music/LVL1.ogg", b"OggS" + b"\0" * 20)
+assert find_title_music(None, [root / "plain.pk3"]) is None  # nothing title-like: stay silent rather than guess a level song
 print("smoke ok:", ", ".join(sorted(found)), "| UI", app.screen.get_size())

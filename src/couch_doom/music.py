@@ -28,6 +28,9 @@ TITLEMUSIC_RE = re.compile(rb'titlemusic\s*=\s*"([^"]+)"', re.IGNORECASE)
 # Per-game defaults; the IWAD itself tells us which one applies.
 DEFAULT_TITLE_LUMPS = ("D_DM2TTL", "D_INTRO", "MUS_TITL", "HEXEN", "D_LOGO")
 MUSIC_FOLDERS = ("music/", "")
+# Mods that start their title music from a script or a custom title map declare it nowhere we can read, so as a last
+# resort a pk3 track named like a title song is used.
+TITLE_GUESS_RE = re.compile(r"^(tit|intro|menu|opening)|title", re.IGNORECASE)
 DEH_TEXT_RE = re.compile(r"^Text\s+(\d+)\s+(\d+)[^\n]*\n", re.IGNORECASE | re.MULTILINE)
 BEX_MUSIC_RE = re.compile(r"^\[MUSIC\][^\n]*\n(.*?)(?=^\[|\Z)", re.IGNORECASE | re.MULTILINE | re.DOTALL)
 SF_EXTS = (".sf2", ".sf3")
@@ -117,6 +120,8 @@ def find_title_music(iwad: Path | None, files: list[Path]) -> Track | None:
                     if data.startswith(b"MUS\x1a"):
                         data = mus_to_midi(data)
                     return Track(kind, data, Path(name).stem.upper())
+        if (data := arcs.guess_music(TITLE_GUESS_RE)) and (kind := _classify(data)):
+            return Track(kind, data, "TITLE")
         return None
 
 

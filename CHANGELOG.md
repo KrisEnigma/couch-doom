@@ -2,6 +2,9 @@
 
 Each release's notes on GitHub are its own section below, behind the download instructions in `packaging/release-header.md`. Keep the `**New in X.Y.Z**` heading format: the release workflow and the in-app update notice both look for it.
 
+**New in 0.7.3**
+- Title music now plays for mods that start it from a script instead of declaring it, such as Castlevania: Simon's Destiny: a pk3 track named like a title song is used when nothing else is found.
+
 **New in 0.7.2**
 - Linux: games no longer fail to start with errors like "GLIBCXX not found". CouchDoom's own libraries were leaking into the games it launched; they now start with a clean environment.
 
