@@ -1518,7 +1518,7 @@ class App:
         self.screen.blit(ver, (brand_pos[0] + brand.get_width() + int(10 * s), baseline - self._font(14, bold=True).get_ascent()))
         stripe_y = m + brand.get_height() - int(14 * s)
         pygame.draw.rect(self.screen, self.theme.accent, (m, stripe_y, int(150 * s), int(7 * s)))
-        tag = self._tracked(f"For {self.opts.launcher}" if self.opts.launcher else "Couch launcher", 18, self.theme.accent, tracking=0.3)
+        tag = self._tracked(f"From {self.opts.launcher}" if self.opts.launcher else "Couch launcher", 18, self.theme.accent, tracking=0.3)
         tag_pos = (m + int(168 * s), stripe_y + int(4 * s) - tag.get_height() // 2)
         self.screen.blit(tag, tag_pos)
         if self.launchers and self.mode == "list":
