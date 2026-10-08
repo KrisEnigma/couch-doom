@@ -6,11 +6,14 @@ same-named .txt beside the file, or a readme/credits text at the root of a PK3/Z
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import log
 from .archive import Zip, open_archive
+from .config import STATE_DIR
 from .known import KNOWN
 from .launch import _expand_mappack
 from .options import Preset
@@ -273,8 +276,52 @@ def _embedded(path: Path) -> Readme | None:
         a.close()
 
 
+OVERRIDES_FILE = STATE_DIR / "descriptions.json"
+_overrides: tuple[float, dict] | None = None  # (file mtime, parsed): presets are listed often, the file rarely changes
+
+
+def _load_overrides(path: Path | None = None) -> dict[str, dict]:
+    """`descriptions.json`: {"file name": {"title", "author", "year", "description"}}, every field optional."""
+    global _overrides
+    path = path or OVERRIDES_FILE
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return {}
+    if _overrides and _overrides[0] == mtime and path == OVERRIDES_FILE:
+        return _overrides[1]
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        table = {k.lower(): v for k, v in data.items() if isinstance(k, str) and isinstance(v, dict)}
+    except (OSError, ValueError, AttributeError) as exc:
+        log.write("descriptions.json unreadable", f"{path}\n{exc}")
+        table = {}
+    if path == OVERRIDES_FILE:
+        _overrides = (mtime, table)
+    return table
+
+
+def _override_readme(files: list[Path], table: dict[str, dict]) -> Readme | None:
+    """The player's own entry for one of the preset's files; it outranks every other source."""
+    for f in files:
+        if entry := table.get(f.name.lower()):
+            fields = {k: str(entry[k]).strip() for k in ("title", "author", "description") if str(entry.get(k, "")).strip()}
+            if str(entry.get("year", "")).strip():
+                fields["date"] = str(entry["year"]).strip()
+            if not fields:
+                continue
+            rows = [("Title", fields.get("title")), ("Author", fields.get("author")), ("Release date", fields.get("date"))]
+            head = "\n".join(f"{k:<13}: {v}" for k, v in rows if v)
+            body = fields.get("description", "")
+            return Readme("descriptions.json", f"{head}\n\n{body}".strip(), fields)
+    return None
+
+
 def find_readme(preset: Preset) -> Readme | None:
     maps = [f for mp in preset.mappacks if mp.exists() for f in _expand_mappack(mp)]
+    if table := _load_overrides():
+        if found := _override_readme([*maps, *preset.mods] or ([preset.iwad] if preset.iwad else []), table):
+            return found
     embedded = None
     for path in [*maps, *preset.mods]:
         if not path.is_file():

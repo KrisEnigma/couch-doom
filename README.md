@@ -156,6 +156,14 @@ On Windows from source, `run.bat` passes these through. To run without a console
 ## Notes
 
 - **Update notice:** a few seconds after start, CouchDoom asks GitHub (one request, no identifiers) whether a newer release exists and, if so, shows a notice once per launch: open the release page, remind me next time, or stop reminding me about that version. To turn the check off, set `"update_check": false` in `last_played.json`, or set the `COUCHDOOM_NO_UPDATE_CHECK` environment variable.
+- **Your own descriptions:** for a mod CouchDoom can't describe, create `descriptions.json` in the same `state` folder. Each entry is keyed by the file name and every field is optional; it takes priority over any readme:
+
+  ```json
+  {
+    "mymod.wad": { "title": "My Mod", "author": "Someone", "year": 2020, "description": "One or two sentences." }
+  }
+  ```
+
 - **Saved state:** the last played preset, favorites, the music toggle and the chosen launcher are stored in `state/last_played.json`, beside `CouchDoom.exe` or the source checkout. Installed copies use `%LOCALAPPDATA%\CouchDoom`, `~/.local/share/couch-doom` or `~/Library/Application Support/CouchDoom`. A troubleshooting log is kept in `state/couch-doom.log`: crashes, "nothing found" reports, and each game launch with its command line, exit code and the engine's last output. It stays on your machine, is capped at about 512 KB (it rotates into `couch-doom.log.1`) and never records environment variables, but it does contain file paths, so look it over before sharing it.
 - **Not supported:**
   - DoomRunner's multiplayer and demo options.

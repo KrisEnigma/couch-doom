@@ -300,4 +300,24 @@ newer = (b"Map creator                     : Carton\nMap title                  
 r = _readme_for("newtpl", {"dd.pk3": b"x", "Readme ENG.txt": newer}, "dd.pk3")
 assert r and r.author == "Carton" and r.fields["title"] == "The Darkest", r
 assert r.blurb == "Map for a contest. For years, the echoes of my breath were the only sound.", r.blurb
+import couch_doom.readme as rdm  # noqa: E402
+
+real_file = rdm.OVERRIDES_FILE
+rdm.OVERRIDES_FILE = root / "descriptions.json"
+rdm._overrides = None
+try:
+    assert _readme_for("ov0", {"Mod.wad": b"x"}, "Mod.wad") is None  # no override file yet
+    rdm.OVERRIDES_FILE.write_text('{"MOD.WAD": {"title": "My Mod", "author": "Me", "year": 2020, "description": "Mine."}}', encoding="utf-8")
+    r = _readme_for("ov1", {"Mod.wad": b"x", "Mod.txt": b"Title : Other\nAuthor : Them\nDescription : theirs"}, "Mod.wad")
+    assert r and r.source == "descriptions.json" and r.author == "Me" and r.year == "2020" and r.blurb == "Mine.", r  # beats a readme
+    assert _readme_for("ov2", {"Other.wad": b"x"}, "Other.wad") is None  # only the named file
+    import time
+    time.sleep(0.05)
+    rdm.OVERRIDES_FILE.write_text("{not json", encoding="utf-8")
+    import os
+    os.utime(rdm.OVERRIDES_FILE, (time.time() + 5, time.time() + 5))
+    assert _readme_for("ov3", {"Mod.wad": b"x"}, "Mod.wad") is None  # a broken file is ignored, not fatal
+finally:
+    rdm.OVERRIDES_FILE = real_file
+    rdm._overrides = None
 print("smoke ok:", ", ".join(sorted(found)), "| UI", app.screen.get_size())
