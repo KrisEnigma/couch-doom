@@ -16,7 +16,7 @@ from typing import Callable
 
 import pygame
 
-from . import draw
+from . import __version__, draw
 from .filedialog import open_file
 from .gamepad import Action, Input
 from .glyphs import BUTTON_NAMES, Glyphs
@@ -1391,8 +1391,13 @@ class App:
 
     def _draw_header(self) -> None:
         s, m = self.s, self.margin
-        brand = self._shadowed("COUCH DOOM", self._font(88, bold=True), TEXT)
-        self.screen.blit(brand, (m - int(4 * s), m - int(18 * s)))
+        brand_font = self._font(88, bold=True)
+        brand = self._shadowed("COUCH DOOM", brand_font, TEXT)
+        brand_pos = (m - int(4 * s), m - int(18 * s))
+        self.screen.blit(brand, brand_pos)
+        ver = self._tracked(f"v{__version__}", 14, DIM, tracking=0.2)
+        baseline = brand_pos[1] + brand_font.get_ascent()
+        self.screen.blit(ver, (brand_pos[0] + brand.get_width() + int(10 * s), baseline - self._font(14, bold=True).get_ascent()))
         stripe_y = m + brand.get_height() - int(14 * s)
         pygame.draw.rect(self.screen, self.theme.accent, (m, stripe_y, int(150 * s), int(7 * s)))
         tag = self._tracked(f"For {self.opts.launcher}" if self.opts.launcher else "Couch launcher", 18, self.theme.accent, tracking=0.3)
