@@ -2,6 +2,10 @@
 
 Each release's notes on GitHub are its own section below, behind the download instructions in `packaging/release-header.md`. Keep the `**New in X.Y.Z**` heading format: the release workflow and the in-app update notice both look for it.
 
+**New in 0.7.0**
+- Intel Macs and Linux on ARM now have their own downloads, and the Linux builds run on older distributions (glibc 2.28 or newer, such as Ubuntu 20.04).
+- Fixed: on macOS older than the build machine, the title music silently didn't play. The Mac builds now support macOS 10.15 (Intel) and 11 (Apple Silicon) or newer.
+
 **New in 0.6.0**
 - The official games now have credits and a description in the info sheet: Doom, Doom II, Final Doom, No Rest for the Living, Master Levels, Legacy of Rust, SIGIL, Heretic, Hexen, Strife, Freedoom, Hacx, Chex Quest 3, Blasphemer and The Adventures of Square. The texts come from their store pages, readmes and official sites.
 - The info sheet always opens on the readme, and the command-line tab is gone. The file path is no longer shown.
