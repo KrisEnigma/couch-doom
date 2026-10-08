@@ -254,4 +254,43 @@ with zipfile.ZipFile(pk, "w") as z:
     z.writestr("readme.txt", "Title : Both\nDescription : the readme")
 r = find_readme(Preset("t", "s", "e", None, [pk]))
 assert r and r.source.endswith("readme.txt") and r.blurb == "the readme", r  # readme beats credits
+def _bstr(text: str, ident: int) -> bytes:
+    raw = text.encode("utf-8")
+    n, varint = len(raw), b""
+    while True:
+        varint += bytes([n & 0x7F | (0x80 if n > 0x7F else 0)])
+        n >>= 7
+        if not n:
+            break
+    return b"\x06" + ident.to_bytes(4, "little") + varint + raw
+
+
+def _metadata(wad: str, title: str, english: str, author: str) -> bytes:
+    parts = ["/WADs/8/8", wad, title, english, "Version fran\u00e7aise " + "x" * 50, "Versione " + "x" * 50, "Deutsch " + "x" * 50,
+             "Espa\u00f1ol " + "x" * 50, author, "iwad", "2019/9/27", "shot1.jpg"]
+    return b"\x00\x01junk" + b"".join(_bstr(v, 10 + i) for i, v in enumerate(parts))
+
+
+english = "A long English description of the episode that is clearly more than forty characters.\n\nSecond paragraph."
+r = _readme_for("mb", {"mine.wad": b"x", "metadata": _metadata("mine.wad", "Mine", english, "Someone")}, "mine.wad")
+assert r and r.source == "mod browser" and r.author == "Someone" and r.year == "2019", r
+assert r.blurb.startswith("A long English") and "Second paragraph" not in r.blurb and "Second paragraph" in r.text, r.blurb
+r = _readme_for("mb2", {"tvr.wad": b"x", "metadata": _metadata("tvr2021.wad", "TVR", english, "T")}, "tvr.wad")
+assert r and r.source == "mod browser"  # renamed file, but the only game in its folder
+r = _readme_for("mb3", {"a.wad": b"x", "b.wad": b"x", "metadata": _metadata("other.wad", "O", english, "T")}, "a.wad")
+assert r is None, r  # several downloads share the folder and the name doesn't match: don't borrow it
+
+
+def _wad_with(lumps: dict[str, bytes]) -> bytes:
+    body, entries, pos = b"", b"", 12
+    for name, data in lumps.items():
+        entries += pos.to_bytes(4, "little") + len(data).to_bytes(4, "little") + name.encode().ljust(8, b"\0")
+        body += data
+        pos += len(data)
+    return b"PWAD" + len(lumps).to_bytes(4, "little") + pos.to_bytes(4, "little") + body + entries
+
+
+info = b"Title                   : Embedded\nAuthor                  : Me\n" + b"Description : " + b"x" * 80
+r = _readme_for("emb", {"emb.wad": _wad_with({"WADINFO": info})}, "emb.wad")
+assert r and r.source.endswith("WADINFO") and r.author == "Me", r
 print("smoke ok:", ", ".join(sorted(found)), "| UI", app.screen.get_size())

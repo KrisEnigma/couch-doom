@@ -186,8 +186,89 @@ def _read_beside(txt: Path) -> Readme | None:
     return Readme(txt.name, text, parse_fields(text))
 
 
+_DATE_RE = re.compile(r"^\d{4}/\d{1,2}/\d{1,2}$")
+
+
+def _object_strings(blob: bytes) -> list[str]:
+    """The text values of a .NET BinaryFormatter file (record type 6, a length-prefixed UTF-8 string), in file order.
+
+    The in-game mod browser saves each download's title, description and author this way. Reading the strings
+    alone is enough, and avoids implementing the whole format."""
+    out: list[str] = []
+    i = 0
+    while i < len(blob) - 6:
+        if blob[i] == 6:
+            j, n, shift = i + 5, 0, 0
+            while j < len(blob):
+                c = blob[j]
+                j += 1
+                n |= (c & 0x7F) << shift
+                shift += 7
+                if not c & 0x80:
+                    break
+            if 0 < n < 50000 and j + n <= len(blob):
+                try:
+                    out.append(blob[j : j + n].decode("utf-8"))
+                    i = j + n
+                    continue
+                except UnicodeDecodeError:
+                    pass
+        i += 1
+    return out
+
+
+def _mod_metadata(path: Path) -> Readme | None:
+    """The `metadata` file the in-game mod browser leaves beside a downloaded WAD: title, English description, author, date."""
+    meta = path.parent / "metadata"
+    try:
+        if not meta.is_file() or meta.stat().st_size > MAX_BYTES:
+            return None
+        strings = _object_strings(meta.read_bytes())
+        games = [f for f in path.parent.iterdir() if f.suffix.lower() in _GAME_FILE_EXTS]
+    except OSError:
+        return None
+    # Layout: ... local path, file name, title, one description per language, author, type, date, screenshots.
+    dates = [i for i, v in enumerate(strings) if _DATE_RE.match(v)]
+    start = next((i for i, v in enumerate(strings) if v.startswith("/WADs/")), None)
+    if not dates or start is None or dates[0] < start + 5 or len(strings) < start + 5:
+        return None
+    file_name, title, description = strings[start + 1], strings[start + 2], strings[start + 3]
+    author, date = strings[dates[0] - 2], strings[dates[0]]
+    if file_name.lower() != path.name.lower() and len(games) != 1:
+        return None  # a folder of several downloads: this file's description may belong to another
+    if len(description) < 40:
+        return None
+    text = _decode(description.encode("utf-8"))
+    head = "\n".join(f"{k:<13}: {v}" for k, v in (("Title", title), ("Author", author), ("Release date", date)) if v)
+    first = re.split(r"\n\s*\n", text.strip())[0]
+    fields = {"title": title, "author": author, "date": date, "description": re.sub(r"\s+", " ", first).strip()}
+    return Readme("mod browser", f"{head}\n\n{text}", {k: v for k, v in fields.items() if v})
+
+
+_EMBEDDED = ("WADINFO", "README", "READ_ME", "TEXTFILE")
+
+
+def _embedded(path: Path) -> Readme | None:
+    """Some WADs carry their own text file as a lump (BTSX has a WADINFO in the idgames template)."""
+    a = open_archive(path)
+    if a is None or isinstance(a, Zip):
+        if a:
+            a.close()
+        return None
+    try:
+        for name in (*_EMBEDDED, "CREDITS"):
+            if (data := a.lump(name)) and len(data) > 80:
+                text = _decode(data)
+                if name == "CREDITS" or parse_fields(text):
+                    return Readme(f"{path.name} \u203a {name}", text, parse_fields(text))
+        return None
+    finally:
+        a.close()
+
+
 def find_readme(preset: Preset) -> Readme | None:
     maps = [f for mp in preset.mappacks if mp.exists() for f in _expand_mappack(mp)]
+    embedded = None
     for path in [*maps, *preset.mods]:
         if not path.is_file():
             continue
@@ -196,12 +277,17 @@ def find_readme(preset: Preset) -> Readme | None:
         inside = _inside(path)
         if inside and inside[2]:
             return Readme(f"{path.name} \u203a {inside[0]}", _decode(inside[1]), parse_fields(_decode(inside[1])))
+        if found := _mod_metadata(path):
+            return found
         if (txt := _beside_fuzzy(path)) and (found := _read_beside(txt)):
             return found
         if inside:  # only credits or an about file
             text = _decode(inside[1])
             return Readme(f"{path.name} \u203a {inside[0]}", text, parse_fields(text))
-    return _known_readme(preset, [*maps, *preset.mods])
+        if not embedded:
+            embedded = _embedded(path)
+    # The curated entries for the official games outrank a text a WAD happens to carry.
+    return _known_readme(preset, [*maps, *preset.mods]) or embedded
 
 
 def _known_readme(preset: Preset, files: list[Path]) -> Readme | None:
