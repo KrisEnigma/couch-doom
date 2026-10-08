@@ -11,23 +11,39 @@ permissions:
 jobs:
   build:
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
             target: windows-x64
           - os: macos-latest
             target: macos-arm64
-          # The oldest supported runner: a PyInstaller build only runs on glibc as new as the one it was built on.
+          # GitHub's Intel Mac runner; Intel Macs top out at macOS 26, so this target has a limited lifespan.
+          - os: macos-15-intel
+            target: macos-x64
           - os: ubuntu-22.04
             target: linux-x64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7
+        if: ${{ !startsWith(matrix.target, 'linux') }}
         with:
           python-version: "3.14"
+
+      # A PyInstaller build only runs on glibc as new as the newest symbol it bundles. The runner's own Python is
+      # built against glibc 2.35, but uv's python-build-standalone targets glibc 2.17, so the app runs on far older distros.
+      - uses: astral-sh/setup-uv@v10.2.0
+        if: ${{ startsWith(matrix.target, 'linux') }}
+
+      - name: Portable Python (Linux)
+        if: ${{ startsWith(matrix.target, 'linux') }}
+        run: |
+          uv venv --python 3.14 --managed-python --seed .venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Install
         shell: bash
@@ -37,6 +53,18 @@ jobs:
 
       - name: Build
         run: python -m PyInstaller --noconfirm --clean --distpath dist --workpath build packaging/CouchDoom.spec
+
+      - name: Check the glibc floor (Linux)
+        if: ${{ startsWith(matrix.target, 'linux') }}
+        run: |
+          floor=$(find dist -type f \( -name '*.so*' -o -name CouchDoom \) -exec objdump -T {} + 2>/dev/null \
+            | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -1)
+          echo "Newest glibc symbol the build needs: $floor"
+          echo "glibc floor: $floor" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$(printf '%s\n2.28\n' "$floor" | sort -V | tail -1)" != "2.28" ]; then
+            echo "Build needs glibc $floor, newer than the 2.28 we promise" >&2
+            exit 1
+          fi
 
       - name: Package
         id: pkg
@@ -51,13 +79,13 @@ jobs:
               cp "packaging/How to use.txt" LICENSE stage/CouchDoom/
               (cd stage && 7z a -tzip "../$name.zip" CouchDoom >/dev/null)
               echo "file=$name.zip" >> "$GITHUB_OUTPUT" ;;
-            macos-arm64)
+            macos-*)
               cp -R dist/CouchDoom.app stage/CouchDoom/
               cp "packaging/How to use.txt" LICENSE stage/CouchDoom/
               # ditto keeps the bundle's symlinks and ad-hoc signature intact; plain zip breaks them.
               ditto -c -k --keepParent stage/CouchDoom "$name.zip"
               echo "file=$name.zip" >> "$GITHUB_OUTPUT" ;;
-            linux-x64)
+            linux-*)
               cp -R dist/CouchDoom/. stage/CouchDoom/
               cp "packaging/How to use.txt" LICENSE stage/CouchDoom/
               tar -C stage -czf "$name.tar.gz" CouchDoom
