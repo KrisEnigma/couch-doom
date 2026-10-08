@@ -14,7 +14,7 @@ optdepends=('doomrunner: a launcher whose presets CouchDoom lists'
             'zenity: "Find it myself" file picker'
             'kdialog: "Find it myself" file picker on KDE')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('41b948d240e785c45d466e71ae2ce2239e791f9630b57b27670795adb429a622')
 
 build() {
   cd "$pkgname-$pkgver"
