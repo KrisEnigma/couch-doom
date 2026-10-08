@@ -25,6 +25,7 @@ else:
     os.environ["XDG_DATA_HOME"] = str(root / "data")
     os.environ["XDG_CONFIG_HOME"] = str(root / "config")
     dr_dir, zdl_dir = root / "data" / "DoomRunner", root / "config" / "Vectec Software"
+os.environ["COUCHDOOM_NO_UPDATE_CHECK"] = "1"  # tests never touch the network
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 os.environ["SDL_AUDIODRIVER"] = "dummy"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -154,8 +155,26 @@ bare = Preset(name="Doom II", section="", engine_id="", iwad=Path(g) / "DOOM2.WA
 assert (r := find_readme(bare)) and r.author == "id Software" and r.year == "1994", r
 assert find_readme(Preset(name="Mod", section="", engine_id="", iwad=Path(g) / "DOOM2.WAD", mods=[Path(g) / "mod.pk3"])) is None
 
-app = App(dr, State(root / "state.json"), windowed=True)
+from couch_doom import update as upd  # noqa: E402
+from couch_doom.gamepad import Action  # noqa: E402
+
+assert upd.is_newer("0.10.0", "0.9.0") and not upd.is_newer("0.6.0", "0.6.0") and not upd.is_newer("junk", "0.6.0")
+notes_md = "**Download**\n- a\n\n**New in 0.7.0**\n- Thing with `code` and [a link](http://x).\n- Second\n\n**New in 0.6.0**\n- Old\n"
+assert upd.whats_new(notes_md, "0.7.0") == ["Thing with code and a link.", "Second"], upd.whats_new(notes_md, "0.7.0")
+assert upd.check("0.1.0") is None  # disabled by the env var set above
+
+state = State(root / "state.json")
+app = App(dr, state, windowed=True)
 now = time.monotonic()
+app._open_update({"version": "9.9.9", "current": "0.6.0", "url": "https://github.com/KrisEnigma/couch-doom/releases", "notes": ["x"]})
+app._draw(now)
+assert app.mode == "update" and app.update_sel == 1
+app._on_action(Action.BACK, now)
+assert app.mode == "list" and app.update_choice == "later" and state.update_skip is None
+app._open_update({"version": "9.9.9", "current": "0.6.0", "url": "", "notes": []})
+app._on_action(Action.DOWN, now)
+app._on_action(Action.CONFIRM, now)
+assert app.mode == "list" and state.update_skip == "9.9.9" and State(root / "state.json").update_skip == "9.9.9"
 for _ in range(3):
     pygame.event.pump()
     app.tick(now, 1 / 60)

@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import time
+import webbrowser
 from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from typing import Callable
 import pygame
 
 from . import __version__, draw
+from . import update as updates
 from .config import ASSET_DIR
 from . import filedialog
 from .filedialog import open_file
@@ -59,6 +61,13 @@ ART_MIN_FILL = 0.62  # of the art panel's height
 ART_MAX_ZOOM = 1.25
 FAVORITES = "Favorites"
 INFO_TABS = ("Readme", "ENDOOM")
+UPDATE_DELAY_SECONDS = 3.0  # let the list settle before a notice appears over it
+# (key, label, caption) for the update notice; "later" is index 1 because B and a click outside both mean it.
+UPDATE_CHOICES = (
+    ("open", "Open release page", "Opens GitHub in your browser"),
+    ("later", "Remind me later", "Ask again the next time CouchDoom starts"),
+    ("skip", "Don't remind me again", "Stay quiet about {v}; a newer release will still show"),
+)
 ENDOOM_TAB = 1
 LOGO_MAX_H = 168  # design px; menu logos are compact, so they need more height than a text title to read as big
 INFO_SLIDE_SECONDS = 0.22
@@ -142,6 +151,20 @@ def _load_extras(preset: Preset) -> tuple[Art | None, Readme | None, Endoom | No
     except Exception:
         endoom = None
     return art, readme, endoom, logo
+
+
+def _set_window_icon() -> None:
+    """The exe's embedded icon only covers Explorer; the taskbar shows the window's own, which pygame
+    leaves as its default. Windows also groups taskbar buttons by app ID, which would otherwise be python's."""
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("com.krisenigma.couchdoom")
+        except (AttributeError, OSError):
+            pass
+    try:
+        pygame.display.set_icon(pygame.image.load(str(ASSET_DIR / "icon.png")))
+    except (pygame.error, FileNotFoundError):
+        pass
 
 
 def _wrap_mono(text: str, per_line: int) -> list[str]:
@@ -276,6 +299,14 @@ class App:
         self.picker: list[Choice | None] = []  # None is the "find it myself" row
         self.picker_sel = 0
         self.picker_opened = 0.0
+        # A newer release, shown once as a notice: {"version", "current", "notes": [str], "url"}.
+        self.update: dict | None = None
+        self.update_sel = 1
+        self.update_opened = 0.0
+        self.update_choice: str | None = None
+        self.update_job: Future | None = None
+        self.update_pool: ThreadPoolExecutor | None = None
+        self.update_started = 0.0
         self.soundfont_choice = soundfont
 
         _set_dpi_aware()
@@ -286,6 +317,7 @@ class App:
         pygame.mixer.pre_init(44100, 32, 2, 1024)
         pygame.init()
         pygame.display.set_caption("CouchDoom")
+        _set_window_icon()
         self.input = Input()
 
         self.soundfont = find_soundfont(opts, soundfont)
@@ -444,6 +476,68 @@ class App:
             self._close_overlay()
             return
         self._choose(choice)
+
+    # ---------- update notice ----------
+
+    def _open_update(self, info: dict) -> None:
+        self.update = info
+        self.update_sel = 1  # "Remind me later": the safe default, and what B does
+        self.update_choice = None
+        self.update_opened = time.monotonic()
+        self.mode = "update"
+        self._sound("open")
+
+    def _on_update_action(self, action: Action) -> None:
+        if action in (Action.UP, Action.DOWN):
+            sel = max(0, min(len(UPDATE_CHOICES) - 1, self.update_sel + (-1 if action == Action.UP else 1)))
+            if sel != self.update_sel:
+                self.update_sel = sel
+                self._sound("move")
+        elif action in (Action.CONFIRM, Action.MENU):
+            self._update_pick(self.update_sel)
+        elif action == Action.BACK:
+            self._update_pick(1)
+
+    def _update_hover(self, i: int) -> None:
+        if i != self.update_sel:
+            self.update_sel = i
+            self._sound("move")
+
+    def _update_pick(self, i: int) -> None:
+        self.update_sel = i
+        self.update_choice = UPDATE_CHOICES[i][0]
+        info = self.update or {}
+        if self.update_choice == "open" and info.get("url"):
+            try:
+                webbrowser.open(info["url"])
+            except webbrowser.Error:
+                pass
+            # Counts as "later": if they don't update, the notice returns next launch.
+        elif self.update_choice == "skip" and info.get("version"):
+            self.state.skip_update(info["version"])
+        self._close_overlay()
+
+    def _start_update_check(self, now: float) -> None:
+        if not self.state.update_check or updates.disabled():
+            return
+        self.update_started = now
+        self.update_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="update")  # apart from the art pool: a slow network must not stall title art
+        self.update_job = self.update_pool.submit(updates.check, __version__, self.state.update_skip)
+
+    def _poll_update(self, now: float) -> None:
+        """Show the notice once, a few seconds in, and only from the plain list so it never interrupts anything."""
+        job = self.update_job
+        if job is None or not job.done() or now - self.update_started < UPDATE_DELAY_SECONDS:
+            return
+        if self.mode != "list" or self.blocked or now < self.ignore_until:
+            return
+        self.update_job = None
+        try:
+            info = job.result()
+        except Exception:
+            info = None
+        if info:
+            self._open_update(info)
 
     def _choose(self, choice: Choice, added: bool = False) -> None:
         try:
@@ -997,6 +1091,9 @@ class App:
         if self.mode == "launcher":
             self._on_picker_action(action)
             return
+        if self.mode == "update":
+            self._on_update_action(action)
+            return
         if action == Action.LAUNCHER:
             if self.mode == "list":
                 self._open_picker()
@@ -1484,6 +1581,8 @@ class App:
             self._draw_info(now)
         elif self.mode == "launcher":
             self._draw_picker(now)
+        elif self.mode == "update":
+            self._draw_update(now)
         self._draw_toast(now)
 
     def _draw_header(self) -> None:
@@ -1717,6 +1816,8 @@ class App:
         launcher = [(("L3",) if pad else ("KEY:F4",), "Launcher", (A.LAUNCHER,))] if self.launchers else []
         if self.mode == "launcher":
             return [(("A",) if pad else ("KEY:ENTER",), "Choose", (A.CONFIRM,)), (("B",) if pad else ("KEY:ESC",), "Close", (A.BACK,))]
+        if self.mode == "update":
+            return [(("A",) if pad else ("KEY:ENTER",), "Choose", (A.CONFIRM,)), (("B",) if pad else ("KEY:ESC",), "Later", (A.BACK,))]
         if self.blocked:
             picking = self.launchers is not None and self.launchers.must_pick
             reload = [(("A",) if pad else ("KEY:ENTER",), "Choose" if picking else "Reload", (A.CONFIRM,))]
@@ -1834,6 +1935,56 @@ class App:
         note = f"Not listed? Drag its {PROGRAM} or settings file onto this window."
         note_font = self._font(21)
         self.screen.blit(self._text(self._fit(note, note_font, inner), note_font, DIM), (x, y + int(18 * s)))
+
+    def _draw_update(self, now: float) -> None:
+        s = self.s
+        info = self.update or {}
+        t = _ease_out((now - self.update_opened) / 0.25)
+        pad, row_h, head_h = int(34 * s), int(84 * s), int(118 * s)
+        width = min(self.w - 2 * self.margin, int(980 * s))
+        inner = width - 2 * pad
+        notes_font = self._font(23)
+        notes: list[str] = []
+        for item in info.get("notes", [])[:4]:
+            wrapped = self._wrap(item, notes_font, inner - int(26 * s), 2)
+            notes += [(("•  " if i == 0 else "    ") + line) for i, line in enumerate(wrapped)]
+        notes_h = (int(34 * s) + len(notes) * int(32 * s)) if notes else 0
+        box = pygame.Rect(0, 0, width, 2 * pad + head_h + notes_h + len(UPDATE_CHOICES) * row_h)
+        box.center = (self.w // 2, (self.h - self.footer_h) // 2 + int(24 * s * (1 - t)))
+
+        shade = pygame.Surface((self.w, self.h - self.footer_h), pygame.SRCALPHA)
+        shade.fill((0, 0, 0, int(150 * t)))
+        self.screen.blit(shade, (0, 0))
+        self.screen.blit(draw.rounded_rect(box.width, box.height, 18 * s, (*PANEL, 248), (78, 62, 55), 1.5 * s), box)
+        self.hits.append(Hit(shade.get_rect(), lambda: self._update_pick(1)))
+        self.hits.append(Hit(box, lambda: None))
+
+        x, y = box.x + pad, box.y + pad
+        self.screen.blit(self._tracked("Update available", 16, self.theme.label, tracking=0.3), (x, y))
+        self.screen.blit(self._text(f"CouchDoom {info.get('version', '')} is out", self._font(40, bold=True), TEXT), (x, y + int(28 * s)))
+        self.screen.blit(self._text(f"You're on {info.get('current', __version__)}", self._font(22), MUTED), (x, y + int(80 * s)))
+        y += head_h
+
+        if notes:
+            self.screen.blit(self._tracked("What's new", 15, self.theme.label, tracking=0.25), (x, y))
+            y += int(34 * s)
+            for line in notes:
+                self.screen.blit(self._text(line, notes_font, MUTED), (x, y))
+                y += int(32 * s)
+
+        name_font, sel_font, sub_font = self._font(31), self._font(31, bold=True), self._font(21)
+        for i, (_, name, sub) in enumerate(UPDATE_CHOICES):
+            rect = pygame.Rect(box.x + int(12 * s), y, box.width - int(24 * s), row_h - int(6 * s))
+            selected = i == self.update_sel
+            if selected:
+                self.screen.blit(draw.rounded_rect(rect.width, rect.height, 10 * s, (255, 255, 255, 16)), rect)
+                pygame.draw.rect(self.screen, self.theme.accent, (rect.x, rect.y + int(10 * s), int(5 * s), rect.height - int(20 * s)))
+            self.hits.append(Hit(rect, lambda i=i: self._update_pick(i), lambda i=i: self._update_hover(i)))
+            font = sel_font if selected else name_font
+            self.screen.blit(self._text(name, font, TEXT if selected else MUTED), (x, self._text_top(font, rect.y + int(26 * s))))
+            sub = sub.replace("{v}", str(info.get("version", "")))
+            self.screen.blit(self._text(self._fit(sub, sub_font, inner), sub_font, DIM), (x, rect.y + int(52 * s)))
+            y += row_h
 
     def _draw_osk(self, now: float) -> None:
         s = self.s
@@ -2084,6 +2235,7 @@ class App:
     def run(self) -> int:
         clock = pygame.time.Clock()
         last = time.monotonic()
+        self._start_update_check(last)
         try:
             while self.running:
                 now = time.monotonic()
@@ -2126,12 +2278,15 @@ class App:
                 clock.tick(60)
         finally:
             self.art_pool.shutdown(wait=False, cancel_futures=True)
+            if self.update_pool:
+                self.update_pool.shutdown(wait=False, cancel_futures=True)
             if self.music:
                 self.music.shutdown()
             pygame.quit()
         return 0
 
     def tick(self, now: float, dt: float) -> None:
+        self._poll_update(now)
         self._update_art(now)
         self._update_music(now)
         if self.mode == "info":

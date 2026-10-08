@@ -11,6 +11,8 @@ You need [DoomRunner](https://github.com/Youda008/DoomRunner), [ZDL](https://git
 - The info sheet always opens on the readme, and the command-line tab is gone. The file path is no longer shown.
 - Title music now plays for games that rename their tracks through Dehacked (Hacx) or set it in an included MAPINFO file (The Adventures of Square).
 - Music starts faster: title tracks are capped at 30 seconds and fade out at the cut, so long MIDI songs no longer take seconds to start.
+- A notice when a newer release is out, shown once per launch: open the release page, remind me next time, or don't remind me about that version. It can be turned off (see the README).
+- A new app icon, and the taskbar now shows it instead of Python's.
 
 **New in 0.5.0**
 - macOS and Linux downloads, alongside Windows.

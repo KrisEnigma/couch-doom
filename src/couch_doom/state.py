@@ -15,6 +15,8 @@ class State:
         self.favorites: list[str] = []
         self.launcher: tuple[str, str] | None = None  # (source key, settings path) the player last picked
         self.added: list[tuple[str, str]] = []  # launchers dropped onto the window, kept for the picker
+        self.update_check = True  # set false in the file to never contact GitHub
+        self.update_skip: str | None = None  # a release the player said not to be reminded about
         self._load()
 
     def _load(self) -> None:
@@ -29,6 +31,13 @@ class State:
         if (pick := _pair(data.get("launcher"))) is not None:
             self.launcher = pick
         self.added = [p for item in data.get("added_launchers") or [] if (p := _pair(item)) is not None]
+        self.update_check = bool(data.get("update_check", True))
+        skip = data.get("update_skip")
+        self.update_skip = skip if isinstance(skip, str) else None
+
+    def skip_update(self, version: str) -> None:
+        self.update_skip = version
+        self._save()
 
     def record(self, preset_name: str) -> None:
         self.last_played = preset_name
@@ -65,6 +74,8 @@ class State:
             "favorites": self.favorites,
             "launcher": {"source": self.launcher[0], "path": self.launcher[1]} if self.launcher else None,
             "added_launchers": [{"source": k, "path": p} for k, p in self.added],
+            "update_check": self.update_check,
+            "update_skip": self.update_skip,
         }
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp.replace(self.path)

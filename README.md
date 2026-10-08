@@ -153,6 +153,7 @@ On Windows from source, `run.bat` passes these through. To run without a console
 
 ## Notes
 
+- **Update notice:** a few seconds after start, CouchDoom asks GitHub (one request, no identifiers) whether a newer release exists and, if so, shows a notice once per launch: open the release page, remind me next time, or stop reminding me about that version. To turn the check off, set `"update_check": false` in `last_played.json`, or set the `COUCHDOOM_NO_UPDATE_CHECK` environment variable.
 - **Saved state:** the last played preset, favorites, the music toggle and the chosen launcher are stored in `state/last_played.json`, beside `CouchDoom.exe` or the source checkout. Installed copies use `%LOCALAPPDATA%\CouchDoom`, `~/.local/share/couch-doom` or `~/Library/Application Support/CouchDoom`. Errors are logged to `state/couch-doom.log`.
 - **Not supported:**
   - DoomRunner's multiplayer and demo options.
