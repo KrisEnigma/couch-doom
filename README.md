@@ -18,7 +18,15 @@ Windows: grab `CouchDoom-…-windows-x64.zip` from the [latest release](https://
 
 The app isn't code-signed, so Windows SmartScreen may warn about an unknown publisher: click **More info**, then **Run anyway**.
 
-Arch Linux: install [`couch-doom`](https://aur.archlinux.org/packages/couch-doom) from the AUR (for example `yay -S couch-doom`), then run `couch-doom` or pick CouchDoom from your app menu. It needs the regular SDL2 `python-pygame-ce` package, not `python-pygame-ce-sdl3`, which is built without sound or game controller support.
+Arch Linux: an AUR package is coming soon. Until then, build the same package from this repo (install `python-pygame-ce` from the AUR first, for example `yay -S python-pygame-ce`):
+
+```bash
+git clone https://github.com/KrisEnigma/couch-doom.git
+cd couch-doom/packaging/aur
+makepkg -si
+```
+
+Then run `couch-doom` or pick CouchDoom from your app menu. It needs the regular SDL2 `python-pygame-ce` package, not `python-pygame-ce-sdl3`, which is built without sound or game controller support.
 
 ## Linux
 

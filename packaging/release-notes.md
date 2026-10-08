@@ -2,7 +2,7 @@
 
 You need [DoomRunner](https://github.com/Youda008/DoomRunner), [ZDL](https://github.com/lcferrum/qzdl) or [Doom Launcher](https://github.com/nstlaurent/DoomLauncher) with at least one game set up. CouchDoom finds its settings automatically; if you have more than one launcher, it asks which to use (switch later with L3 / F4). Windows may show an "unknown publisher" warning because the app isn't code-signed: click **More info → Run anyway**.
 
-On Arch Linux, install [`couch-doom`](https://aur.archlinux.org/packages/couch-doom) from the AUR. Other Linux distros can run it from source; see the README.
+On Arch Linux, an AUR package is coming soon; until then, build it from the repo's `packaging/aur/PKGBUILD` with `makepkg -si` (see the README). Other Linux distros can run it from source.
 
 **New in 0.4.0**
 - Linux support: finds DoomRunner (including Flatpak) and qZDL settings in their standard Linux folders, recognises their programs and AppImages when dropped on the window, and uses zenity or kdialog for **Find it myself…**. Tested on Arch Linux with DSDA-Doom.
