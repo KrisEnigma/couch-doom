@@ -65,8 +65,7 @@ INFO_SLIDE_SECONDS = 0.22
 INFO_STICK_LINES_PER_SEC = 48
 MUSIC_CHANNELS, MOVE_CHANNEL = (0, 1), 2
 MOUSE_EVENTS = {pygame.MOUSEMOTION, pygame.MOUSEWHEEL, pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP}
-FONT_DIR = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" if os.name == "nt" else None
-OWN_FONTS = ASSET_DIR / "fonts"
+FONTS = ASSET_DIR / "fonts"
 PROGRAM = ".exe" if os.name == "nt" else "program"
 
 
@@ -605,16 +604,9 @@ class App:
         px = max(9, int(size * self.s))
         key = (px, bold, mono)
         if key not in self._fonts:
-            path = FONT_DIR / ("consola.ttf" if mono else "bahnschrift.ttf") if FONT_DIR else None
-            if path and path.exists():
-                f = pygame.font.Font(str(path), px)
-                f.bold = bold
-            elif mono:
-                f = pygame.font.SysFont("consolas,dejavusansmono,liberationmono,notosansmono,monospace", px, bold=bold)
-            else:
-                # Bahnschrift is Windows-only and can't be shipped; Barlow is the closest open DIN-style face.
-                f = pygame.font.Font(str(OWN_FONTS / ("Barlow-Bold.ttf" if bold else "Barlow-Regular.ttf")), px)
-            self._fonts[key] = f
+            # Bundled files with a real bold, so every OS looks the same; SDL_ttf's synthetic bold has jagged edges.
+            name = "JetBrainsMono-Regular.ttf" if mono else "Barlow-Bold.ttf" if bold else "Barlow-Regular.ttf"
+            self._fonts[key] = pygame.font.Font(str(FONTS / name), px)
         return self._fonts[key]
 
     def _layout(self) -> None:

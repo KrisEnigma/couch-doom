@@ -152,7 +152,7 @@ Nothing here depends on a particular engine; it all comes from the preset's own 
 ## Notes
 
 - The backdrop is each preset's own title screen, read from its files in engine override order: a MAPINFO `titlepage`, then `TITLEPIC`, then Heretic/Hexen's raw `TITLE`. WAD and PK3/IPK3 are supported; PK7 is not.
-- Text uses Windows' Bahnschrift where available; elsewhere it's [Barlow](https://github.com/jpt/barlow) (SIL OFL, `src/couch_doom/assets/fonts/`).
+- Text uses [Barlow](https://github.com/jpt/barlow) and [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) on every OS, both SIL OFL and bundled in `src/couch_doom/assets/fonts/`.
 - Button prompts are [Kenney's Input Prompts](https://kenney.nl/assets/input-prompts) (CC0, `src/couch_doom/assets/prompts/`). The style follows the pad you last pressed a button on: Xbox, PlayStation (detected by name) or Switch.
 - Last played preset, favorites, the music toggle and the chosen launcher are stored in `state/last_played.json` (beside `CouchDoom.exe` or the source checkout; `~/.local/share/couch-doom/`, `~/Library/Application Support/CouchDoom/` or `%LOCALAPPDATA%\CouchDoom\` for pip/AUR installs).
 - Crashes under `pythonw` (no console) are written to `state/couch-doom.log`.
