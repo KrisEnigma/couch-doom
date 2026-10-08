@@ -103,7 +103,15 @@ def _beside(path: Path) -> Path | None:
     return None
 
 
-def _inside(path: Path) -> tuple[str, bytes] | None:
+_ABOUT_STEMS = ("about",)
+_SKIP_STEMS = re.compile(r"change|history|credit|licen[sc]e|install|manual|added|todo|whatsnew|news|errata|bugs", re.I)
+_GAME_FILE_EXTS = {".wad", ".pk3", ".pk7", ".ipk3", ".pke"}
+_VERSION_TAIL_RE = re.compile(r"[ _\-]+v?\d+([._]\d+)*[a-z]?$", re.I)
+
+
+def _inside(path: Path) -> tuple[str, bytes, bool] | None:
+    """A readme at the root of a pk3/zip: (name, text, strong). A credits file alone is weak, because a readme
+    sitting beside the archive under another name tells the player more."""
     a = open_archive(path)
     if not isinstance(a, Zip):
         if a:
@@ -119,12 +127,63 @@ def _inside(path: Path) -> tuple[str, bytes] | None:
             if p.suffix.lower() not in TEXT_EXTS:
                 continue
             s = p.stem.lower()
-            rank = 0 if s == stem else 1 if s.startswith(README_STEMS) else None
-            if rank is not None and (best is None or rank < best[0]):
+            if s == stem:
+                rank = 0
+            elif s.startswith(README_STEMS[:3]):
+                rank = 1
+            elif s.startswith(_ABOUT_STEMS):
+                rank = 2
+            elif s.startswith("credits"):
+                rank = 3
+            else:
+                continue
+            if best is None or rank < best[0]:
                 best = (rank, real)
-        return (best[1], a.read(best[1])) if best else None
+        return (best[1], a.read(best[1]), best[0] <= 1) if best else None
     finally:
         a.close()
+
+
+def _squash(stem: str) -> str:
+    """'Eviternity II' and 'eviternityii', 'aaliens_v1_2' and 'aaliens' compare equal."""
+    while (shorter := _VERSION_TAIL_RE.sub("", stem)) != stem and shorter:
+        stem = shorter
+    return re.sub(r"[^a-z0-9]", "", stem.lower())
+
+
+def _beside_fuzzy(path: Path) -> Path | None:
+    """A text file beside `path` that is plainly its readme although the name doesn't match exactly.
+
+    Two safe cases: the names agree once spacing and version tails are ignored, or the folder holds only this one
+    game file and a single readme-looking text. A folder of unrelated downloads gets no guess at all: a blank
+    beats another mod's text."""
+    folder = path.parent
+    try:
+        texts = [f for f in folder.iterdir() if f.is_file() and f.suffix.lower() in (".txt", ".md", ".nfo")
+                 and f.stem.lower() != path.stem.lower() and not _SKIP_STEMS.search(f.stem)]
+        games = [f for f in folder.iterdir() if f.is_file() and f.suffix.lower() in _GAME_FILE_EXTS]
+    except OSError:
+        return None
+    mine = _squash(path.stem)
+    if len(mine) >= 4:
+        close = [f for f in texts if len(t := _squash(f.stem)) >= 4 and (t == mine or t.startswith(mine) or mine.startswith(t))]
+        if len(close) == 1:
+            return close[0]
+    if len(games) <= 1:
+        looks = [f for f in texts if re.search(r"read[ _]?me", f.stem, re.I)]
+        if len(looks) > 1:
+            looks = [f for f in looks if re.search(r"(^|[ _\-])(eng|en|english)([ _\-]|$)", f.stem, re.I)]
+        if len(looks) == 1:
+            return looks[0]
+    return None
+
+
+def _read_beside(txt: Path) -> Readme | None:
+    try:
+        text = _decode(txt.read_bytes())
+    except OSError:
+        return None
+    return Readme(txt.name, text, parse_fields(text))
 
 
 def find_readme(preset: Preset) -> Readme | None:
@@ -132,16 +191,16 @@ def find_readme(preset: Preset) -> Readme | None:
     for path in [*maps, *preset.mods]:
         if not path.is_file():
             continue
-        if txt := _beside(path):
-            try:
-                text = _decode(txt.read_bytes())
-            except OSError:
-                continue
-            return Readme(txt.name, text, parse_fields(text))
-        if found := _inside(path):
-            name, raw = found
-            text = _decode(raw)
-            return Readme(f"{path.name} › {name}", text, parse_fields(text))
+        if (txt := _beside(path)) and (found := _read_beside(txt)):
+            return found
+        inside = _inside(path)
+        if inside and inside[2]:
+            return Readme(f"{path.name} \u203a {inside[0]}", _decode(inside[1]), parse_fields(_decode(inside[1])))
+        if (txt := _beside_fuzzy(path)) and (found := _read_beside(txt)):
+            return found
+        if inside:  # only credits or an about file
+            text = _decode(inside[1])
+            return Readme(f"{path.name} \u203a {inside[0]}", text, parse_fields(text))
     return _known_readme(preset, [*maps, *preset.mods])
 
 

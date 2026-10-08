@@ -4,6 +4,7 @@ Each release's notes on GitHub are its own section below, behind the download in
 
 **New in 0.7.3**
 - Title music now plays for mods that start it from a script instead of declaring it, such as Castlevania: Simon's Destiny: a pk3 track named like a title song is used when nothing else is found.
+- Readmes are found more often: a readme beside the file with a slightly different name (spacing or a version number) now matches, a lone "readme" next to a single game file is used, and inside a pk3 the readme is chosen over the credits file.
 
 **New in 0.7.2**
 - Linux: games no longer fail to start with errors like "GLIBCXX not found". CouchDoom's own libraries were leaking into the games it launched; they now start with a clean environment.

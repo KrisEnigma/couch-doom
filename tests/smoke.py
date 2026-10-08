@@ -224,4 +224,34 @@ assert guess and guess.name == "TITLE" and guess.kind == "stream" and guess.data
 with zipfile.ZipFile(root / "plain.pk3", "w") as z:
     z.writestr("music/LVL1.ogg", b"OggS" + b"\0" * 20)
 assert find_title_music(None, [root / "plain.pk3"]) is None  # nothing title-like: stay silent rather than guess a level song
+from couch_doom.readme import find_readme  # noqa: E402
+from couch_doom.options import Preset  # noqa: E402
+
+
+def _readme_for(folder: str, files: dict[str, bytes], mod: str):
+    d = root / "rm" / folder
+    d.mkdir(parents=True, exist_ok=True)
+    for name, data in files.items():
+        (d / name).write_bytes(data)
+    return find_readme(Preset("t", "s", "e", None, [d / mod]))
+
+
+r = _readme_for("evit", {"Eviternity II.wad": b"x", "eviternityii.txt": b"Title : Evit\nDescription : big"}, "Eviternity II.wad")
+assert r and r.source == "eviternityii.txt", r  # spacing ignored
+r = _readme_for("aa", {"aaliens_v1_2.wad": b"x", "aaliens.txt": b"Title : AA"}, "aaliens_v1_2.wad")
+assert r and r.source == "aaliens.txt", r  # version tail ignored
+r = _readme_for("single", {"sa.pk3": b"x", "SA readme.txt": b"hello"}, "sa.pk3")
+assert r and r.source == "SA readme.txt", r  # one game file, one readme
+r = _readme_for("lang", {"dd.pk3": b"x", "Readme RUS.txt": b"privet", "Readme ENG.txt": b"hello"}, "dd.pk3")
+assert r and r.source == "Readme ENG.txt", r
+r = _readme_for("dump", {"a.wad": b"x", "b.wad": b"x", "SIGIL_README.txt": b"unrelated"}, "a.wad")
+assert r is None, r  # a shared folder of downloads: no guessing
+r = _readme_for("changes", {"solo.wad": b"x", "CHANGELOG.txt": b"v2"}, "solo.wad")
+assert r is None, r
+pk = root / "rm" / "both.pk3"
+with zipfile.ZipFile(pk, "w") as z:
+    z.writestr("credits.txt", "Thanks")
+    z.writestr("readme.txt", "Title : Both\nDescription : the readme")
+r = find_readme(Preset("t", "s", "e", None, [pk]))
+assert r and r.source.endswith("readme.txt") and r.blurb == "the readme", r  # readme beats credits
 print("smoke ok:", ", ".join(sorted(found)), "| UI", app.screen.get_size())
