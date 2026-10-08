@@ -199,4 +199,12 @@ try:
     raise AssertionError("expected OSError")
 except OSError:
     pass
+assert clog.last_line("a\n\n  Error: no display  \n") == "Error: no display" and clog.last_line("") == ""
+fuse = "AppImages require FUSE to run."
+assert clog.needs_extract_retry(["/o/Nugget.AppImage", "-iwad", "x"], {}, fuse, 1, 0.2)
+assert clog.needs_extract_retry(["wrapper", "/o/n.appimage"], {}, fuse, 1, 0.2)
+assert not clog.needs_extract_retry(["/o/nugget-doom"], {}, fuse, 1, 0.2)  # not an AppImage
+assert not clog.needs_extract_retry(["/o/n.AppImage"], {}, "some other error", 1, 0.2)
+assert not clog.needs_extract_retry(["/o/n.AppImage"], {"APPIMAGE_EXTRACT_AND_RUN": "1"}, fuse, 1, 0.2)  # no retry loop
+assert not clog.needs_extract_retry(["/o/n.AppImage"], {}, fuse, 0, 0.2)
 print("smoke ok:", ", ".join(sorted(found)), "| UI", app.screen.get_size())

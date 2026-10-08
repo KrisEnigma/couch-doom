@@ -25,7 +25,7 @@ from .filedialog import open_file
 from .gamepad import Action, Input
 from .glyphs import BUTTON_NAMES, Glyphs
 from .launch import LaunchCommand, build_command, load_order, split_args
-from .log import closed_early, spawn
+from .log import closed_early, last_line, needs_extract_retry, spawn
 from .launchers import Launchers
 from .music import DWELL_SECONDS, MusicPlayer, find_soundfont
 from .options import Options, OptionsError, Preset, unpack
@@ -1406,6 +1406,14 @@ class App:
         pygame.display.quit()
         self._audio_down()
         code, elapsed = proc.wait()
+        if needs_extract_retry(cmd.argv, cmd.env, proc.output, code, elapsed):
+            # No FUSE on this system: run the AppImage by unpacking it instead, and say so in the log.
+            retry = {**cmd.env, "APPIMAGE_EXTRACT_AND_RUN": "1"}
+            try:
+                proc = spawn(cmd.argv, cmd.cwd, retry, preset.name + " (retry without FUSE)", cmd.display())
+                code, elapsed = proc.wait()
+            except OSError:
+                pass
 
         self._audio_up()
         pygame.display.init()
@@ -1417,7 +1425,8 @@ class App:
         self.scroll = self._target_scroll()
         self.bar_y = self.row_y[self._sel_row()]
         if closed_early(code, elapsed):
-            self._notify(f"{preset.name} closed right away (exit {code}). Details are in couch-doom.log", ERROR)
+            why = last_line(proc.output)
+            self._notify(f"{preset.name} closed right away (exit {code})" + (f": {why}" if why else ". Details are in couch-doom.log"), ERROR)
         else:
             self._notify(f"Back from {preset.name}", MUTED)
 
