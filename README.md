@@ -63,7 +63,11 @@ If the settings can't be read or have no presets, CouchDoom shows what went wron
 
 ## Install
 
-**Windows:** download `CouchDoom-…-windows-x64.zip` from the [latest release](https://github.com/KrisEnigma/couch-doom/releases/latest), unzip it anywhere and run `CouchDoom.exe`. No Python needed. The app isn't code-signed, so SmartScreen may warn you: click **More info**, then **Run anyway**.
+Downloads are on the [latest release](https://github.com/KrisEnigma/couch-doom/releases/latest). No Python needed. The app isn't code-signed, so the first start needs one extra click.
+
+- **Windows:** `CouchDoom-…-windows-x64.zip`. Unzip it anywhere and run `CouchDoom.exe`. If SmartScreen warns you, click **More info**, then **Run anyway**.
+- **macOS (Apple Silicon):** `CouchDoom-…-macos-arm64.zip`. Unzip it and open `CouchDoom.app`. If macOS says it can't be opened, go to **System Settings → Privacy & Security** and click **Open Anyway**.
+- **Linux (x86-64):** `CouchDoom-…-linux-x64.tar.gz`. Extract it and run `./CouchDoom`. It needs glibc 2.35 or newer (Ubuntu 22.04, Fedora 36 or later).
 
 **Arch Linux:** an AUR package is coming soon. Until then, build it from this repo after installing `python-pygame-ce` from the AUR (for example `yay -S python-pygame-ce`):
 
@@ -75,7 +79,7 @@ makepkg -si
 
 It needs the regular `python-pygame-ce`, not `python-pygame-ce-sdl3`, which is built without sound or controller support.
 
-**Other Linux and macOS:** run from source with Python 3.11 or newer. On macOS, Apple's built-in Python is too old; get it from [python.org](https://www.python.org/downloads/macos/) or Homebrew.
+**From source** (any OS, including Intel Macs): Python 3.11 or newer. On macOS, Apple's built-in Python is too old; get it from [python.org](https://www.python.org/downloads/macos/) or Homebrew.
 
 ```bash
 git clone https://github.com/KrisEnigma/couch-doom.git

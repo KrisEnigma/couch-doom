@@ -9,8 +9,19 @@ permissions:
   contents: write
 
 jobs:
-  windows:
-    runs-on: windows-latest
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-x64
+          - os: macos-latest
+            target: macos-arm64
+          # The oldest supported runner: a PyInstaller build only runs on glibc as new as the one it was built on.
+          - os: ubuntu-22.04
+            target: linux-x64
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
 
@@ -19,30 +30,58 @@ jobs:
           python-version: "3.14"
 
       - name: Install
+        shell: bash
         run: |
-          python -m pip install -r requirements.txt pyinstaller
-          python -m pip install --no-deps tinysoundfont
+          python -m pip install -r requirements.txt pyinstaller pillow
+          python -m pip install --no-deps tinysoundfont || echo "No tinysoundfont for this platform: MIDI title music is left out"
 
       - name: Build
         run: python -m PyInstaller --noconfirm --clean --distpath dist --workpath build packaging/CouchDoom.spec
 
       - name: Package
         id: pkg
-        shell: pwsh
+        shell: bash
         run: |
-          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME } else { "dev-$($env:GITHUB_SHA.Substring(0,7))" }
-          Copy-Item "packaging/How to use.txt", LICENSE dist/CouchDoom/
-          $zip = "CouchDoom-$version-windows-x64.zip"
-          Compress-Archive dist/CouchDoom $zip
-          "zip=$zip" >> $env:GITHUB_OUTPUT
+          if [ "$GITHUB_REF_TYPE" = tag ]; then version="$GITHUB_REF_NAME"; else version="dev-${GITHUB_SHA::7}"; fi
+          name="CouchDoom-$version-${{ matrix.target }}"
+          mkdir -p "stage/CouchDoom"
+          case "${{ matrix.target }}" in
+            windows-x64)
+              cp -R dist/CouchDoom/. stage/CouchDoom/
+              cp "packaging/How to use.txt" LICENSE stage/CouchDoom/
+              (cd stage && 7z a -tzip "../$name.zip" CouchDoom >/dev/null)
+              echo "file=$name.zip" >> "$GITHUB_OUTPUT" ;;
+            macos-arm64)
+              cp -R dist/CouchDoom.app stage/CouchDoom/
+              cp "packaging/How to use.txt" LICENSE stage/CouchDoom/
+              # ditto keeps the bundle's symlinks and ad-hoc signature intact; plain zip breaks them.
+              ditto -c -k --keepParent stage/CouchDoom "$name.zip"
+              echo "file=$name.zip" >> "$GITHUB_OUTPUT" ;;
+            linux-x64)
+              cp -R dist/CouchDoom/. stage/CouchDoom/
+              cp "packaging/How to use.txt" LICENSE stage/CouchDoom/
+              tar -C stage -czf "$name.tar.gz" CouchDoom
+              echo "file=$name.tar.gz" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - uses: actions/upload-artifact@v7
         with:
-          name: CouchDoom-windows-x64
-          path: ${{ steps.pkg.outputs.zip }}
+          name: CouchDoom-${{ matrix.target }}
+          path: ${{ steps.pkg.outputs.file }}
+
+  publish:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v7
+        with:
+          path: assets
+          merge-multiple: true
 
       - name: Publish release
-        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" "${{ steps.pkg.outputs.zip }}" --title "CouchDoom ${{ github.ref_name }}" --notes-file packaging/release-notes.md
+        run: gh release create "$GITHUB_REF_NAME" assets/* --title "CouchDoom $GITHUB_REF_NAME" --notes-file packaging/release-notes.md

@@ -3,7 +3,7 @@ https://github.com/KrisEnigma/couch-doom
 
 1. Set up your games in DoomRunner, ZDL or Doom Launcher first. No launcher? GZDoom,
    UZDoom or VKDoom on its own works too: CouchDoom lists the IWADs it can find.
-2. Double-click CouchDoom.exe. That's it.
+2. Start it: CouchDoom.exe on Windows, CouchDoom.app on macOS, ./CouchDoom on Linux.
 
 CouchDoom finds your launcher's settings on its own, including portable installs you
 have a Start Menu, Desktop or taskbar shortcut to. You can also put this CouchDoom
@@ -25,8 +25,11 @@ Controls (Xbox names; PlayStation and Switch pads work too)
   Mouse: click a preset to select it, click again to play. Wheel scrolls,
   right-click goes back, and the button hints at the bottom are clickable.
 
-Windows may warn that the app is from an unknown publisher (it isn't code-signed).
-Click "More info" then "Run anyway".
+CouchDoom isn't code-signed, so the first start needs one extra step:
+  Windows: on the "unknown publisher" warning, click "More info" then "Run anyway".
+  macOS: if it says the app can't be opened or verified, open System Settings >
+  Privacy & Security, scroll down, and click "Open Anyway" next to CouchDoom.
 
 MIDI title music needs a SoundFont: drop any .sf2 file into a "soundfonts" folder next
-to CouchDoom.exe. Without one, MIDI music stays silent and everything else works.
+to CouchDoom.exe, CouchDoom.app or CouchDoom. Without one, MIDI music stays silent and
+everything else works.

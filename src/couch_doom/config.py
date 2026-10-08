@@ -8,6 +8,10 @@ FROZEN = getattr(sys, "frozen", False)
 PACKAGE_DIR = Path(__file__).resolve().parent
 # A packaged build keeps user data (state, soundfonts) beside the exe and read-only assets in the bundle.
 PROJECT_ROOT = Path(sys.executable).parent if FROZEN else PACKAGE_DIR.parents[1]
+# A macOS app's executable sits in CouchDoom.app/Contents/MacOS; "beside the app" means the folder holding the .app.
+APP_BUNDLE = FROZEN and sys.platform == "darwin" and PROJECT_ROOT.parent.name == "Contents"
+if APP_BUNDLE:
+    PROJECT_ROOT = PROJECT_ROOT.parents[2]
 SOURCE_TREE = not FROZEN and (PROJECT_ROOT / "pyproject.toml").is_file()
 ASSET_DIR = Path(sys._MEIPASS) / "assets" if FROZEN else PACKAGE_DIR / "assets"
 
@@ -30,7 +34,8 @@ def _user_data_dir() -> Path:
     return xdg("XDG_DATA_HOME", ".local/share") / "couch-doom"
 
 
-DATA_DIR = PROJECT_ROOT if FROZEN or SOURCE_TREE else _user_data_dir()
+# The app bundle can't hold state: Gatekeeper may run a downloaded app from a read-only, randomized copy.
+DATA_DIR = PROJECT_ROOT if (FROZEN and not APP_BUNDLE) or SOURCE_TREE else _user_data_dir()
 # The author's own launcher folder, searched only when running from source; a release must not list it.
 DEV_LAUNCHERS = Path(r"D:\Standalone\UZDoom") if SOURCE_TREE and os.name == "nt" else None
 DEFAULT_OPTIONS = Path(r"D:\Standalone\UZDoom\DoomRunner\options.json")

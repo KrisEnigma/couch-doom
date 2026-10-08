@@ -21,7 +21,7 @@ from pathlib import Path
 import pygame
 
 from .archive import Archives
-from .config import DATA_DIR
+from .config import APP_BUNDLE, DATA_DIR, PROJECT_ROOT
 from .options import Options
 
 TITLEMUSIC_RE = re.compile(rb'titlemusic\s*=\s*"([^"]+)"', re.IGNORECASE)
@@ -190,7 +190,7 @@ def find_soundfont(opts: Options, explicit: str | None = None) -> Path | None:
     explicit = explicit or os.environ.get("DOOMRUNNER_SOUNDFONT")
     if explicit and Path(explicit).is_file():
         return Path(explicit)
-    tiers = [_fonts_in(DATA_DIR / "soundfonts")]
+    tiers = [_fonts_in(DATA_DIR / "soundfonts") + (_fonts_in(PROJECT_ROOT / "soundfonts") if APP_BUNDLE else [])]
     engine_fonts: list[Path] = []
     for e in opts.engines.values():
         root = e.path.parent
