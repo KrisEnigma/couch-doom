@@ -1,0 +1,30 @@
+# Maintainer: KrisEnigma <krisescobarm at gmail dot com>
+pkgname=couch-doom
+pkgver=0.4.0
+pkgrel=1
+pkgdesc="Fullscreen gamepad front end for DoomRunner, ZDL and Doom Launcher presets"
+arch=('any')
+url="https://github.com/KrisEnigma/couch-doom"
+license=('MIT')
+# The SDL2 build of pygame-ce: its SDL3 variant has no mixer or game controller support.
+depends=('python' 'python-pygame-ce' 'ttf-dejavu')
+makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+optdepends=('doomrunner: a launcher whose presets CouchDoom lists'
+            'qzdl: a launcher whose setups CouchDoom lists'
+            'zenity: "Find it myself" file picker'
+            'kdialog: "Find it myself" file picker on KDE')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname-$pkgver"
+  python -m build --wheel --no-isolation
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 packaging/linux/couch-doom.desktop "$pkgdir/usr/share/applications/couch-doom.desktop"
+  install -Dm644 packaging/couch-doom.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/couch-doom.png"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

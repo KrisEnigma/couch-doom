@@ -31,7 +31,12 @@ class LaunchCommand:
         return not self.issues
 
     def display(self) -> str:
-        return subprocess.list2cmdline(self.argv)
+        return cmdline(self.argv)
+
+
+def cmdline(argv: list[str]) -> str:
+    """argv quoted the way this OS's shell would need it."""
+    return subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
 
 
 def split_args(text: str) -> list[str]:

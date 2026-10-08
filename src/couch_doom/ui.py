@@ -17,10 +17,12 @@ from typing import Callable
 import pygame
 
 from . import __version__, draw
+from .config import ASSET_DIR
+from . import filedialog
 from .filedialog import open_file
 from .gamepad import Action, Input
 from .glyphs import BUTTON_NAMES, Glyphs
-from .launch import LaunchCommand, build_command, load_order, split_args
+from .launch import LaunchCommand, build_command, cmdline, load_order, split_args
 from .launchers import Launchers
 from .music import DWELL_SECONDS, MusicPlayer, find_soundfont
 from .options import Options, OptionsError, Preset, unpack
@@ -62,7 +64,9 @@ INFO_SLIDE_SECONDS = 0.22
 INFO_STICK_LINES_PER_SEC = 48
 MUSIC_CHANNELS, MOVE_CHANNEL = (0, 1), 2
 MOUSE_EVENTS = {pygame.MOUSEMOTION, pygame.MOUSEWHEEL, pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP}
-FONT_DIR = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+FONT_DIR = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" if os.name == "nt" else None
+OWN_FONTS = ASSET_DIR / "fonts"
+PROGRAM = ".exe" if os.name == "nt" else "program"
 
 
 @dataclass
@@ -336,7 +340,7 @@ class App:
         choices = self.launchers.refresh()
         for c in choices:
             self.launchers.preview(c)  # the counts shown; loading here keeps the stall on the button press
-        self.picker = [*choices, None]
+        self.picker = [*choices, None] if filedialog.available() else list(choices)
         current = self.launchers.current
         self.picker_sel = next((i for i, c in enumerate(choices) if current and c.id == current.id), 0)
         self.picker_opened = time.monotonic()
@@ -490,12 +494,15 @@ class App:
         px = max(9, int(size * self.s))
         key = (px, bold, mono)
         if key not in self._fonts:
-            path = FONT_DIR / ("consola.ttf" if mono else "bahnschrift.ttf")
-            if path.exists():
+            path = FONT_DIR / ("consola.ttf" if mono else "bahnschrift.ttf") if FONT_DIR else None
+            if path and path.exists():
                 f = pygame.font.Font(str(path), px)
+                f.bold = bold
+            elif mono:
+                f = pygame.font.SysFont("consolas,dejavusansmono,liberationmono,notosansmono,monospace", px, bold=bold)
             else:
-                f = pygame.font.SysFont("consolas" if mono else "segoeui", px)
-            f.bold = bold
+                # Bahnschrift is Windows-only and can't be shipped; Barlow is the closest open DIN-style face.
+                f = pygame.font.Font(str(OWN_FONTS / ("Barlow-Bold.ttf" if bold else "Barlow-Regular.ttf")), px)
             self._fonts[key] = f
         return self._fonts[key]
 
@@ -1325,7 +1332,7 @@ class App:
         """Wrap a command line between arguments; split an argument only if it alone is too wide."""
         per_line = max(10, max_w // max(1, font.size("M")[0]))
         lines, line = [], ""
-        for token in subprocess.list2cmdline(argv).split(" ") if argv else []:
+        for token in cmdline(argv).split(" ") if argv else []:
             trial = f"{line} {token}" if line else token
             if len(trial) <= per_line:
                 line = trial
@@ -1712,7 +1719,7 @@ class App:
                 pygame.draw.rect(self.screen, self.theme.accent, (rect.x, rect.y + int(10 * s), int(5 * s), rect.height - int(20 * s)))
             self.hits.append(Hit(rect, lambda i=i: self._picker_pick(i), lambda i=i: self._picker_hover(i)))
             if choice is None:
-                name, sub, side, side_color = "Find it myself…", "Pick a launcher's .exe or its settings file", "", MUTED
+                name, sub, side, side_color = "Find it myself…", f"Pick a launcher's {PROGRAM} or its settings file", "", MUTED
             else:
                 result = self.launchers.preview(choice)
                 name, sub = choice.source.name, str(choice.path)
@@ -1734,7 +1741,7 @@ class App:
             self.screen.blit(self._text(self._fit(sub, mono, inner), mono, DIM), (x, rect.y + int(52 * s)))
             y += row_h
 
-        note = "Not listed? Drag its .exe or settings file onto this window."
+        note = f"Not listed? Drag its {PROGRAM} or settings file onto this window."
         note_font = self._font(21)
         self.screen.blit(self._text(self._fit(note, note_font, inner), note_font, DIM), (x, y + int(18 * s)))
 

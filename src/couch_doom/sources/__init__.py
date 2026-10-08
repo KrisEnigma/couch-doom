@@ -57,13 +57,21 @@ def _beside(source: Source, folder: Path) -> Path | None:
     return next((p for n in source.module.SETTINGS_NAMES if (p := folder / n).is_file() and source.module.matches(p)), None)
 
 
+def _is_exe(source: Source, name: str) -> bool:
+    if name in source.module.EXES:
+        return True
+    # AppImages carry the version in the name: DoomRunner-1.9.2-Linux-x86_64.AppImage
+    stem = name.removesuffix(".appimage")
+    return stem != name and any(stem.split("-")[0] == e for e in source.module.EXES)
+
+
 def identify(path: Path) -> Choice | None:
     """What a dropped file or folder points at: a launcher's exe, its folder, or a settings file itself."""
     if path.is_dir():
         return next((Choice(s, p) for s in SOURCES if (p := _beside(s, path))), None)
     name = path.name.lower()
     for s in SOURCES:
-        if name in s.module.EXES:
+        if _is_exe(s, name):
             # Portable builds keep settings beside the exe; installed ones in the user's app data.
             p = _beside(s, path.parent) or next((c for c in s.module.candidates() if c.is_file() and s.module.matches(c)), None)
             return Choice(s, p) if p else None

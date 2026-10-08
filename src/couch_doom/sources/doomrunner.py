@@ -3,14 +3,15 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 from .. import engine_traits
-from ..config import DEV_LAUNCHERS, FROZEN, PROJECT_ROOT
+from ..config import DEV_LAUNCHERS, FROZEN, PROJECT_ROOT, home, xdg
 from ..options import Engine, Options, Preset
 
 NAME = "DoomRunner"
-EXES = ("doomrunner.exe",)
+EXES = ("doomrunner.exe", "doomrunner")
 SETTINGS_NAMES = ("options.json",)
 
 # DoomRunner's OptionsStorage enum.
@@ -33,9 +34,16 @@ def candidates() -> list[Path]:
     found = [PROJECT_ROOT / "options.json", PROJECT_ROOT.parent / "options.json"] if FROZEN else []
     if DEV_LAUNCHERS:
         found.append(DEV_LAUNCHERS / "DoomRunner" / "options.json")
-    for var in ("LOCALAPPDATA", "APPDATA"):
-        if base := os.environ.get(var):
-            found.append(Path(base) / "DoomRunner" / "options.json")
+    if os.name == "nt":
+        for var in ("LOCALAPPDATA", "APPDATA"):
+            if base := os.environ.get(var):
+                found.append(Path(base) / "DoomRunner" / "options.json")
+    elif sys.platform == "darwin":
+        found.append(home() / "Library" / "Application Support" / "DoomRunner" / "options.json")
+    else:
+        found += [xdg("XDG_DATA_HOME", ".local/share") / "DoomRunner" / "options.json",
+                  home() / ".var/app/io.github.Youda008.DoomRunner/data/DoomRunner/options.json",
+                  home() / ".var/app/io.github.Youda008.DoomRunner/.local/share/DoomRunner/options.json"]
     return found
 
 

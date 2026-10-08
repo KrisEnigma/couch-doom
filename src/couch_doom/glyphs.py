@@ -9,10 +9,10 @@ from typing import Callable
 
 import pygame
 
-from .config import BUNDLE_ROOT
+from .config import ASSET_DIR as _ASSETS
 from .draw import paint, rr_on
 
-ASSET_DIR = BUNDLE_ROOT / "assets" / "prompts"
+ASSET_DIR = _ASSETS / "prompts"
 PROMPT_HEIGHT = 34
 # Shoulders/triggers are wide; at full height they outweigh the face buttons.
 PROMPT_HEIGHTS = {"LB": 27, "RB": 27, "LT": 31, "RT": 31}

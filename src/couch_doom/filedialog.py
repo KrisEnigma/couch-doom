@@ -1,8 +1,10 @@
-"""The standard Windows "Open" dialog, through ctypes so the build needs no GUI toolkit."""
+"""The system "Open" dialog: Windows' own through ctypes, zenity or kdialog elsewhere, so no GUI toolkit is needed."""
 from __future__ import annotations
 
 import ctypes
 import os
+import shutil
+import subprocess
 from ctypes import wintypes
 from pathlib import Path
 
@@ -22,10 +24,20 @@ class _OpenFileName(ctypes.Structure):
     ]
 
 
+def _unix_tool() -> str | None:
+    """zenity (GNOME and most desktops) or kdialog (KDE); KDE users get theirs first."""
+    order = ("kdialog", "zenity") if "KDE" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper() else ("zenity", "kdialog")
+    return next((p for name in order if (p := shutil.which(name))), None)
+
+
+def available() -> bool:
+    return os.name == "nt" or _unix_tool() is not None
+
+
 def open_file(title: str, filters: list[tuple[str, str]], owner: int | None = None) -> Path | None:
-    """filters: (label, "*.exe;options.json") pairs. Returns None if cancelled or not on Windows."""
+    """filters: (label, "*.exe;options.json") pairs. Returns None if cancelled or no dialog is available."""
     if os.name != "nt":
-        return None
+        return _open_unix(title, filters)
     buf = ctypes.create_unicode_buffer(1024)
     spec = "".join(f"{label}\0{pattern}\0" for label, pattern in filters) + "\0"
     ofn = _OpenFileName()
@@ -40,3 +52,22 @@ def open_file(title: str, filters: list[tuple[str, str]], owner: int | None = No
     if not ctypes.windll.comdlg32.GetOpenFileNameW(ctypes.byref(ofn)):
         return None
     return Path(buf.value) if buf.value else None
+
+
+def _open_unix(title: str, filters: list[tuple[str, str]]) -> Path | None:
+    tool = _unix_tool()
+    if not tool:
+        return None
+    globs = [(label, ["*" if p == "*.*" else p for p in pattern.split(";")]) for label, pattern in filters]
+    if Path(tool).name == "kdialog":
+        spec = "\n".join(f"{label} ({' '.join(pats)})" for label, pats in globs)
+        argv = [tool, "--title", title, "--getopenfilename", str(Path.home()), spec]
+    else:
+        argv = [tool, "--file-selection", f"--title={title}",
+                *(f"--file-filter={label} | {' '.join(pats)}" for label, pats in globs)]
+    try:
+        out = subprocess.run(argv, capture_output=True, text=True, check=False)
+    except OSError:
+        return None
+    path = out.stdout.strip()
+    return Path(path) if out.returncode == 0 and path else None

@@ -18,6 +18,20 @@ Windows: grab `CouchDoom-…-windows-x64.zip` from the [latest release](https://
 
 The app isn't code-signed, so Windows SmartScreen may warn about an unknown publisher: click **More info**, then **Run anyway**.
 
+Arch Linux: install [`couch-doom`](https://aur.archlinux.org/packages/couch-doom) from the AUR (for example `yay -S couch-doom`), then run `couch-doom` or pick CouchDoom from your app menu. It needs the regular SDL2 `python-pygame-ce` package, not `python-pygame-ce-sdl3`, which is built without sound or game controller support.
+
+## Linux
+
+DoomRunner and ZDL (qZDL) both run on Linux, and CouchDoom finds their settings in the usual places (see [Which launcher](#which-launcher)). Doom Launcher and Doom Launcher 667 are Windows-only. On other distros, run it from source:
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt
+PYTHONPATH=src .venv/bin/python -m couch_doom
+```
+
+Or `pip install .` from a checkout, which adds a `couch-doom` command. Installed copies keep their state in `~/.local/share/couch-doom/`. For **Find it myself…** in the launcher picker, install `zenity` (or `kdialog` on KDE); without either, drag the launcher or its settings file onto the window instead. Tested on Arch Linux (WSLg) with DSDA-Doom, DoomRunner and qZDL; reports from Steam Deck and other desktops are welcome.
+
 ## Run from source
 
 ```powershell
@@ -51,8 +65,8 @@ On first run CouchDoom looks for each launcher's settings:
 
 | Launcher | Settings | Looked for in |
 | --- | --- | --- |
-| DoomRunner | `options.json` | `%LOCALAPPDATA%` / `%APPDATA%\DoomRunner`, or the `DOOMRUNNER_OPTIONS` env var |
-| ZDL | `qZDL.ini` (plus saved `.zdl` setups near it) | `%APPDATA%\Vectec Software` |
+| DoomRunner | `options.json` | Windows: `%LOCALAPPDATA%` / `%APPDATA%\DoomRunner`. Linux: `~/.local/share/DoomRunner` (or its Flatpak folder). macOS: `~/Library/Application Support/DoomRunner`. Or the `DOOMRUNNER_OPTIONS` env var anywhere |
+| ZDL | `qZDL.ini` (plus saved `.zdl` setups near it) | Windows: `%APPDATA%\Vectec Software`. Linux/macOS: `~/.config/Vectec Software` |
 | Doom Launcher | `DoomLauncher.sqlite` | `%APPDATA%\DoomLauncher` (installed) |
 | Doom Launcher 667 | `DoomLauncher.sqlite` | beside `DoomLauncher667.exe`, `%LOCALAPPDATA%\DoomLauncher667`, or the `DOOMLAUNCHER_DATABASE` env var |
 
@@ -61,7 +75,7 @@ Both Doom Launchers use the same database file; CouchDoom tells them apart by th
 - **One found:** it opens straight on that launcher's presets.
 - **Several found:** a picker asks which one, showing each launcher's preset count. The choice is remembered.
 - **Switch any time:** L3 (click the left stick) or F4, or click the "For …" tag under the logo.
-- **Not found:** pick **Find it myself…** in the picker to browse to the launcher's `.exe` or settings file, or drag either one (or the launcher's folder) onto the window. CouchDoom remembers it.
+- **Not found:** pick **Find it myself…** in the picker to browse to the launcher's program (its `.exe` on Windows) or settings file, or drag either one (or the launcher's folder) onto the window. CouchDoom remembers it.
 
 How each launcher's setups show up:
 
@@ -113,8 +127,9 @@ Nothing here depends on a particular engine; it all comes from the preset's own 
 ## Notes
 
 - The backdrop is each preset's own title screen, read from its files in engine override order: a MAPINFO `titlepage`, then `TITLEPIC`, then Heretic/Hexen's raw `TITLE`. WAD and PK3/IPK3 are supported; PK7 is not.
-- Button prompts are [Kenney's Input Prompts](https://kenney.nl/assets/input-prompts) (CC0, `assets/prompts/`). The style follows the pad you last pressed a button on: Xbox, PlayStation (detected by name) or Switch.
-- Last played preset, favorites, the music toggle and the chosen launcher are stored in `state/last_played.json`.
+- Text uses Windows' Bahnschrift where available; elsewhere it's [Barlow](https://github.com/jpt/barlow) (SIL OFL, `src/couch_doom/assets/fonts/`).
+- Button prompts are [Kenney's Input Prompts](https://kenney.nl/assets/input-prompts) (CC0, `src/couch_doom/assets/prompts/`). The style follows the pad you last pressed a button on: Xbox, PlayStation (detected by name) or Switch.
+- Last played preset, favorites, the music toggle and the chosen launcher are stored in `state/last_played.json` (beside `CouchDoom.exe` or the source checkout; `~/.local/share/couch-doom/` or `%LOCALAPPDATA%\CouchDoom\` for pip/AUR installs).
 - Crashes under `pythonw` (no console) are written to `state/couch-doom.log`.
 - Map packs that point at a folder load every game file inside it, sorted by name.
 - DoomRunner option groups supported: launch mode (map/save), gameplay flags, compat flags, video resolution/FPS, audio mute. Multiplayer and demo options are ignored.

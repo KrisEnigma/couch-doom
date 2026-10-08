@@ -11,7 +11,7 @@ a = Analysis(
     [str(root / "packaging" / "couch_doom_entry.py")],
     pathex=[str(root / "src")],
     binaries=tsf_binaries,
-    datas=[(str(root / "assets"), "assets"), *tsf_datas],
+    datas=[(str(root / "src" / "couch_doom" / "assets"), "assets"), *tsf_datas],
     hiddenimports=tsf_hidden,
     excludes=["tkinter", "unittest", "pydoc", "pyaudio"],
 )

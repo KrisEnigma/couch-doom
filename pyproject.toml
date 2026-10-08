@@ -1,19 +1,27 @@
 [project]
 name = "couch-doom"
 dynamic = ["version"]
-description = "Gamepad couch launcher for DoomRunner presets"
+description = "Fullscreen gamepad front end for DoomRunner, ZDL and Doom Launcher presets"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = ["pygame-ce>=2.5"]
+
+[project.urls]
+Homepage = "https://github.com/KrisEnigma/couch-doom"
 
 [project.scripts]
 couch-doom = "couch_doom.__main__:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+couch_doom = ["assets/**/*"]
 
 [tool.setuptools.dynamic]
 version = { attr = "couch_doom.__version__" }

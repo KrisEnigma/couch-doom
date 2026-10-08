@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=CouchDoom
+GenericName=Doom launcher
+Comment=Play your DoomRunner, ZDL and Doom Launcher presets from the couch with a gamepad
+Exec=couch-doom
+Icon=couch-doom
+Terminal=false
+Categories=Game;ActionGame;
+Keywords=doom;gzdoom;uzdoom;dsda;launcher;gamepad;

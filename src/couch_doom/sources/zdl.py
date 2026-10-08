@@ -9,11 +9,11 @@ import configparser
 import os
 from pathlib import Path
 
-from ..config import FROZEN, PROJECT_ROOT
+from ..config import FROZEN, PROJECT_ROOT, xdg
 from ..options import Engine, Options, Preset
 
 NAME = "ZDL"
-EXES = ("zdl.exe", "qzdl.exe")
+EXES = ("zdl.exe", "qzdl.exe", "zdl", "qzdl")
 SETTINGS_NAMES = ("zdl.ini", "qZDL.ini")
 CURRENT = "Current setup"
 SAVED = "Saved setups"
@@ -25,8 +25,11 @@ _ZDOOM_LIKE = ("zdoom", "zandronum", "vkdoom", "skulltag", "zdaemon", "odamex")
 
 def candidates() -> list[Path]:
     found = [PROJECT_ROOT / "qZDL.ini", PROJECT_ROOT.parent / "qZDL.ini"] if FROZEN else []
-    if base := os.environ.get("APPDATA"):
-        found += [Path(base) / "Vectec Software" / "qZDL.ini", Path(base) / "Vectec Software" / "zdl.ini"]
+    if os.name == "nt":
+        if base := os.environ.get("APPDATA"):
+            found += [Path(base) / "Vectec Software" / "qZDL.ini", Path(base) / "Vectec Software" / "zdl.ini"]
+    else:
+        found.append(xdg("XDG_CONFIG_HOME", ".config") / "Vectec Software" / "qZDL.ini")  # Qt's per-user ini location
     return found
 
 
