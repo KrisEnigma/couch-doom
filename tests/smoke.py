@@ -293,4 +293,11 @@ def _wad_with(lumps: dict[str, bytes]) -> bytes:
 info = b"Title                   : Embedded\nAuthor                  : Me\n" + b"Description : " + b"x" * 80
 r = _readme_for("emb", {"emb.wad": _wad_with({"WADINFO": info})}, "emb.wad")
 assert r and r.source.endswith("WADINFO") and r.author == "Me", r
+newer = (b"Map creator                     : Carton\nMap title                       : The Darkest\n"
+         b"Map description                 : Map for a contest.\n\n"
+         b"Commentary                      : For years, the echoes of my breath\n                                  were the only sound.\n\n"
+         b"Credits                         : Someone\n")
+r = _readme_for("newtpl", {"dd.pk3": b"x", "Readme ENG.txt": newer}, "dd.pk3")
+assert r and r.author == "Carton" and r.fields["title"] == "The Darkest", r
+assert r.blurb == "Map for a contest. For years, the echoes of my breath were the only sound.", r.blurb
 print("smoke ok:", ", ".join(sorted(found)), "| UI", app.screen.get_size())

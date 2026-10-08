@@ -29,6 +29,11 @@ _FIELDS = {
     "date finished": "date",
     "date": "date",
     "description": "description",
+    # The newer idgames template, used for single maps.
+    "map creator": "author",
+    "map title": "title",
+    "map description": "description",
+    "commentary": "commentary",
 }
 _KEY_RE = re.compile(r"^\s{0,4}([A-Za-z][A-Za-z ()'/\-]{1,32}?)\s*:\s?(.*)$")
 _YEAR_RE = re.compile(r"\b(19[89]\d|20\d\d)\b")
@@ -59,7 +64,9 @@ class Readme:
 
     @property
     def blurb(self) -> str:
-        return self.fields.get("description", "")
+        """The description; when that is only a line (a map's "made for contest X"), its commentary follows it."""
+        desc, comment = self.fields.get("description", ""), self.fields.get("commentary", "")
+        return desc if len(desc) >= 120 or not comment else f"{desc} {comment}".strip()
 
 
 def _decode(raw: bytes) -> str:
