@@ -5,7 +5,7 @@ Each release's notes on GitHub are its own section below, behind the download in
 **New in 0.7.1**
 - A troubleshooting log: every game launch is recorded in `couch-doom.log` with its command line, exit code and the engine's last output, so a port that won't start can be diagnosed. It is capped at about 512 KB.
 - If a game closes right away, CouchDoom now says so and shows the engine's own last message, instead of just returning to the list.
-- Linux: an AppImage engine (such as Nugget Doom) that can't start because the system has no FUSE is now retried automatically by unpacking itself, so it no longer fails with exit code 1.
+- Linux: an AppImage engine that fails to start because the system lacks FUSE is now retried automatically by unpacking itself.
 
 **New in 0.7.0**
 - Intel Macs and Linux on ARM now have their own downloads, and the Linux builds run on older distributions (glibc 2.28 or newer, such as Ubuntu 20.04).
