@@ -4,7 +4,8 @@ import argparse
 import sys
 import traceback
 
-from .config import LOG_FILE, STATE_FILE
+from . import log
+from .config import STATE_FILE
 from .launch import build_command
 from .launchers import Launchers
 from .options import OptionsError, empty_options
@@ -59,8 +60,7 @@ def main(argv: list[str] | None = None) -> int:
         opts, problem = empty_options(exc.tried[0] if exc.tried else STATE_FILE, exc.launcher), exc
         if not pick:
             # pythonw has no console: the in-app screen explains it, the log keeps it for later.
-            LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-            LOG_FILE.write_text(f"{exc.title}\n{exc.detail}\n" + "".join(f"  {p}\n" for p in exc.tried), encoding="utf-8")
+            log.write(exc.title, f"{exc.detail}\n" + "".join(f"  {p}\n" for p in exc.tried))
     if args.dry_run:
         if problem:
             print(f"{problem.title}. {problem.detail}", file=sys.stderr)
@@ -82,8 +82,7 @@ def _entry() -> int:
         raise
     except Exception:
         # pythonw has no console; keep crashes discoverable.
-        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        LOG_FILE.write_text(traceback.format_exc(), encoding="utf-8")
+        log.write("crash", traceback.format_exc())
         raise
 
 

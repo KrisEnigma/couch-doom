@@ -179,4 +179,24 @@ for _ in range(3):
     pygame.event.pump()
     app.tick(now, 1 / 60)
     app._draw(now)
+from couch_doom import log as clog  # noqa: E402
+
+lp = root / "log" / "couch-doom.log"
+engine = [sys.executable, "-c", "import sys; print('boom ' * 9000, flush=True); print('last line', file=sys.stderr); sys.exit(3)"]
+run = clog.spawn(engine, None, dict(os.environ), "Fake", "fake cmd")
+code, secs = run.wait(lp)
+text = lp.read_text(encoding="utf-8")
+assert code == 3 and clog.closed_early(code, secs) and not clog.closed_early(0, 60) and clog.closed_early(0, 2)
+assert "launch: Fake" in text and "exit: 3" in text and "last line" in text and "fake cmd" in text
+assert len(text) < clog.OUTPUT_TAIL + 2048, len(text)  # 45 KB of output was cut to the tail
+for _ in range(80):
+    clog.write("filler", "x" * 4000, lp)
+assert lp.stat().st_size <= clog.MAX_BYTES + 5000 and lp.with_name(lp.name + ".1").exists()
+assert lp.stat().st_size + lp.with_name(lp.name + ".1").stat().st_size < 2 * clog.MAX_BYTES + 10000
+clog.write("unwritable", "", root / "state.json" / "nope.log")  # parent is a file: must not raise
+try:
+    clog.spawn([str(root / "no-such-engine.exe")], None, dict(os.environ), "Missing", "x")
+    raise AssertionError("expected OSError")
+except OSError:
+    pass
 print("smoke ok:", ", ".join(sorted(found)), "| UI", app.screen.get_size())

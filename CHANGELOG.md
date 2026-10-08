@@ -2,6 +2,10 @@
 
 Each release's notes on GitHub are its own section below, behind the download instructions in `packaging/release-header.md`. Keep the `**New in X.Y.Z**` heading format: the release workflow and the in-app update notice both look for it.
 
+**New in 0.7.1**
+- A troubleshooting log: every game launch is recorded in `couch-doom.log` with its command line, exit code and the engine's last output, so a port that won't start can be diagnosed. It is capped at about 512 KB.
+- If a game closes right away, CouchDoom now says so and points to the log, instead of just returning to the list.
+
 **New in 0.7.0**
 - Intel Macs and Linux on ARM now have their own downloads, and the Linux builds run on older distributions (glibc 2.28 or newer, such as Ubuntu 20.04).
 - Fixed: on macOS older than the build machine, the title music silently didn't play. The Mac builds now support macOS 10.15 (Intel) and 11 (Apple Silicon) or newer.

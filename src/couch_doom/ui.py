@@ -6,7 +6,6 @@ import ctypes.util
 import io
 import math
 import os
-import subprocess
 import sys
 import time
 import webbrowser
@@ -26,6 +25,7 @@ from .filedialog import open_file
 from .gamepad import Action, Input
 from .glyphs import BUTTON_NAMES, Glyphs
 from .launch import LaunchCommand, build_command, load_order, split_args
+from .log import closed_early, spawn
 from .launchers import Launchers
 from .music import DWELL_SECONDS, MusicPlayer, find_soundfont
 from .options import Options, OptionsError, Preset, unpack
@@ -1392,9 +1392,8 @@ class App:
         if self.music:
             self.music.stop(int(LAUNCH_WIPE_SECONDS * 1000))
         self._play_wipe(preset.name)
-        started = time.monotonic()
         try:
-            proc = subprocess.Popen(cmd.argv, cwd=cmd.cwd, env=cmd.env)
+            proc = spawn(cmd.argv, cmd.cwd, cmd.env, preset.name, cmd.display())
         except OSError as exc:
             self._notify(f"Could not start: {exc}", ERROR)
             self._sound("error")
@@ -1406,8 +1405,7 @@ class App:
             self.window = None
         pygame.display.quit()
         self._audio_down()
-        code = proc.wait()
-        elapsed = time.monotonic() - started
+        code, elapsed = proc.wait()
 
         self._audio_up()
         pygame.display.init()
@@ -1418,8 +1416,8 @@ class App:
         self.ignore_until = time.monotonic() + INPUT_COOLDOWN
         self.scroll = self._target_scroll()
         self.bar_y = self.row_y[self._sel_row()]
-        if code != 0 and elapsed < 15:
-            self._notify(f"{preset.name} exited with code {code}", ERROR)
+        if closed_early(code, elapsed):
+            self._notify(f"{preset.name} closed right away (exit {code}). Details are in couch-doom.log", ERROR)
         else:
             self._notify(f"Back from {preset.name}", MUTED)
 
