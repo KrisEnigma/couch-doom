@@ -2,9 +2,9 @@
 
 Made by [KrisEnigma](https://github.com/KrisEnigma).
 
-A fullscreen, gamepad-friendly front end for the Doom setups you already have. CouchDoom reads the presets saved by your launcher, or the IWADs your source port can find, and shows them big-screen style with each WAD's own title art, music and readme. Pick one and it starts the engine with the same files and arguments your launcher would use.
+A fullscreen, gamepad-friendly front end for the Doom setups you already have. CouchDoom reads your launcher's presets (or the IWADs your source port finds) and shows them big-screen style, with each WAD's own title art, music and readme. Pick one and it starts the engine with the same files and arguments your launcher would use.
 
-It only reads other programs' files and never changes them, so keep setting games up in your launcher.
+It only reads other programs' files, never changes them. Keep setting games up in your launcher.
 
 ![CouchDoom on Eviternity II: the WAD's own title art and logo beside a list of DoomRunner presets](docs/screenshots/eviternity-2.jpg)
 
@@ -21,57 +21,55 @@ It only reads other programs' files and never changes them, so keep setting game
   <img src="docs/screenshots/ashes-2063.jpg" width="49%" alt="Ashes 2063 Enriched, a standalone game with mods and its own config">
 </p>
 
-Title art, logos, readmes and ENDOOM screens shown here belong to their WAD authors; CouchDoom reads them from your own files.
+Title art, logos, readmes and ENDOOM screens belong to their WAD authors; CouchDoom reads them from your own files.
 
 ## What it works with
 
 ### Launchers
 
-| Launcher | OS | What CouchDoom reads | Where it looks |
+| Launcher | OS | Reads | Where it looks |
 | --- | --- | --- | --- |
 | [DoomRunner](https://github.com/Youda008/DoomRunner) | Windows, Linux, macOS | `options.json` | Windows `%LOCALAPPDATA%\DoomRunner` or `%APPDATA%\DoomRunner`; Linux `~/.local/share/DoomRunner` or its Flatpak folder; macOS `~/Library/Application Support/DoomRunner`; or the `DOOMRUNNER_OPTIONS` env var |
-| [ZDL](https://github.com/lcferrum/qzdl) (qZDL / ZDL 3) | Windows, Linux | `qZDL.ini`, plus saved `.zdl` files | Windows `%APPDATA%\Vectec Software`; Linux `~/.config/Vectec Software`. `.zdl` files in the folders ZDL last used and beside its ini |
+| [ZDL](https://github.com/lcferrum/qzdl) (qZDL / ZDL 3) | Windows, Linux | `qZDL.ini` and saved `.zdl` files | Windows `%APPDATA%\Vectec Software`; Linux `~/.config/Vectec Software`. `.zdl` files in ZDL's last-used folders and beside its ini |
 | [Doom Launcher](https://github.com/nstlaurent/DoomLauncher) | Windows | `DoomLauncher.sqlite` | `%APPDATA%\DoomLauncher` |
 | [Doom Launcher 667](https://github.com/Realm667/DoomLauncher667) | Windows | `DoomLauncher.sqlite` | Beside `DoomLauncher667.exe`, `%LOCALAPPDATA%\DoomLauncher667`, or the `DOOMLAUNCHER_DATABASE` env var |
 
-Any engine your launcher runs works, because CouchDoom uses the launcher's own engine list. DoomRunner presets get DoomRunner's per-engine flags, so DSDA-Doom, PrBoom+, Woof, Chocolate Doom, EDGE and the ZDoom family each get arguments they understand.
+Any engine your launcher runs works, since CouchDoom uses the launcher's own engine list. DoomRunner's per-engine flags carry over too, so DSDA-Doom, PrBoom+, Woof, Chocolate Doom, EDGE and the ZDoom family all get arguments they understand.
 
-How presets show up:
-
-- **DoomRunner:** every preset, grouped by its separators, including launch options (map, skill, gameplay and compat flags, video, audio).
-- **ZDL:** the setup currently loaded, plus saved `.zdl` files; subfolders become sections.
-- **Doom Launcher:** every game with saved settings, and each profile as its own entry; tags become sections. Zipped files it manages are unpacked into `state/unpacked/` when first needed.
-- **Doom Launcher 667:** every game, sectioned by collection. Mods it keeps as `.7z`/`.rar` only play from Doom Launcher 667 itself.
+- **DoomRunner:** every preset, grouped by its separators, with its launch options (map, skill, gameplay and compat flags, video, audio).
+- **ZDL:** the loaded setup plus saved `.zdl` files; subfolders become sections.
+- **Doom Launcher:** every game with saved settings, one entry per profile; tags become sections. Zipped files it manages get unpacked into `state/unpacked/` when first needed.
+- **Doom Launcher 667:** every game, sectioned by collection. Mods kept as `.7z`/`.rar` only play from Doom Launcher 667 itself.
 
 ### Source ports without a launcher
 
-| Port | What CouchDoom reads | Where it looks |
+| Port | Reads | Where it looks |
 | --- | --- | --- |
-| GZDoom, UZDoom, VKDoom | The port's ini (`[IWADSearch.Directories]`), its `iwadinfo.txt` (inside `game_support.pk3`), and the IWADs it finds | The program: on `PATH`, `Program Files\<Port>`, beside or one folder up from `CouchDoom.exe`, `/Applications/<Port>.app`, `/usr/bin`, or the GZDoom Flatpak. The ini: `<port>_portable.ini` beside the exe or `Documents\My Games\<Port>\<port>.ini` on Windows, `~/.config/<port>/<port>.ini` on Linux, `~/Library/Preferences/<port>.ini` on macOS |
+| GZDoom, UZDoom, VKDoom | The port's ini (`[IWADSearch.Directories]`), its `iwadinfo.txt` and the IWADs it finds | The program: on `PATH`, `Program Files\<Port>`, beside or one folder up from `CouchDoom.exe`, `/Applications/<Port>.app`, `/usr/bin`, or the GZDoom Flatpak. The ini: `<port>_portable.ini` beside the exe, or `Documents\My Games\<Port>\<port>.ini` (Windows), `~/.config/<port>/<port>.ini` (Linux), `~/Library/Preferences/<port>.ini` (macOS) |
 
-You get one entry per IWAD, named and ordered like the port's own startup picker. That includes the Steam, GOG and Bethesda.net copies the port finds on its own (unless `i_searchdistributors` is off). Add-ons such as Hexen: Deathkings only appear when the game they need is there too. Playing one runs the port with `-iwad`, so its autoload folders and settings apply as usual.
+You get one entry per IWAD, named and ordered like the port's own startup picker, including Steam, GOG and Bethesda.net copies (unless `i_searchdistributors` is off). Add-ons like Hexen: Deathkings only show up when their base game is there. Playing one runs the port with `-iwad`, so your autoload folders and settings still apply.
 
 ### Finding them
 
-CouchDoom checks the locations above. It also follows Start Menu, Desktop and taskbar shortcuts to any of these programs, which is how portable installs get found. Settings beside `CouchDoom.exe`, or one folder up, count too.
+Beyond the locations above, CouchDoom follows Start Menu, Desktop and taskbar shortcuts to these programs, which is how portable installs get found. Settings beside `CouchDoom.exe`, or one folder up, count too.
 
 - **One found:** it opens straight on its presets.
-- **Several found:** it asks which one and remembers the choice. Switch later with L3 (click the left stick) or F4.
-- **None found:** choose **Find it myself…** and pick the launcher, the port, or a settings file, or drag one onto the window.
+- **Several found:** it asks once and remembers. Switch later with L3 (click the left stick) or F4.
+- **None found:** choose **Find it myself…** and pick the launcher, the port or a settings file. Dragging one onto the window works too.
 
 ![The launcher picker listing DoomRunner, ZDL, Doom Launcher and UZDoom with their preset counts](docs/screenshots/launcher-picker.jpg)
 
-If the settings can't be read or have no presets, CouchDoom shows what went wrong and the paths it tried, instead of closing.
+If the settings can't be read or have no presets, CouchDoom shows what went wrong and which paths it tried. It doesn't just close.
 
 ## Install
 
-Downloads are on the [latest release](https://github.com/KrisEnigma/couch-doom/releases/latest). No Python needed. The app isn't code-signed, so the first start needs one extra click.
+Grab a build from the [latest release](https://github.com/KrisEnigma/couch-doom/releases/latest); no Python needed. The app isn't code-signed, so the first start takes one extra click.
 
-- **Windows:** `CouchDoom-…-windows-x64.zip`. Unzip it anywhere and run `CouchDoom.exe`. If SmartScreen warns you, click **More info**, then **Run anyway**.
-- **macOS:** `CouchDoom-…-macos-arm64.zip` for Apple Silicon, `CouchDoom-…-macos-x64.zip` for Intel Macs (macOS 10.15 or newer). Unzip it and open `CouchDoom.app`. If macOS says it can't be opened, go to **System Settings → Privacy & Security** and click **Open Anyway**.
-- **Linux:** `CouchDoom-…-linux-x64.tar.gz` for PCs, `CouchDoom-…-linux-arm64.tar.gz` for ARM boards such as the Raspberry Pi 4 and 5. Extract it and run `./CouchDoom`. It needs glibc 2.28 or newer (Ubuntu 20.04, Debian 10, RHEL 8 and later); 32-bit systems aren't supported.
+- **Windows:** `CouchDoom-…-windows-x64.zip`. Unzip anywhere and run `CouchDoom.exe`. If SmartScreen complains, click **More info**, then **Run anyway**.
+- **macOS:** `…-macos-arm64.zip` for Apple Silicon, `…-macos-x64.zip` for Intel (macOS 10.15+). Unzip and open `CouchDoom.app`. If macOS refuses, go to **System Settings → Privacy & Security** and click **Open Anyway**.
+- **Linux:** `…-linux-x64.tar.gz` for PCs, `…-linux-arm64.tar.gz` for ARM boards like the Raspberry Pi 4 and 5. Extract and run `./CouchDoom`. Needs glibc 2.28+ (Ubuntu 20.04, Debian 10, RHEL 8 and later). No 32-bit.
 
-**Arch Linux:** an AUR package is coming soon. Until then, build it from this repo after installing `python-pygame-ce` from the AUR (for example `yay -S python-pygame-ce`):
+**Arch Linux:** an AUR package is coming. For now, install `python-pygame-ce` from the AUR (e.g. `yay -S python-pygame-ce`), then:
 
 ```bash
 git clone https://github.com/KrisEnigma/couch-doom.git
@@ -79,9 +77,9 @@ cd couch-doom/packaging/aur
 makepkg -si
 ```
 
-It needs the regular `python-pygame-ce`, not `python-pygame-ce-sdl3`, which is built without sound or controller support.
+Use the regular `python-pygame-ce`. The `-sdl3` variant is built without sound or controller support.
 
-**From source** (any OS): Python 3.11 or newer. On macOS, Apple's built-in Python is too old; get it from [python.org](https://www.python.org/downloads/macos/) or Homebrew.
+**From source** (any OS) needs Python 3.11+. Apple's built-in Python is too old; get one from [python.org](https://www.python.org/downloads/macos/) or Homebrew.
 
 ```bash
 git clone https://github.com/KrisEnigma/couch-doom.git
@@ -92,12 +90,12 @@ python3 -m venv .venv
 PYTHONPATH=src .venv/bin/python -m couch_doom
 ```
 
-`pip install .` instead adds a `couch-doom` command.
+`pip install .` adds a `couch-doom` command instead.
 
-- **Linux:** the **Find it myself…** dialog needs `zenity` (or `kdialog` on KDE).
-- **macOS:** click the file dialog once before typing, because macOS doesn't give it keyboard focus. If GZDoom was downloaded and never opened, open it once from Finder first, so its "downloaded from the internet" prompt doesn't appear behind CouchDoom.
+- **Linux:** **Find it myself…** needs `zenity` (or `kdialog` on KDE).
+- **macOS:** click the file dialog once before typing; macOS doesn't give it keyboard focus. If GZDoom was downloaded but never opened, open it once from Finder first, or its "downloaded from the internet" prompt hides behind CouchDoom.
 
-Tested on Arch Linux with DSDA-Doom, DoomRunner and qZDL, and on an M4 MacBook Pro with GZDoom. Steam Deck reports are welcome.
+Tested on Arch Linux with DSDA-Doom, DoomRunner and qZDL, and on an M4 MacBook Pro with GZDoom. Steam Deck reports welcome.
 
 ## Controls
 
@@ -105,7 +103,7 @@ Tested on Arch Linux with DSDA-Doom, DoomRunner and qZDL, and on an M4 MacBook P
 | --- | --- | --- |
 | D-pad / left stick | Arrows | Move (hold to repeat) |
 | A / Start | Enter | Play |
-| X | Tab | Info sheet: the readme, plus the ENDOOM screen when the WAD has one |
+| X | Tab | Info sheet: the readme, plus ENDOOM when the WAD has one |
 | Y | `/` or just type | Search |
 | R3 (click right stick) | F3 | Add to or remove from Favorites |
 | Back / View | F2 | Title music on/off |
@@ -114,12 +112,7 @@ Tested on Arch Linux with DSDA-Doom, DoomRunner and qZDL, and on an M4 MacBook P
 | LT / RT | PgUp / PgDn | Jump 8 presets |
 | B | Esc | Clear the filter, otherwise quit (press twice) |
 
-The mouse works too:
-
-- **Playing:** click a preset to select it, and click it again to play.
-- **Scrolling:** the wheel scrolls the list.
-- **Going back:** right-click works like B.
-- **On-screen controls:** footer prompts, tabs and the search keyboard are clickable.
+The mouse works too. Click a preset to select it and again to play; the wheel scrolls, right-click acts as B, and footer prompts, tabs and the search keyboard are all clickable.
 
 Favorites get their own section at the top. CouchDoom hides while a game runs and comes back when it exits.
 
@@ -127,14 +120,14 @@ Favorites get their own section at the top. CouchDoom hides while a game runs an
 
 Everything comes from the preset's own files, in the order the engine would load them:
 
-- **Backdrop:** the title screen (MAPINFO `titlepage`, `TITLEPIC`, or Heretic/Hexen's `TITLE`). The UI's colours follow its most vivid hue.
-- **Logo:** the main-menu logo (`M_DOOM`, `M_HTIC`, `M_STRIFE`), when it's a real custom logo.
-- **Title music:** the MAPINFO `titlemusic` or the title lump (`D_DM2TTL`, `D_INTRO`, `MUS_TITL`, …). It plays once and crossfades between presets. MIDI and MUS need a SoundFont: `--soundfont <file>`, any `.sf2`/`.sf3` in a `soundfonts/` folder beside CouchDoom, or one shipped with your engine.
-- **Readme:** a same-named `.txt` beside the WAD, or a readme inside the PK3.
-- **ENDOOM:** shown only when the preset ships its own.
-- **Menu sounds:** taken from your IWAD.
+- **Backdrop:** the title screen (MAPINFO `titlepage`, `TITLEPIC`, or Heretic/Hexen's `TITLE`). The UI takes its colours from the most vivid hue.
+- **Logo:** the main-menu logo (`M_DOOM`, `M_HTIC`, `M_STRIFE`), if it's a real custom one.
+- **Title music:** MAPINFO `titlemusic`, the title lump (`D_DM2TTL`, `D_INTRO`, `MUS_TITL`, …) or a title-named track. It plays once and crossfades between presets. MIDI and MUS need a SoundFont: `--soundfont <file>`, any `.sf2`/`.sf3` in a `soundfonts/` folder beside CouchDoom, or one shipped with your engine.
+- **Readme:** a matching `.txt` beside the WAD, a readme inside the PK3, the WAD's own embedded text, or the info a mod browser saved next to it. Notable mods without any get a built-in line.
+- **ENDOOM:** only when the preset ships its own.
+- **Menu sounds:** from your IWAD.
 
-WAD, PK3 and IPK3 are supported; PK7 is not.
+WAD, PK3 and IPK3 work; PK7 doesn't.
 
 <p>
   <img src="docs/screenshots/readme.jpg" width="49%" alt="The readme tab showing Valiant's text file">
@@ -151,12 +144,14 @@ WAD, PK3 and IPK3 are supported; PK7 is not.
 | `--launcher <name>` | Only consider `doomrunner`, `zdl`, `doomlauncher`, `doomlauncher667` or `gzdoom` |
 | `--soundfont <file>` | SoundFont for MIDI title music |
 
-On Windows from source, `run.bat` passes these through. To run without a console window, point a shortcut at `.venv\Scripts\pythonw.exe -m couch_doom` with `PYTHONPATH` set to the checkout's `src` folder.
+On Windows from source, `run.bat` passes these through. For no console window, point a shortcut at `.venv\Scripts\pythonw.exe -m couch_doom` with `PYTHONPATH` set to the checkout's `src` folder.
 
 ## Notes
 
-- **Update notice:** a few seconds after start, CouchDoom asks GitHub (one request, no identifiers) whether a newer release exists and, if so, shows a notice once per launch: open the release page, remind me next time, or stop reminding me about that version. To turn the check off, set `"update_check": false` in `last_played.json`, or set the `COUCHDOOM_NO_UPDATE_CHECK` environment variable.
-- **Your own descriptions:** for a mod CouchDoom can't describe, create `descriptions.json` in the same `state` folder. Each entry is keyed by the file name and every field is optional; it takes priority over any readme:
+- **Saved state** (last played, favorites, music toggle, chosen launcher) lives in `state/last_played.json`, beside `CouchDoom.exe` or the source checkout. Installed copies use `%LOCALAPPDATA%\CouchDoom`, `~/.local/share/couch-doom` or `~/Library/Application Support/CouchDoom`.
+- **Troubleshooting log:** `state/couch-doom.log` records crashes, "nothing found" reports, and every launch with its command line, exit code and the engine's last output. It never leaves your machine and tops out around 512 KB (older entries rotate into `couch-doom.log.1`). No environment variables, but it does contain file paths, so look it over before sharing.
+- **Update notice:** shortly after start, CouchDoom asks GitHub once (no identifiers) whether there's a newer release. If so, you can open it, be reminded next time, or skip that version. Turn it off with `"update_check": false` in `last_played.json` or the `COUCHDOOM_NO_UPDATE_CHECK` environment variable.
+- **Your own descriptions:** for a mod CouchDoom can't describe, add a `descriptions.json` to the same `state` folder. Keys are file names, every field is optional, and it beats any readme:
 
   ```json
   {
@@ -164,15 +159,13 @@ On Windows from source, `run.bat` passes these through. To run without a console
   }
   ```
 
-- **Saved state:** the last played preset, favorites, the music toggle and the chosen launcher are stored in `state/last_played.json`, beside `CouchDoom.exe` or the source checkout. Installed copies use `%LOCALAPPDATA%\CouchDoom`, `~/.local/share/couch-doom` or `~/Library/Application Support/CouchDoom`. A troubleshooting log is kept in `state/couch-doom.log`: crashes, "nothing found" reports, and each game launch with its command line, exit code and the engine's last output. It stays on your machine, is capped at about 512 KB (it rotates into `couch-doom.log.1`) and never records environment variables, but it does contain file paths, so look it over before sharing it.
-- **Not supported:**
-  - DoomRunner's multiplayer and demo options.
-  - Doom Launcher's unmanaged `.7z`/`.rar` files, and its ports with a custom file flag.
-- **Building the Windows app:** `pip install pyinstaller`, then `pyinstaller packaging/CouchDoom.spec`. Pushing a `v*` tag builds and publishes it on GitHub Actions.
+- **Descriptions for everyone:** pull requests adding to `COMMUNITY` in `src/couch_doom/known.py` are welcome. Notable WADs only (Cacoward winners, classic megawads, well-known total conversions), and only ones that don't already show a description. One or two factual lines in your own words, plus a source link and the date you checked it. Skip things that change, like version notes.
+- **Not supported:** DoomRunner's multiplayer and demo options; Doom Launcher's unmanaged `.7z`/`.rar` files and its ports with a custom file flag.
+- **Building the Windows app:** `pip install pyinstaller`, then `pyinstaller packaging/CouchDoom.spec`. Pushing a `v*` tag builds and publishes every platform on GitHub Actions.
 
 ## Credits and license
 
-Made and maintained by [KrisEnigma](https://github.com/KrisEnigma). CouchDoom is MIT licensed; see [LICENSE](LICENSE).
+Made and maintained by [KrisEnigma](https://github.com/KrisEnigma). MIT licensed; see [LICENSE](LICENSE).
 
 - **Fonts:** [Barlow](https://github.com/jpt/barlow) and [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono), both SIL OFL.
 - **Button prompts:** [Kenney's Input Prompts](https://kenney.nl/assets/input-prompts), CC0. They match the pad you last used: Xbox, PlayStation or Switch.
