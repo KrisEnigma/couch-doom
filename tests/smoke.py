@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import struct
 import sys
 import tempfile
@@ -122,6 +123,30 @@ uz = load_choice(uz_choice)
 assert [(p.name, p.iwad.name) for p in uz.presets] == [("Freedoom: Phase 2", "freedoom2.wad"), ("Own Game", "own.iwad")], uz.presets
 assert build_command(uz, uz.presets[0]).argv[1:] == ["-iwad", str(port / "freedoom2.wad")]
 found["gzdoom"] = uz_choice
+
+dl_db = root / "DoomLauncher" / "DoomLauncher.sqlite"
+dl_db.parent.mkdir()
+settings = "SourcePortID, IWadID, SettingsMap, SettingsSkill, SettingsExtraParams, SettingsExtraParamsOnly, SettingsFiles, SettingsSpecificFiles"
+with sqlite3.connect(dl_db) as con:
+    con.executescript(f"""
+        create table Configuration (Name, Value);
+        create table GameFiles (GameFileID, FileName, Title, {settings}, SettingsFilesSourcePort, SettingsSaved, LastPlayed);
+        create table SourcePorts (SourcePortID, Name, Executable, Directory, SupportedExtensions, ExtraParameters, SettingsFiles, LaunchType);
+        create table IWads (IWadID, GameFileID);
+        create table GameProfiles (GameProfileID, GameFileID, Name, {settings});
+        create table Tags (TagID, Name);
+        create table TagMapping (FileID, TagID);
+        insert into SourcePorts values (1, 'UZDoom', 'uzdoom.exe', '{port}', '.wad,.pk3', '', '', 0);
+        insert into GameFiles (GameFileID, FileName, Title, SettingsSaved, LastPlayed) values
+            (1, '{g}{os.sep}mod.pk3', 'Tagged', 1, null),
+            (2, '{g}{os.sep}fix.deh', 'Played', 0, '2026-01-01'),
+            (3, '{g}{os.sep}music.wad', 'Support file', 0, null);
+        insert into Tags values (1, 'Megawads');
+        insert into TagMapping values (1, 1);
+    """)
+con.close()
+dl = load_choice(identify(dl_db))
+assert [(p.section, p.name) for p in dl.presets] == [("Megawads", "Tagged"), ("Untagged", "Played")], dl.presets
 
 app = App(dr, State(root / "state.json"), windowed=True)
 now = time.monotonic()

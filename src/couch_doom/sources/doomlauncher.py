@@ -227,8 +227,14 @@ def load(path: Path) -> Options:
     for prof in lib.profiles:
         profiles.setdefault(prof["GameFileID"], []).append(prof)
 
+    def is_game(gid, game) -> bool:
+        # Adding a game's files also adds its patches, music WADs and engine pk3s to the library; those are never
+        # tagged, played or given settings.
+        return bool(lib.file_tags.get(gid) or gid in profiles or _int(game["SettingsSaved"]) or game["LastPlayed"])
+
+    games = {gid: g for gid, g in lib.files.items() if is_game(gid, g)} or lib.files
     presets: list[Preset] = []
-    for gid, game in lib.files.items():
+    for gid, game in games.items():
         tags = lib.file_tags.get(gid, [])
         # IWADs live in Doom Launcher's IWADs tab; they only join the list once tagged like a game.
         if gid in lib.iwad_files and not tags:
