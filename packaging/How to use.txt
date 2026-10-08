@@ -1,7 +1,8 @@
 CouchDoom - play your Doom launcher's setups from the couch with a gamepad
 https://github.com/KrisEnigma/couch-doom
 
-1. Set up your games in DoomRunner, ZDL or Doom Launcher first.
+1. Set up your games in DoomRunner, ZDL or Doom Launcher first. No launcher? GZDoom,
+   UZDoom or VKDoom on its own works too: CouchDoom lists the IWADs it can find.
 2. Double-click CouchDoom.exe. That's it.
 
 CouchDoom finds your launcher's settings on its own, including portable installs you
@@ -12,7 +13,7 @@ If it finds more than one launcher, it asks which one to use and remembers the a
 Press L3 (click the left stick) or F4 any time to switch.
 
 If it finds none, press L3 / F4 and choose "Find it myself..." to browse to the
-launcher's .exe, or drag the .exe (or its folder) onto the CouchDoom window.
+launcher's or port's .exe, or drag the .exe (or its folder) onto the CouchDoom window.
 
 Controls (Xbox names; PlayStation and Switch pads work too)
   A / Start   Play          B   Quit (press twice) or close

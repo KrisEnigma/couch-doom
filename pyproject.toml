@@ -1,7 +1,7 @@
 [project]
 name = "couch-doom"
 dynamic = ["version"]
-description = "Fullscreen gamepad front end for DoomRunner, ZDL and Doom Launcher presets"
+description = "Fullscreen gamepad front end for DoomRunner, ZDL and Doom Launcher presets, or GZDoom's IWADs"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
