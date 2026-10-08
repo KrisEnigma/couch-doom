@@ -11,7 +11,7 @@ from types import ModuleType
 
 from .. import shortcuts
 from ..options import Options, OptionsError
-from . import doomlauncher, doomlauncher667, doomrunner, zdl
+from . import doomlauncher, doomlauncher667, doomrunner, gzdoom, zdl
 
 
 @dataclass(frozen=True)
@@ -24,9 +24,10 @@ class Source:
         return self.module.NAME
 
 
-# Auto-detection order: the first launcher whose settings file exists wins.
+# Auto-detection order: the first launcher whose settings file exists wins. A bare source port comes last:
+# its "settings file" is the port itself, listing the IWADs it would offer.
 SOURCES = [Source("doomrunner", doomrunner), Source("zdl", zdl), Source("doomlauncher", doomlauncher),
-           Source("doomlauncher667", doomlauncher667)]
+           Source("doomlauncher667", doomlauncher667), Source("gzdoom", gzdoom)]
 KEYS = [s.key for s in SOURCES]
 BY_KEY = {s.key: s for s in SOURCES}
 
@@ -41,6 +42,11 @@ class Choice:
     def id(self) -> str:
         return os.path.normcase(os.path.abspath(self.path))
 
+    @property
+    def name(self) -> str:
+        label = getattr(self.source.module, "label", None)
+        return label(self.path) if label else self.source.name
+
 
 def plan(cli_path: str | None, launcher: str | None) -> list[tuple[Source, Path]]:
     """Every (launcher, settings file) worth trying, in order. An explicit path is the only candidate:
@@ -53,6 +59,8 @@ def plan(cli_path: str | None, launcher: str | None) -> list[tuple[Source, Path]
 
 
 def _beside(source: Source, folder: Path) -> Path | None:
+    if hook := getattr(source.module, "beside", None):
+        return hook(folder)
     # Both Doom Launchers use DoomLauncher.sqlite, so the file's contents decide whose it is.
     return next((p for n in source.module.SETTINGS_NAMES if (p := folder / n).is_file() and source.module.matches(p)), None)
 
@@ -72,6 +80,8 @@ def identify(path: Path) -> Choice | None:
     name = path.name.lower()
     for s in SOURCES:
         if _is_exe(s, name):
+            if s.module.matches(path):
+                return Choice(s, path)  # a source port is its own settings file
             # Portable builds keep settings beside the exe; installed ones in the user's app data.
             p = _beside(s, path.parent) or next((c for c in s.module.candidates() if c.is_file() and s.module.matches(c)), None)
             return Choice(s, p) if p else None

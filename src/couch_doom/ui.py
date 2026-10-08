@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ctypes
+import ctypes.util
 import io
 import math
 import os
@@ -172,20 +173,87 @@ def _set_dpi_aware() -> None:
 
 
 def _force_foreground() -> None:
-    """Windows blocks background processes from stealing focus; a synthetic Alt press lifts that lock."""
-    if sys.platform != "win32":
+    """Bring the launcher in front of the terminal (or the game that just exited)."""
+    if sys.platform == "win32":
+        # Windows blocks background processes from stealing focus; a synthetic Alt press lifts that lock.
+        try:
+            hwnd = pygame.display.get_wm_info().get("window")
+            if not hwnd:
+                return
+            user32 = ctypes.windll.user32
+            VK_MENU, KEYUP = 0x12, 0x0002
+            user32.keybd_event(VK_MENU, 0, 0, 0)
+            user32.SetForegroundWindow(hwnd)
+            user32.keybd_event(VK_MENU, 0, KEYUP, 0)
+        except (AttributeError, OSError, pygame.error):
+            pass
         return
+    if sys.platform == "darwin":
+        _force_foreground_macos()
+
+
+def _appkit():
+    """(objc, send, NSApp) through ctypes, or None; pygame exposes no AppKit handles of its own."""
+    lib = ctypes.util.find_library("objc")
+    if not lib:
+        return None
+    objc = ctypes.cdll.LoadLibrary(lib)
+    objc.objc_getClass.restype = ctypes.c_void_p
+    objc.objc_getClass.argtypes = [ctypes.c_char_p]
+    objc.sel_registerName.restype = ctypes.c_void_p
+    objc.sel_registerName.argtypes = [ctypes.c_char_p]
+
+    def send(obj: int, sel: bytes, *args, restype=ctypes.c_void_p, argtypes=()):
+        fn = objc.objc_msgSend
+        fn.restype = restype
+        fn.argtypes = [ctypes.c_void_p, ctypes.c_void_p, *argtypes]
+        return fn(obj, objc.sel_registerName(sel), *args)
+
+    NSApp = send(objc.objc_getClass(b"NSApplication"), b"sharedApplication")
+    return (objc, send, NSApp) if NSApp else None
+
+
+def _macos_window_levels(levels: list[int] | None = None) -> list[int]:
+    """Drop this app's windows to the normal level (the fullscreen one sits above dialogs), or restore `levels`.
+    Returns the levels they had."""
     try:
-        hwnd = pygame.display.get_wm_info().get("window")
-        if not hwnd:
+        kit = _appkit()
+        if not kit:
+            return []
+        _, send, NSApp = kit
+        windows = send(NSApp, b"windows")
+        previous = []
+        for i in range(send(windows, b"count", restype=ctypes.c_ulong)):
+            win = send(windows, b"objectAtIndex:", ctypes.c_ulong(i), argtypes=[ctypes.c_ulong])
+            previous.append(send(win, b"level", restype=ctypes.c_long))
+            level = levels[i] if levels and i < len(levels) else 0
+            send(win, b"setLevel:", ctypes.c_long(level), restype=None, argtypes=[ctypes.c_long])
+        return previous
+    except (AttributeError, OSError, TypeError, ValueError):
+        return []
+
+
+def _force_foreground_macos() -> None:
+    """Activate via AppKit. macOS 14+ may ignore this without a prior user gesture (cooperative activation)."""
+    try:
+        kit = _appkit()
+        if not kit:
             return
-        user32 = ctypes.windll.user32
-        VK_MENU, KEYUP = 0x12, 0x0002
-        user32.keybd_event(VK_MENU, 0, 0, 0)
-        user32.SetForegroundWindow(hwnd)
-        user32.keybd_event(VK_MENU, 0, KEYUP, 0)
-    except (AttributeError, OSError, pygame.error):
+        objc, send, NSApp = kit
+        # Regular policy so a bare python process can become the active app.
+        send(NSApp, b"setActivationPolicy:", ctypes.c_long(0), restype=ctypes.c_long, argtypes=[ctypes.c_long])
+        send(NSApp, b"activateIgnoringOtherApps:", True, restype=None, argtypes=[ctypes.c_bool])
+        # Fallback used by newer AppKit; NSApplicationActivateIgnoringOtherApps = 1 << 1.
+        running = send(objc.objc_getClass(b"NSRunningApplication"), b"currentApplication")
+        if running:
+            send(running, b"activateWithOptions:", ctypes.c_ulong(2), restype=ctypes.c_bool, argtypes=[ctypes.c_ulong])
+    except (AttributeError, OSError, TypeError, ValueError):
         pass
+
+
+# convert() takes the window's format, which is RGBA on macOS: fresh surfaces start at alpha 0 and
+# vanish when blitted. Opaque layers convert to this no-alpha format instead, as they get on Windows/Linux.
+_OPAQUE = pygame.Surface((1, 1), 0, 32, (0xFF0000, 0xFF00, 0xFF, 0))
 
 
 class App:
@@ -214,6 +282,8 @@ class App:
         _set_dpi_aware()
         if not windowed:
             os.environ.setdefault("SDL_VIDEO_WINDOW_POS", "0,0")
+            # Stay on the current Space, like GZDoom's default fullscreen, so launching a game doesn't swipe between Spaces.
+            os.environ.setdefault("SDL_VIDEO_MAC_FULLSCREEN_SPACES", "0")
         pygame.mixer.pre_init(44100, 32, 2, 1024)
         pygame.init()
         pygame.display.set_caption("CouchDoom")
@@ -389,7 +459,28 @@ class App:
     def _browse(self) -> None:
         patterns = ";".join([*(e for s in SOURCES for e in s.module.EXES), *(n for s in SOURCES for n in s.module.SETTINGS_NAMES), "*.zdl"])
         owner = pygame.display.get_wm_info().get("window")
-        path = open_file("Find your Doom launcher", [("Doom launchers and their settings", patterns), ("All files", "*.*")], owner)
+        args = ("Find your Doom launcher", [("Doom launchers and their settings", patterns), ("All files", "*.*")], owner)
+        if sys.platform == "darwin":
+            # The dialog is another process; keep frames (and music) going or macOS shows this window as not responding.
+            self._mouse_on()
+            levels = _macos_window_levels()
+            with ThreadPoolExecutor(1) as pool:
+                job = pool.submit(open_file, *args)
+                last = time.monotonic()
+                while not job.done():
+                    pygame.event.get()
+                    now = time.monotonic()
+                    self.tick(now, now - last)
+                    self._draw(now)
+                    self._flip()
+                    last = now
+                    time.sleep(1 / 60)
+            path = job.result()
+            if any(levels):
+                _macos_window_levels(levels)
+            self._mouse_off()
+        else:
+            path = open_file(*args)
         # The dialog swallowed the presses that closed it; don't let their releases act on the list.
         pygame.event.clear()
         self.input.reset()
@@ -408,7 +499,7 @@ class App:
             if exe:
                 self._notify(f"{exe.name} hasn't saved any settings yet. Set up a game in it first.", ERROR)
             else:
-                self._notify(f"{path.name} isn't a DoomRunner, ZDL or Doom Launcher file", ERROR)
+                self._notify(f"{path.name} isn't a Doom launcher, its settings, or GZDoom/UZDoom/VKDoom", ERROR)
             self._sound("error")
             return
         self._choose(choice, added=True)
@@ -481,14 +572,34 @@ class App:
     # ---------- window / layout ----------
 
     def _open_window(self) -> None:
-        if self.windowed:
-            self.screen = pygame.display.set_mode((1440, 810))
+        size = (1440, 810) if self.windowed else pygame.display.get_desktop_sizes()[0]
+        self.window = None
+        self.dpi = 1.0
+        if sys.platform == "darwin":
+            # display.set_mode renders in points and macOS upscales it on Retina; draw at backing pixels instead.
+            self.window = pygame.Window("CouchDoom", size, allow_high_dpi=True)
+            if not self.windowed:
+                # A borderless window sits under the menu bar and Dock; fullscreen hides them.
+                self.window.set_fullscreen(desktop=True)
+                for _ in range(30):
+                    pygame.event.pump()
+                    time.sleep(0.01)
+            self.screen = self.window.get_surface()
+            self.dpi = self.screen.get_width() / self.window.size[0]
+        elif self.windowed:
+            self.screen = pygame.display.set_mode(size)
         else:
-            self.screen = pygame.display.set_mode(pygame.display.get_desktop_sizes()[0], pygame.NOFRAME)
+            self.screen = pygame.display.set_mode(size, pygame.NOFRAME)
         self._mouse_off()
         pygame.key.start_text_input()
         self._layout()
         _force_foreground()
+
+    def _flip(self) -> None:
+        if self.window is not None:
+            self.window.flip()
+        else:
+            pygame.display.flip()
 
     def _font(self, size: float, bold: bool = False, mono: bool = False) -> pygame.font.Font:
         px = max(9, int(size * self.s))
@@ -555,7 +666,7 @@ class App:
         return bar
 
     def _make_background(self, theme: Theme) -> pygame.Surface:
-        bg = pygame.Surface((self.w, self.h)).convert()
+        bg = pygame.Surface((self.w, self.h)).convert(_OPAQUE)
         top, bottom = theme.bg_top, theme.bg_bottom
         for y in range(self.h):
             t = (y / max(1, self.h - 1)) ** 1.6
@@ -792,11 +903,11 @@ class App:
             return None
         try:
             if art.kind == "encoded":
-                img = pygame.image.load(io.BytesIO(art.data)).convert()
+                img = pygame.image.load(io.BytesIO(art.data)).convert(_OPAQUE)
             else:
                 img = pygame.image.frombytes(art.data, art.size, "P")
                 img.set_palette([tuple(art.palette[i * 3 : i * 3 + 3]) for i in range(256)])
-                img = img.convert()
+                img = img.convert(_OPAQUE)
         except (pygame.error, ValueError):
             return None
         w, h = img.get_size()
@@ -821,7 +932,7 @@ class App:
             scale = min(th * ART_MIN_FILL / (h * aspect), scale * ART_MAX_ZOOM)
         size = (int(w * scale) + 1, int(h * aspect * scale) + 1)
         scaled = pygame.transform.scale(img, size) if w <= 640 else pygame.transform.smoothscale(img, size)
-        out = pygame.Surface((tw, th)).convert()
+        out = pygame.Surface((tw, th)).convert(_OPAQUE)
         out.blit(self._background_for(self.themes[idx]), (0, 0), self.art_rect)  # its own theme, for short art
         crop = scaled.subsurface(pygame.Rect((size[0] - tw) // 2, max(0, (size[1] - th) // 3), tw, min(th, size[1])))
         if crop.get_height() < th:
@@ -1019,6 +1130,11 @@ class App:
 
     def _on_mouse(self, event: pygame.event.Event, now: float) -> None:
         t = event.type
+        if self.dpi != 1.0:
+            if hasattr(event, "pos"):
+                event.pos = (int(event.pos[0] * self.dpi), int(event.pos[1] * self.dpi))
+            if hasattr(event, "rel"):
+                event.rel = (event.rel[0] * self.dpi, event.rel[1] * self.dpi)
         if hasattr(event, "pos"):
             self.mouse_pos = event.pos
         if t == pygame.MOUSEMOTION:
@@ -1197,6 +1313,9 @@ class App:
             return
         self.state.record(preset.name)
         # Spawn before hiding so the engine inherits foreground rights.
+        if self.window is not None:
+            self.window.destroy()
+            self.window = None
         pygame.display.quit()
         self._audio_down()
         code = proc.wait()
@@ -1229,11 +1348,11 @@ class App:
             pygame.draw.polygon(self.screen, self.theme.accent, [(0, 0), (wipe_w + slant, 0), (wipe_w, self.h), (0, self.h)])
             visible = max(0, wipe_w - self.margin)
             self.screen.blit(label, (self.margin, self.h // 2 - label.get_height() // 2), pygame.Rect(0, 0, visible, label.get_height()))
-            pygame.display.flip()
+            self._flip()
             clock.tick(60)
         self.screen.fill(self.theme.accent)
         self.screen.blit(label, (self.margin, self.h // 2 - label.get_height() // 2))
-        pygame.display.flip()
+        self._flip()
 
     # ---------- text helpers ----------
 
@@ -1440,8 +1559,8 @@ class App:
             if self.problem.hint:
                 hint = self.problem.hint.format(pick=pick)
             elif len(paths) > 1:
-                hint = ("Set up a game in DoomRunner, ZDL or Doom Launcher so it saves its settings, then reload. "
-                        f"Using a portable one that isn't listed? Press {pick} to point CouchDoom at it.")
+                hint = ("Set up a game in DoomRunner, ZDL or Doom Launcher so it saves its settings, or install GZDoom "
+                        f"with an IWAD, then reload. Using a portable one that isn't listed? Press {pick} to point CouchDoom at it.")
             else:
                 who = self.problem.launcher or "the launcher"
                 hint = f"If {who} was saving, reload. Otherwise open {who} and check its settings."
@@ -1722,7 +1841,7 @@ class App:
                 name, sub, side, side_color = "Find it myself…", f"Pick a launcher's {PROGRAM} or its settings file", "", MUTED
             else:
                 result = self.launchers.preview(choice)
-                name, sub = choice.source.name, str(choice.path)
+                name, sub = choice.name, str(choice.path)
                 if isinstance(result, OptionsError):
                     side, side_color = "Can't read", ERROR
                 else:
@@ -1812,7 +1931,7 @@ class App:
                 font = f
                 break
         cw, ch = font.size("M")[0], font.get_linesize()
-        surf = pygame.Surface((cw * COLS, ch * ROWS)).convert()
+        surf = pygame.Surface((cw * COLS, ch * ROWS)).convert(_OPAQUE)
         glyphs: dict[tuple, pygame.Surface] = {}
         # Block and shade characters are ANSI art's pixels; as font glyphs they leave gaps between rows.
         blocks = {"█": (0, 0, 1, 1), "▀": (0, 0, 1, 0.5), "▄": (0, 0.5, 1, 0.5), "▌": (0, 0, 0.5, 1), "▐": (0.5, 0, 0.5, 1)}
@@ -2048,7 +2167,7 @@ class App:
 
                 self.tick(now, dt)
                 self._draw(now)
-                pygame.display.flip()
+                self._flip()
                 clock.tick(60)
         finally:
             self.art_pool.shutdown(wait=False, cancel_futures=True)

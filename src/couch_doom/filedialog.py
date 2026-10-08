@@ -1,10 +1,11 @@
-"""The system "Open" dialog: Windows' own through ctypes, zenity or kdialog elsewhere, so no GUI toolkit is needed."""
+"""The system "Open" dialog: Windows' own through ctypes, AppleScript on macOS, zenity or kdialog elsewhere, so no GUI toolkit is needed."""
 from __future__ import annotations
 
 import ctypes
 import os
 import shutil
 import subprocess
+import sys
 from ctypes import wintypes
 from pathlib import Path
 
@@ -31,11 +32,13 @@ def _unix_tool() -> str | None:
 
 
 def available() -> bool:
-    return os.name == "nt" or _unix_tool() is not None
+    return os.name == "nt" or sys.platform == "darwin" or _unix_tool() is not None
 
 
 def open_file(title: str, filters: list[tuple[str, str]], owner: int | None = None) -> Path | None:
     """filters: (label, "*.exe;options.json") pairs. Returns None if cancelled or no dialog is available."""
+    if sys.platform == "darwin":
+        return _open_macos(title)
     if os.name != "nt":
         return _open_unix(title, filters)
     buf = ctypes.create_unicode_buffer(1024)
@@ -52,6 +55,21 @@ def open_file(title: str, filters: list[tuple[str, str]], owner: int | None = No
     if not ctypes.windll.comdlg32.GetOpenFileNameW(ctypes.byref(ofn)):
         return None
     return Path(buf.value) if buf.value else None
+
+
+def _open_macos(title: str) -> Path | None:
+    """AppleScript's choose file: built in, needs no permissions, and treats .app bundles as files. Filters are skipped."""
+    start = Path("/Applications") if Path("/Applications").is_dir() else Path.home()
+    script = ["on run argv",
+              "return POSIX path of (choose file with prompt (item 1 of argv) default location (POSIX file (item 2 of argv)))",
+              "end run"]
+    argv = ["osascript", *(a for line in script for a in ("-e", line)), title, str(start)]
+    try:
+        out = subprocess.run(argv, capture_output=True, text=True, check=False)
+    except OSError:
+        return None
+    path = out.stdout.strip().rstrip("/")
+    return Path(path) if out.returncode == 0 and path else None
 
 
 def _open_unix(title: str, filters: list[tuple[str, str]]) -> Path | None:

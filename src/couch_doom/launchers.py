@@ -54,7 +54,7 @@ class Launchers:
         return self.current is None and len(self.choices) > 1
 
     def pick_error(self) -> OptionsError:
-        names = ", ".join(dict.fromkeys(c.source.name for c in self.choices))
+        names = ", ".join(dict.fromkeys(c.name for c in self.choices))
         return OptionsError("Pick a launcher", f"CouchDoom found more than one launcher's settings ({names}):",
                             [c.path for c in self.choices], hint="Press A or Enter to choose. You can switch any time with {pick}.")
 

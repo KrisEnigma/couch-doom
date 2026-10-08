@@ -36,7 +36,8 @@ def _dry_run(opts, name: str | None) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="couch-doom", description=__doc__)
-    ap.add_argument("--options", help="Launcher settings file: DoomRunner options.json, ZDL qZDL.ini or .zdl, DoomLauncher.sqlite")
+    ap.add_argument("--options", help="Launcher settings file: DoomRunner options.json, ZDL qZDL.ini or .zdl, DoomLauncher.sqlite, "
+                                       "or a GZDoom/UZDoom/VKDoom program")
     ap.add_argument("--launcher", choices=KEYS, help="Only consider this launcher (default: the saved pick, or ask if several are found)")
     ap.add_argument("--windowed", action="store_true", help="Run in a window instead of fullscreen")
     ap.add_argument("--dry-run", action="store_true", help="Print launch commands and exit")

@@ -1,5 +1,5 @@
-"""End-to-end smoke test, run in CI on Windows and Linux: fake DoomRunner and qZDL setups in each OS's real
-settings folders, then discovery, command lines and one rendered UI frame.
+"""End-to-end smoke test, run in CI on Windows and Linux: fake DoomRunner, qZDL and bare UZDoom setups in each
+OS's real settings folders, then discovery, command lines and one rendered UI frame.
 
     python tests/smoke.py
 """
@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import json
 import os
+import struct
 import sys
 import tempfile
 import time
+import zipfile
 from pathlib import Path
 
 root = Path(tempfile.mkdtemp(prefix="couchdoom-smoke-"))
@@ -64,9 +66,40 @@ iwad=Freedoom
 file0={games / "mod.pk3"}
 """, encoding="utf-8")
 
+
+def wad(path: Path, lumps: list[str], magic: bytes = b"IWAD", data: dict[str, bytes] | None = None) -> None:
+    body, entries = b"", b""
+    for name in lumps:
+        blob = (data or {}).get(name, b"")
+        entries += struct.pack("<ii8s", 12 + len(body), len(blob), name.encode())
+        body += blob
+    path.write_bytes(magic + struct.pack("<ii", len(lumps), 12 + len(body)) + body + entries)
+
+
+# A bare UZDoom: its iwadinfo names the IWADs, its ini says where to look.
+port, wads = root / "port", root / "wads"
+port.mkdir()
+wads.mkdir()
+(port / f"uzdoom{exe}").write_bytes(b"")
+with zipfile.ZipFile(port / "game_support.pk3", "w") as zf:
+    zf.writestr("iwadinfo.txt", """
+IWad { Name = "Hexen: Deathkings of the Dark Citadel" Required = "Hexen: Beyond Heretic" MustContain = "TITLE", "MAP60" }
+IWad { Name = "Freedoom: Phase 2" MustContain = "MAP01", "FREEDOOM" }  // comment
+Names { "freedoom2.wad" "hexdd.wad" "doom.wad" }
+Order { "Freedoom: Phase 2" "Hexen: Deathkings of the Dark Citadel" }
+""")
+wad(port / "freedoom2.wad", ["MAP01", "FREEDOOM"])
+wad(wads / "hexdd.wad", ["TITLE", "MAP60"])  # needs Hexen, which isn't there: the port hides it
+(wads / "doom.wad").write_bytes(b"not a wad")
+wad(wads / "own.iwad", ["IWADINFO"], data={"IWADINFO": b'IWad { Name = "Own Game" MustContain = "MAP01" }'})
+ini_dir = port if os.name == "nt" else root / "config" / "uzdoom"
+ini_dir.mkdir(parents=True, exist_ok=True)
+(ini_dir / ("uzdoom_portable.ini" if os.name == "nt" else "uzdoom.ini")).write_text(
+    f"[IWADSearch.Directories]\nPath=$PROGDIR\nPath={wads}\nPath=$COUCHDOOM_UNSET\n[GlobalSettings]\ni_searchdistributors=false\n")
+
 import pygame  # noqa: E402
 from couch_doom.launch import build_command  # noqa: E402
-from couch_doom.sources import discover, load_choice  # noqa: E402
+from couch_doom.sources import discover, identify, load_choice  # noqa: E402
 from couch_doom.state import State  # noqa: E402
 from couch_doom.ui import App  # noqa: E402
 
@@ -82,6 +115,13 @@ assert argv["UZDoom"] == ["-iwad", f"{g}{os.sep}freedoom2.wad", "+fov", "110", "
 
 zdl = load_choice(found["zdl"])
 assert build_command(zdl, zdl.presets[0]).argv[1:] == ["-iwad", f"{g}{os.sep}freedoom2.wad", "-file", f"{g}{os.sep}mod.pk3"]
+
+uz_choice = identify(port / f"uzdoom{exe}")
+assert uz_choice and uz_choice.source.key == "gzdoom" and uz_choice.name == "UZDoom", uz_choice
+uz = load_choice(uz_choice)
+assert [(p.name, p.iwad.name) for p in uz.presets] == [("Freedoom: Phase 2", "freedoom2.wad"), ("Own Game", "own.iwad")], uz.presets
+assert build_command(uz, uz.presets[0]).argv[1:] == ["-iwad", str(port / "freedoom2.wad")]
+found["gzdoom"] = uz_choice
 
 app = App(dr, State(root / "state.json"), windowed=True)
 now = time.monotonic()
