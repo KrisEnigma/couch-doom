@@ -62,6 +62,11 @@ jobs:
           echo "Newest glibc symbol the build needs: $floor"
           echo "glibc floor: $floor" >> "$GITHUB_STEP_SUMMARY"
           if [ "$(printf '%s\n2.28\n' "$floor" | sort -V | tail -1)" != "2.28" ]; then
+            echo "Files needing more than 2.28:" >&2
+            find dist -type f \( -name '*.so*' -o -name CouchDoom \) | while read -r f; do
+              v=$(objdump -T "$f" 2>/dev/null | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -1)
+              [ -n "$v" ] && [ "$(printf '%s\n2.28\n' "$v" | sort -V | tail -1)" != "2.28" ] && echo "  $v  $f" >&2
+            done
             echo "Build needs glibc $floor, newer than the 2.28 we promise" >&2
             exit 1
           fi
