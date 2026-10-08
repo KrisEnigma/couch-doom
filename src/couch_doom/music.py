@@ -28,10 +28,15 @@ TITLEMUSIC_RE = re.compile(rb'titlemusic\s*=\s*"([^"]+)"', re.IGNORECASE)
 # Per-game defaults; the IWAD itself tells us which one applies.
 DEFAULT_TITLE_LUMPS = ("D_DM2TTL", "D_INTRO", "MUS_TITL", "HEXEN", "D_LOGO")
 MUSIC_FOLDERS = ("music/", "")
+DEH_TEXT_RE = re.compile(r"^Text\s+(\d+)\s+(\d+)[^\n]*\n", re.IGNORECASE | re.MULTILINE)
+BEX_MUSIC_RE = re.compile(r"^\[MUSIC\][^\n]*\n(.*?)(?=^\[|\Z)", re.IGNORECASE | re.MULTILINE | re.DOTALL)
 SF_EXTS = (".sf2", ".sf3")
 
 RATE = 44100
-MAX_SECONDS = 150  # rendered PCM is float32 stereo: ~0.35 MB per second
+# Rendering is synchronous before playback (~16 ms per second of dense MIDI) and PCM is float32 stereo at
+# ~0.35 MB per second, so the cap sets both the wait before a track starts and how many fit in the cache.
+MAX_SECONDS = 30
+CUT_FADE_SECONDS = 2.5  # a track the cap cuts off fades out instead of stopping mid-phrase
 TAIL_SECONDS = 2.0
 VOLUME = 0.55
 PEAK_TARGET = 0.9
@@ -65,16 +70,46 @@ def _classify(data: bytes) -> str | None:
     return None
 
 
+def _music_renames(arcs: Archives) -> dict[str, str]:
+    """DeHackEd music renames (lump names without D_): classic `Text` string swaps, which only count when
+    both sides fit a 6-character music name, and BEX [MUSIC] entries. Later-loaded files win."""
+    out: dict[str, str] = {}
+    for a in reversed(arcs.items):
+        data = a.lump("DEHACKED")
+        if not data:
+            continue
+        text = data.decode("latin-1").replace("\r", "")
+        for m in DEH_TEXT_RE.finditer(text):
+            old_len, new_len = int(m[1]), int(m[2])
+            body = text[m.end():m.end() + old_len + new_len]
+            old, new = body[:old_len], body[old_len:]
+            if old_len <= 6 and new_len <= 6 and old.isalnum() and new.isalnum():
+                out[old.upper()] = new.upper()
+        if bex := BEX_MUSIC_RE.search(text):
+            for line in bex[1].splitlines():
+                old, eq, new = line.partition("=")
+                if eq and old.strip() and new.strip():
+                    out[old.strip().upper()] = new.strip().upper()
+    return out
+
+
 def find_title_music(iwad: Path | None, files: list[Path]) -> Track | None:
     with Archives(iwad, files) as arcs:
         if not arcs.items:
             return None
+        renames = _music_renames(arcs)
+
+        def renamed(lump: str) -> str:
+            short = lump[2:].upper() if lump.upper().startswith("D_") else None
+            return f"D_{renames[short]}" if short in renames else lump
+
         names = []
         if custom := arcs.mapinfo_value(TITLEMUSIC_RE):
             names.append(custom)
+        defaults = [renamed(n) for n in DEFAULT_TITLE_LUMPS]
         base = arcs.items[-1] if iwad and arcs.items[-1].path == iwad else None
-        default = next((n for n in DEFAULT_TITLE_LUMPS if base and base.lump(n)), None)
-        names += [default] if default else list(DEFAULT_TITLE_LUMPS)
+        default = next((n for n in defaults if base and base.lump(n)), None)
+        names += [default] if default else defaults
         for name in names:
             for a in arcs.items:
                 data = a.lump(name, MUSIC_FOLDERS)
@@ -238,6 +273,7 @@ class MidiRenderer:
         out = bytearray()
         chunk = RATE // 2
         tail = 0.0
+        cut = True
         while len(out) < MAX_SECONDS * RATE * 8:
             if cancel.is_set():
                 return None
@@ -245,8 +281,15 @@ class MidiRenderer:
             if seq.is_empty():
                 tail += chunk / RATE
                 if tail >= TAIL_SECONDS:
+                    cut = False
                     break
         samples = array("f", out)
+        if cut:
+            fade = min(len(samples), int(CUT_FADE_SECONDS * RATE) * 2)
+            start = len(samples) - fade
+            for i in range(fade):
+                samples[start + i] *= 1.0 - i / fade
+            out = samples.tobytes()
         peak = max(max(samples, default=0.0), -min(samples, default=0.0))
         return bytes(out), peak
 

@@ -23,7 +23,7 @@ from . import filedialog
 from .filedialog import open_file
 from .gamepad import Action, Input
 from .glyphs import BUTTON_NAMES, Glyphs
-from .launch import LaunchCommand, build_command, cmdline, load_order, split_args
+from .launch import LaunchCommand, build_command, load_order, split_args
 from .launchers import Launchers
 from .music import DWELL_SECONDS, MusicPlayer, find_soundfont
 from .options import Options, OptionsError, Preset, unpack
@@ -58,8 +58,8 @@ ART_CACHE_SIZE = 24
 ART_MIN_FILL = 0.62  # of the art panel's height
 ART_MAX_ZOOM = 1.25
 FAVORITES = "Favorites"
-INFO_TABS = ("Readme", "Command", "ENDOOM")
-ENDOOM_TAB = 2
+INFO_TABS = ("Readme", "ENDOOM")
+ENDOOM_TAB = 1
 LOGO_MAX_H = 168  # design px; menu logos are compact, so they need more height than a text title to read as big
 INFO_SLIDE_SECONDS = 0.22
 INFO_STICK_LINES_PER_SEC = 48
@@ -1042,8 +1042,7 @@ class App:
                 self.mode = "info"
                 self.info_scroll = self.info_view = 0.0
                 self.info_scrolls = [0.0] * len(INFO_TABS)
-                if self.info_tab not in self._info_tabs():
-                    self.info_tab = 0
+                self.info_tab = 0
                 self.info_opened = now
                 self._sound("open")
         elif action == Action.SEARCH:
@@ -1436,26 +1435,6 @@ class App:
         if len(lines) > max_lines:
             lines = lines[:max_lines]
             lines[-1] = App._fit(lines[-1] + " …", font, max_w)
-        return lines
-
-    @staticmethod
-    def _wrap_tokens(argv: list[str], font: pygame.font.Font, max_w: int) -> list[str]:
-        """Wrap a command line between arguments; split an argument only if it alone is too wide."""
-        per_line = max(10, max_w // max(1, font.size("M")[0]))
-        lines, line = [], ""
-        for token in cmdline(argv).split(" ") if argv else []:
-            trial = f"{line} {token}" if line else token
-            if len(trial) <= per_line:
-                line = trial
-                continue
-            if line:
-                lines.append(line)
-            while len(token) > per_line:
-                lines.append(token[:per_line])
-                token = token[per_line:]
-            line = token
-        if line:
-            lines.append(line)
         return lines
 
     def _wrap_items(self, items: list[str], font: pygame.font.Font, max_w: int, max_lines: int) -> list[str]:
@@ -1909,7 +1888,7 @@ class App:
 
     def _info_tabs(self) -> list[int]:
         """The ENDOOM tab only exists for presets whose own files ship one."""
-        return [0, 1, ENDOOM_TAB] if self.endooms.get(self.current) else [0, 1]
+        return [0, ENDOOM_TAB] if self.endooms.get(self.current) else [0]
 
     def _endoom_surface(self, endoom: Endoom, max_w: int, max_h: int) -> pygame.Surface:
         key = (id(endoom), max_w, max_h)
@@ -1988,14 +1967,8 @@ class App:
         if self.info_tab == 0:
             readme = self.readmes.get(self.current)
             lines = _wrap_mono(readme.text, per_line) if readme else []
-        elif self.info_tab == ENDOOM_TAB:
-            lines = []  # drawn as a picture, never scrolls
         else:
-            cmd = self.commands[self.current]
-            lines = self._wrap_tokens(cmd.argv, mono, body.width)
-            lines += ["", *_wrap_mono(f"Runs in {cmd.cwd}", per_line)]
-            if cmd.issues:
-                lines += ["", "Problems:", *(f"  {i}" for i in cmd.issues)]
+            lines = []  # ENDOOM is drawn as a picture and never scrolls
         self.info_lines = (key, lines)
         return lines
 
@@ -2025,11 +1998,13 @@ class App:
             self.hits.append(Hit(pygame.Rect(rect.x + x0 - int(10 * s), rect.y + tab_cy - band, width + int(20 * s), 2 * band), click))
 
         x = pad
-        sheet.blit(left, (x, tab_cy - left.get_height() // 2))
-        tab_hit(x, left.get_width(), self._act(Action.PREV_SECTION))
-        x += left.get_width() + int(22 * s)
+        tabs = self._info_tabs()
+        if len(tabs) > 1:
+            sheet.blit(left, (x, tab_cy - left.get_height() // 2))
+            tab_hit(x, left.get_width(), self._act(Action.PREV_SECTION))
+            x += left.get_width() + int(22 * s)
         tab_font = self._font(20, bold=True)
-        for i in self._info_tabs():
+        for i in tabs:
             name = INFO_TABS[i]
             active = i == self.info_tab
             label = self._tracked(name, 20, TEXT if active else DIM, tracking=0.22)
@@ -2039,23 +2014,11 @@ class App:
                 pygame.draw.rect(sheet, self.theme.accent, (x, tab_cy + int(22 * s), label.get_width(), max(2, int(3 * s))))
             x += label.get_width() + int(34 * s)
         x -= int(12 * s)
-        sheet.blit(right, (x, tab_cy - right.get_height() // 2))
-        tab_hit(x, right.get_width(), self._act(Action.NEXT_SECTION))
-        x += right.get_width() + int(30 * s)
+        if len(tabs) > 1:
+            sheet.blit(right, (x, tab_cy - right.get_height() // 2))
+            tab_hit(x, right.get_width(), self._act(Action.NEXT_SECTION))
 
-        readme = self.readmes.get(self.current)
         endoom = self.endooms.get(self.current)
-        if self.info_tab == 0:
-            source = readme.source if readme else ""
-        elif self.info_tab == ENDOOM_TAB:
-            source = endoom.source if endoom else ""
-        else:
-            engine = self.opts.engine_for(self.opts.presets[self.current])
-            source = engine.name if engine else ""
-        if source:
-            src_font = self._font(19)
-            src = self._text(self._fit(source, src_font, rect.width - pad - x), src_font, DIM)
-            sheet.blit(src, (rect.width - pad - src.get_width(), self._text_top(src_font, tab_cy)))
         # Opaque: draw.line on an alpha surface replaces pixels instead of blending, which would punch a see-through stripe.
         pygame.draw.line(sheet, (44, 37, 34), (pad, int(92 * s)), (rect.width - pad, int(92 * s)), max(1, int(s)))
 

@@ -9,6 +9,20 @@ from pathlib import Path
 ZIP_EXTS = {".pk3", ".ipk3", ".zip", ".pke"}
 WAD_EXTS = {".wad", ".iwad"}
 _MAPINFO = ("zmapinfo", "mapinfo")
+_INCLUDE_RE = re.compile(rb'^\s*include\s+"?([^"\s]+)"?', re.IGNORECASE | re.MULTILINE)
+
+
+def _search_mapinfo(read, data: bytes, pattern: re.Pattern, seen: set[str]) -> str | None:
+    """Search one MAPINFO and the files it includes; big TCs keep GameInfo in an included file."""
+    if m := pattern.search(data):
+        return m.group(1).decode("ascii", "replace")
+    for inc in _INCLUDE_RE.findall(data):
+        name = inc.decode("ascii", "replace").lower()
+        if name not in seen and len(seen) < 64:
+            seen.add(name)
+            if (sub := read(name)) and (v := _search_mapinfo(read, sub, pattern, seen)):
+                return v
+    return None
 
 
 class Wad:
@@ -36,8 +50,8 @@ class Wad:
     def mapinfo_value(self, pattern: re.Pattern) -> str | None:
         for name in _MAPINFO:
             data = self.lump(name)
-            if data and (m := pattern.search(data)):
-                return m.group(1).decode("ascii", "replace")
+            if data and (v := _search_mapinfo(self.lump, data, pattern, set())):
+                return v
         return None
 
     def close(self) -> None:
@@ -68,9 +82,13 @@ class Zip:
     def mapinfo_value(self, pattern: re.Pattern) -> str | None:
         for n, real in self.names.items():
             if "/" not in n and Path(n).stem in _MAPINFO:
-                if m := pattern.search(self.read(real)):
-                    return m.group(1).decode("ascii", "replace")
+                if v := _search_mapinfo(self._path, self.read(real), pattern, set()):
+                    return v
         return None
+
+    def _path(self, name: str) -> bytes | None:
+        real = self.names.get(name.lower().replace("\\", "/"))
+        return self.read(real) if real else None
 
     def close(self) -> None:
         self.z.close()

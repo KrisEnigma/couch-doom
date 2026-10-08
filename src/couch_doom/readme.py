@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .archive import Zip, open_archive
+from .known import KNOWN
 from .launch import _expand_mappack
 from .options import Preset
 
@@ -141,4 +142,17 @@ def find_readme(preset: Preset) -> Readme | None:
             name, raw = found
             text = _decode(raw)
             return Readme(f"{path.name} › {name}", text, parse_fields(text))
-    return None
+    return _known_readme(preset, [*maps, *preset.mods])
+
+
+def _known_readme(preset: Preset, files: list[Path]) -> Readme | None:
+    """The official IWADs and add-ons ship without readmes. The IWAD only speaks for a preset that loads nothing else,
+    so a mod on top of Doom II never gets Doom II's blurb."""
+    candidates = files if files else [preset.iwad] if preset.iwad else []
+    info = next((k for f in candidates if (k := KNOWN.get(f.name.lower()))), None)
+    if info is None:
+        return None
+    rows = [("Title", info.title), ("Author", info.author), ("Release date", info.year)]
+    head = "\n".join(f"{k:<13}: {v}" for k, v in rows if v)
+    fields = {"title": info.title, "author": info.author, "date": info.year, "description": info.description}
+    return Readme(info.source, f"{head}\n\n{info.description}", {k: v for k, v in fields.items() if v})

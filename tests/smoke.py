@@ -100,6 +100,8 @@ ini_dir.mkdir(parents=True, exist_ok=True)
 
 import pygame  # noqa: E402
 from couch_doom.launch import build_command  # noqa: E402
+from couch_doom.options import Preset  # noqa: E402
+from couch_doom.readme import find_readme  # noqa: E402
 from couch_doom.sources import discover, identify, load_choice  # noqa: E402
 from couch_doom.state import State  # noqa: E402
 from couch_doom.ui import App  # noqa: E402
@@ -147,6 +149,10 @@ with sqlite3.connect(dl_db) as con:
 con.close()
 dl = load_choice(identify(dl_db))
 assert [(p.section, p.name) for p in dl.presets] == [("Megawads", "Tagged"), ("Untagged", "Played")], dl.presets
+
+bare = Preset(name="Doom II", section="", engine_id="", iwad=Path(g) / "DOOM2.WAD", mods=[])
+assert (r := find_readme(bare)) and r.author == "id Software" and r.year == "1994", r
+assert find_readme(Preset(name="Mod", section="", engine_id="", iwad=Path(g) / "DOOM2.WAD", mods=[Path(g) / "mod.pk3"])) is None
 
 app = App(dr, State(root / "state.json"), windowed=True)
 now = time.monotonic()

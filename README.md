@@ -103,7 +103,7 @@ Tested on Arch Linux with DSDA-Doom, DoomRunner and qZDL, and on an M4 MacBook P
 | --- | --- | --- |
 | D-pad / left stick | Arrows | Move (hold to repeat) |
 | A / Start | Enter | Play |
-| X | Tab | Info sheet: Readme, Command and ENDOOM tabs |
+| X | Tab | Info sheet: the readme, plus the ENDOOM screen when the WAD has one |
 | Y | `/` or just type | Search |
 | R3 (click right stick) | F3 | Add to or remove from Favorites |
 | Back / View | F2 | Title music on/off |
