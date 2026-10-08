@@ -81,7 +81,22 @@ jobs:
           path: assets
           merge-multiple: true
 
+      - name: Write this release's notes
+        run: |
+          # Download instructions, then only this tag's section of CHANGELOG.md (not the whole history).
+          version="${GITHUB_REF_NAME#v}"
+          section=$(awk -v h="**New in $version**" '/^\*\*New in /{p=($0==h)} p' CHANGELOG.md)
+          if [ -z "$section" ]; then
+            echo "CHANGELOG.md has no '**New in $version**' section" >&2
+            exit 1
+          fi
+          {
+            cat packaging/release-header.md
+            printf '\n%s\n\n' "$section"
+            echo 'See `How to use.txt` in the download for controls and optional MIDI music setup.'
+          } > notes.md
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" assets/* --title "CouchDoom $GITHUB_REF_NAME" --notes-file packaging/release-notes.md
+        run: gh release create "$GITHUB_REF_NAME" assets/* --title "CouchDoom $GITHUB_REF_NAME" --notes-file notes.md
