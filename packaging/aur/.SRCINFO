@@ -17,6 +17,6 @@ pkgbase = couch-doom
 	optdepends = zenity: "Find it myself" file picker
 	optdepends = kdialog: "Find it myself" file picker on KDE
 	source = couch-doom-0.6.0.tar.gz::https://github.com/KrisEnigma/couch-doom/archive/refs/tags/v0.6.0.tar.gz
-	sha256sums = 6186d9e3dad87e34187db4c6cb9693ae29575a220e2340be943f2e5df063bc40
+	sha256sums = 145b1635dc3f62102c9f37315c953d0631ec99a580ec0f175d9a54225a076864
 
 pkgname = couch-doom
