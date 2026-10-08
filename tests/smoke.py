@@ -207,4 +207,10 @@ assert not clog.needs_extract_retry(["/o/nugget-doom"], {}, fuse, 1, 0.2)  # not
 assert not clog.needs_extract_retry(["/o/n.AppImage"], {}, "some other error", 1, 0.2)
 assert not clog.needs_extract_retry(["/o/n.AppImage"], {"APPIMAGE_EXTRACT_AND_RUN": "1"}, fuse, 1, 0.2)  # no retry loop
 assert not clog.needs_extract_retry(["/o/n.AppImage"], {}, fuse, 0, 0.2)
+from couch_doom.launch import engine_environ  # noqa: E402
+
+pyi = {"PATH": "/usr/bin", "LD_LIBRARY_PATH": "/app/_internal:/mine", "LD_LIBRARY_PATH_ORIG": "/mine", "LANG": "C"}
+assert engine_environ(pyi, True) == {"PATH": "/usr/bin", "LD_LIBRARY_PATH": "/mine", "LANG": "C"}
+assert "LD_LIBRARY_PATH" not in engine_environ({"LD_LIBRARY_PATH": "/app/_internal"}, True)  # there was none originally
+assert engine_environ(pyi, False) == pyi  # running from source: untouched
 print("smoke ok:", ", ".join(sorted(found)), "| UI", app.screen.get_size())

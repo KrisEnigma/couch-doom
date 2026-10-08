@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -162,10 +163,30 @@ def _present(preset: Preset, path: Path) -> bool:
     return any(dest == path and archive.exists() for archive, _, dest in preset.unpack)
 
 
+_LIB_PATHS = ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "LIBPATH")
+
+
+def engine_environ(environ, frozen: bool | None = None) -> dict[str, str]:
+    """The environment games should start with.
+
+    A PyInstaller build puts its own _internal folder first on the library path so CouchDoom finds its bundled libraries.
+    Left in place, every game inherits it and loads those (older) copies of libstdc++ and friends instead of the
+    system's, and anything built against a newer one dies at startup ("GLIBCXX_3.4.32 not found"). PyInstaller keeps
+    the original value as <NAME>_ORIG, so the game gets exactly what CouchDoom itself was started with.
+    """
+    env = dict(environ)
+    if getattr(sys, "frozen", False) if frozen is None else frozen:
+        for name in _LIB_PATHS:
+            if f"{name}_ORIG" in env:
+                env[name] = env.pop(f"{name}_ORIG")
+            else:
+                env.pop(name, None)
+    return env
+
 def build_command(opts: Options, preset: Preset) -> LaunchCommand:
     issues: list[str] = list(preset.issues)
     engine = opts.engine_for(preset)
-    env = {**os.environ, **opts.global_env, **preset.env_vars}
+    env = {**engine_environ(os.environ), **opts.global_env, **preset.env_vars}
 
     if engine is None:
         return LaunchCommand([], None, env, [f"Engine '{preset.engine_id}' not configured"])

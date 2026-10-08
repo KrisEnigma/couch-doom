@@ -2,6 +2,9 @@
 
 Each release's notes on GitHub are its own section below, behind the download instructions in `packaging/release-header.md`. Keep the `**New in X.Y.Z**` heading format: the release workflow and the in-app update notice both look for it.
 
+**New in 0.7.2**
+- Linux: games no longer fail to start with errors like "GLIBCXX not found". CouchDoom's own libraries were leaking into the games it launched; they now start with a clean environment.
+
 **New in 0.7.1**
 - A troubleshooting log: every game launch is recorded in `couch-doom.log` with its command line, exit code and the engine's last output, so a port that won't start can be diagnosed. It is capped at about 512 KB.
 - If a game closes right away, CouchDoom now says so and shows the engine's own last message, instead of just returning to the list.

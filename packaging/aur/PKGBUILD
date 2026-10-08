@@ -1,6 +1,6 @@
 # Maintainer: KrisEnigma <krisescobarm at gmail dot com>
 pkgname=couch-doom
-pkgver=0.7.1
+pkgver=0.7.2
 pkgrel=1
 pkgdesc="Fullscreen gamepad front end for DoomRunner, ZDL and Doom Launcher presets, or GZDoom's IWADs"
 arch=('any')
