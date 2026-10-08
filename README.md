@@ -1,5 +1,7 @@
 # CouchDoom
 
+Made by [KrisEnigma](https://github.com/KrisEnigma).
+
 A fullscreen, gamepad-friendly front end for the Doom setups you already have. CouchDoom reads the presets saved by your launcher, or the IWADs your source port can find, and shows them big-screen style with each WAD's own title art, music and readme. Pick one and it starts the engine with the same files and arguments your launcher would use.
 
 It only reads other programs' files and never changes them, so keep setting games up in your launcher.
@@ -162,7 +164,7 @@ On Windows from source, `run.bat` passes these through. To run without a console
 
 ## Credits and license
 
-CouchDoom is MIT licensed; see [LICENSE](LICENSE).
+Made and maintained by [KrisEnigma](https://github.com/KrisEnigma). CouchDoom is MIT licensed; see [LICENSE](LICENSE).
 
 - **Fonts:** [Barlow](https://github.com/jpt/barlow) and [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono), both SIL OFL.
 - **Button prompts:** [Kenney's Input Prompts](https://kenney.nl/assets/input-prompts), CC0. They match the pad you last used: Xbox, PlayStation or Switch.

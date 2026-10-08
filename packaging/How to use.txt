@@ -1,5 +1,5 @@
 CouchDoom - play your Doom launcher's setups from the couch with a gamepad
-https://github.com/KrisEnigma/couch-doom
+Made by KrisEnigma - https://github.com/KrisEnigma/couch-doom
 
 1. Set up your games in DoomRunner, ZDL or Doom Launcher first. No launcher? GZDoom,
    UZDoom or VKDoom on its own works too: CouchDoom lists the IWADs it can find.
