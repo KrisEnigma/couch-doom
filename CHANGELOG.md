@@ -4,7 +4,7 @@ Each release's notes on GitHub are its own section below, behind the download in
 
 **New in 0.7.4**
 
-- Fixed a crash when coming back from long play sessions with a gamepad. The taskbar also keeps CouchDoom's icon after a game.
+- Windows: fixed a crash when coming back from long play sessions with a gamepad, and the taskbar keeps CouchDoom's icon after a game.
 - MIDI title music plays at an even volume, presets that share a track keep it playing, and Strife plays its real title song.
 - Far more mods show their own title screen, logo and music, including Abysm, Elementalism, Doom Infinite, Bloom, Square, Brutal Wolfenstein and Simon's Destiny.
 - Mods without title art use their loading screen as the background. Deathkings and Strife: Veteran Edition show their base game's title screen.
