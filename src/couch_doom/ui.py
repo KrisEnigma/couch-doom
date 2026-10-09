@@ -1197,7 +1197,7 @@ class App:
                 self._set_filter("")
                 self._sound("close")
             else:
-                self._arm_quit(now, self._button_name("B") if self.input.pad_count else "Esc")
+                self._arm_quit(now, self._button_name("B") if self.input.pad_mode else "Esc")
 
     def _button_name(self, button: str) -> str:
         return BUTTON_NAMES[self.input.family].get(button, button)
@@ -1680,7 +1680,7 @@ class App:
     def _draw_notice(self) -> None:
         """Stands in for list and details when there's nothing to pick: say what's wrong and how to fix it."""
         s, m = self.s, self.margin
-        pick = "L3" if self.input.pad_count else "F4"
+        pick = "L3" if self.input.pad_mode else "F4"
         if self.problem:
             title, detail, paths = self.problem.title, self.problem.detail, self.problem.tried
             if self.problem.hint:
@@ -1868,7 +1868,7 @@ class App:
 
     def _footer_hints(self) -> list[tuple[tuple[str, ...], str, tuple[Action, ...]]]:
         """(glyphs, label, actions): one action for the whole hint, or one per glyph (LB = previous, RB = next)."""
-        pad = self.input.pad_count > 0
+        pad = self.input.pad_mode
         A = Action
         launcher = [(("L3",) if pad else ("KEY:F4",), "Launcher", (A.LAUNCHER,))] if self.launchers else []
         if self.mode == "launcher":
@@ -2195,7 +2195,7 @@ class App:
         sheet = draw.rounded_rect(rect.width, rect.height, 18 * s, (*PANEL, 250), (78, 62, 55), 1.5 * s).copy()
         pad = int(36 * s)
         tab_cy = int(48 * s)
-        pad_mode = self.input.pad_count > 0
+        pad_mode = self.input.pad_mode
         left = self.glyphs.get("LB" if pad_mode else "KEY:LEFT")
         right = self.glyphs.get("RB" if pad_mode else "KEY:RIGHT")
         self.hits.append(Hit(shade.get_rect(), self._close_overlay))  # click outside the sheet closes it

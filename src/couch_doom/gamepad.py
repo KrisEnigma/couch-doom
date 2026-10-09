@@ -92,6 +92,20 @@ def _family(name: str) -> str:
     return "xbox"
 
 
+def _deliberate_pad_input(event: pygame.event.Event) -> bool:
+    """A press or a real push, not stick drift or a trigger resting slightly off zero."""
+    t = event.type
+    if t in (pygame.CONTROLLERBUTTONDOWN, pygame.JOYBUTTONDOWN):
+        return True
+    if t == pygame.JOYHATMOTION:
+        return event.value != (0, 0)
+    if t == pygame.CONTROLLERAXISMOTION:
+        return abs(event.value / 32767) >= STICK_THRESHOLD
+    if t == pygame.JOYAXISMOTION:
+        return abs(event.value) >= STICK_THRESHOLD
+    return False
+
+
 class Input:
     def __init__(self) -> None:
         controller.init()
@@ -100,6 +114,7 @@ class Input:
         self._joysticks: dict[int, pygame.joystick.JoystickType] = {}
         self._families: dict[int, str] = {}
         self._last_pad: int | None = None
+        self._pad_last = True  # the device used most recently was a pad; a connected pad wins until something else is used
         # source key -> (action, next_fire_time)
         self._held: dict[tuple, tuple[Action, float]] = {}
         self._right_y: dict[int, float] = {}
@@ -110,6 +125,11 @@ class Input:
     @property
     def pad_count(self) -> int:
         return len(self._controllers) + len(self._joysticks)
+
+    @property
+    def pad_mode(self) -> bool:
+        """Show pad prompts: a pad is connected and was used after the keyboard or a mouse click."""
+        return self._pad_last and self.pad_count > 0
 
     @property
     def family(self) -> str:
@@ -196,6 +216,10 @@ class Input:
     def handle(self, event: pygame.event.Event, now: float) -> list[Action]:
         out: list[Action] = []
         t = event.type
+        if t in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+            self._pad_last = False
+        elif _deliberate_pad_input(event):
+            self._pad_last = True
 
         if t in (pygame.CONTROLLERDEVICEADDED, pygame.JOYDEVICEADDED):
             self._open(event.device_index)

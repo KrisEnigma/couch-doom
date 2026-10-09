@@ -155,6 +155,30 @@ bare = Preset(name="Doom II", section="", engine_id="", iwad=Path(g) / "DOOM2.WA
 assert (r := find_readme(bare)) and r.author == "id Software" and r.year == "1994", r
 assert find_readme(Preset(name="Mod", section="", engine_id="", iwad=Path(g) / "DOOM2.WAD", mods=[Path(g) / "mod.pk3"])) is None
 
+from couch_doom.music import TITLEMAP_MUSIC_RE, TITLEMUSIC_RE  # noqa: E402
+
+bw_info = b'map TITLEMAP "Love"\r\n{\r\n\ttitlepatch = "CWILV23" // note\r\n\tmusic = WONDER\r\n\tpar = 150\r\n}'
+assert TITLEMAP_MUSIC_RE.search(bw_info)[1] == b"WONDER"
+assert TITLEMAP_MUSIC_RE.search(b'map titlemap "x" { music = "D_TITLE" }')[1] == b"D_TITLE"
+assert TITLEMUSIC_RE.search(b"gameinfo { titlemusic = intro; }")[1] == b"intro"
+assert TITLEMUSIC_RE.search(b'titlemusic = "music/theme.ogg"')[1] == b"music/theme.ogg"
+
+from couch_doom.gamepad import Input  # noqa: E402
+
+pygame.init()
+inp = Input()
+inp._pad_last = True
+inp.handle(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_a, mod=0, unicode="a", scancode=0), 0.0)
+assert not inp._pad_last
+inp.handle(pygame.event.Event(pygame.JOYAXISMOTION, instance_id=99, axis=0, value=0.1), 0.0)
+assert not inp._pad_last  # drift doesn't count
+inp.handle(pygame.event.Event(pygame.CONTROLLERBUTTONDOWN, instance_id=99, button=pygame.CONTROLLER_BUTTON_A), 0.0)
+assert inp._pad_last
+inp.handle(pygame.event.Event(pygame.MOUSEMOTION, pos=(1, 1), rel=(1, 1), buttons=(0, 0, 0)), 0.0)
+assert inp._pad_last  # moving the mouse doesn't count, only clicks
+inp.handle(pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(1, 1), button=1), 0.0)
+assert not inp._pad_last and not inp.pad_mode
+
 from couch_doom import update as upd  # noqa: E402
 from couch_doom.gamepad import Action  # noqa: E402
 

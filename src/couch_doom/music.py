@@ -26,10 +26,11 @@ from .archive import Archives
 from .config import APP_BUNDLE, DATA_DIR, PROJECT_ROOT
 from .options import Options
 
-TITLEMUSIC_RE = re.compile(rb'titlemusic\s*=\s*"([^"]+)"', re.IGNORECASE)
+# MAPINFO accepts music names with or without quotes (Brutal Wolfenstein: `music = WONDER`).
+TITLEMUSIC_RE = re.compile(rb'titlemusic\s*=\s*"?([^"\s;}]+)', re.IGNORECASE)
 # Without titlemusic, a mod with a TITLEMAP plays that map's music on the title screen (Elementalism).
 ACS_MUSIC_RE = re.compile(rb'music/[\w\-. ]+\.(?:mp3|ogg|flac|opus|wav|mid|mus|it|xm|s3m|mod)', re.IGNORECASE)
-TITLEMAP_MUSIC_RE = re.compile(rb'\bmap\s+titlemap\b[^{]*\{[^}]*?\bmusic\s*=\s*"([^"]+)"', re.IGNORECASE)
+TITLEMAP_MUSIC_RE = re.compile(rb'\bmap\s+titlemap\b[^{]*\{[^}]*?\bmusic\s*=\s*"?([^"\s;}]+)', re.IGNORECASE)
 # Per-game defaults; the IWAD itself tells us which one applies.
 # Strife has D_INTRO too, but its title plays D_LOGO, so that one is checked first.
 DEFAULT_TITLE_LUMPS = ("D_DM2TTL", "D_LOGO", "D_INTRO", "MUS_TITL", "HEXEN")
