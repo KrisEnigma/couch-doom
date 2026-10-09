@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .archive import Archives
+from .known import lookup
 
 PNG_SIG = b"\x89PNG\r\n\x1a\n"
 TITLEPAGE_RE = re.compile(rb'titlepage\s*=\s*"([^"]+)"', re.IGNORECASE)
@@ -78,6 +79,16 @@ def _palette(arcs: Archives) -> bytes | None:
     return next((p[:768] for a in arcs.items if (p := a.lump("PLAYPAL")) and len(p) >= 768), None)
 
 
+def _known_art(own: list, palette: bytes) -> Art | None:
+    """The picture a known.py entry names, for mods whose best one no rule would pick."""
+    for a in own:
+        known = lookup(a.path.name)
+        real = known and known.art and getattr(a, "names", {}).get(known.art.lower())
+        if real and (art := _decode(a.read(real), palette)):
+            return art
+    return None
+
+
 def find_title_art(iwad: Path | None, files: list[Path]) -> Art | None:
     with Archives(iwad, files) as arcs:
         if not arcs.items:
@@ -87,6 +98,8 @@ def find_title_art(iwad: Path | None, files: list[Path]) -> Art | None:
         palette = _palette(arcs)
         searches = [(candidates, arcs.items)]
         own = [a for a in arcs.items if a.path != iwad]
+        if known := _known_art(own, palette):
+            return known
         if any(a.mapinfo_value(TITLEMAP_RE) for a in own):
             # A mod's 3D title map we can't render: its own intermission backdrop beats the IWAD's picture.
             searches.insert(0, (candidates + list(STAND_INS), own))

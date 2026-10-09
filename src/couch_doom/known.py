@@ -1,4 +1,7 @@
-"""Credits and blurbs for games that ship or circulate without a readme of their own.
+"""Everything CouchDoom knows about specific WADs by name, kept in one place.
+
+Credits and blurbs for games that ship or circulate without a readme of their own, the odd title picture no rule would
+find, which IWADs are add-ons, and the IWAD file names recognised when a port has no iwadinfo of its own.
 
 The official IWADs and add-ons are quoted from the publishers' own store text. The community entries further down
 (`COMMUNITY`) are short factual lines written here, each citing the page they were checked against and the date, so a
@@ -17,6 +20,7 @@ class Known:
     year: str
     description: str
     source: str
+    art: str = ""  # path inside the archive of a title picture to use instead of the one the rules would find
 
 
 _STEAM = "Steam store page"
@@ -314,6 +318,7 @@ COMMUNITY: dict[str, Known] = {
         "A Doom II mod that rebuilds Wolfenstein 3D in the spirit of Brutal Doom: excessive gore, new weapons, enemies "
         "and graphics, and redesigned maps.",
         f"wl6.wolfenstein3d.nl/Brutal_Wolfenstein_3D, moddb.com/mods/brutal-wolfenstein-3d ({_CHECKED})",
+        art="graphics/wlfend.png",  # the title is a 3D map; its end screen is the castle gate under the logo
     ),
     "ashes2063enriched": Known(
         "Ashes: 2063 (Enriched)", "", "2021",
@@ -331,6 +336,22 @@ COMMUNITY: dict[str, Known] = {
         f"moddb.com/mods/ashes-2063 ({_CHECKED})",
     ),
 }
+
+
+# Add-on IWADs the engine loads on top of their base game (iwadinfo's "Required"); alone they have no title
+# screen, music or logo.
+ADDON_IWADS = {"hexdd.wad": "hexen.wad", "sve.wad": "strife1.wad"}
+
+# The port's own iwadinfo decides names and order; without it, these file names are still recognised.
+IWAD_NAMES = (
+    "doom_complete.pk3", "doom2.wad", "doom2xbox.wad", "doom2unity.wad", "doom2kex.wad", "doom2f.wad", "doomu.wad",
+    "doom.wad", "doomxbox.wad", "doomunity.wad", "doomkex.wad", "doom1.wad", "bfgdoom.wad", "bfgdoom2.wad",
+    "doombfg.wad", "doom2bfg.wad", "plutonia.wad", "plutoniaunity.wad", "plutoniakex.wad", "tnt.wad",
+    "tntunity.wad", "tntkex.wad", "freedoom1.wad", "freedoom2.wad", "freedoomu.wad", "freedoom.wad", "freedm.wad",
+    "heretic.wad", "hereticsr.wad", "heretic1.wad", "hexen.wad", "hexdd.wad", "hexendemo.wad", "hexdemo.wad",
+    "strife1.wad", "sve.wad", "strife0.wad", "strife.wad", "blasphem.wad", "blasphemer.wad", "chex.wad",
+    "chex3.wad", "action2.wad", "harm1.wad", "hacx.wad", "hacx2.wad", "square1.pk3", "delaweare.wad", "rotwb.wad",
+)
 
 
 def lookup(file_name: str) -> Known | None:

@@ -12,6 +12,7 @@ import zipfile
 from pathlib import Path
 
 from ..config import FROZEN, PROJECT_ROOT
+from ..known import ADDON_IWADS
 from ..options import Engine, Options, Preset
 from .doomlauncher import DB_NAME, LIBRARY, UNTAGGED, _connect, _int, _Library, _title, _unpack_dest, is_667
 
@@ -131,13 +132,13 @@ def _preset(lib: _Library, game, section: str) -> Preset:
     files: list[Path] = []
     if iwad is not None:
         base = iwad
-        # Hexen: Deathkings is an add-on: HEXEN.WAD stays the IWAD and HEXDD.WAD loads as the first file.
-        if _iwad_name(iwad).upper() == "HEXDD.WAD":
-            base = next((i for i in lib.iwads.values() if _iwad_name(i).upper() == "HEXEN.WAD"), None)
+        # An add-on IWAD (Hexen: Deathkings) loads as the first file on top of its base game, which stays the IWAD.
+        if base_name := ADDON_IWADS.get(_iwad_name(iwad).lower()):
+            base = next((i for i in lib.iwads.values() if _iwad_name(i).lower() == base_name), None)
             if base is None:
-                issues.append("Hexen: Deathkings needs HEXEN.WAD set up as an IWAD")
-            elif dk := _iwad(lib, iwad, unpack, issues):
-                files.append(dk)
+                issues.append(f"{_iwad_name(iwad).upper()} needs {base_name.upper()} set up as an IWAD")
+            elif addon := _iwad(lib, iwad, unpack, issues):
+                files.append(addon)
         if base is not None:
             preset.iwad = _iwad(lib, base, unpack, issues)
 

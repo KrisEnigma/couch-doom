@@ -494,6 +494,13 @@ with zipfile.ZipFile(zt, "w") as z:
     z.writestr("textures.wad", _wad_with({"ZMCTITLE": _png(1280, 720, b"zmc"), "TITLEPI2": _png(640, 400, b"no")}))
     z.writestr("graphics/titlepic.png", _png(320, 200, b"pic"))
 assert find_logo(d2, [zt]).data.endswith(b"zmc")  # a title card among its textures, inside a WAD in the pk3
+bwk = root / "ZMC-BWV7.0.pk3"
+with zipfile.ZipFile(bwk, "w") as z:
+    z.writestr("MapInfo.txt", 'map TITLEMAP "Love"\n{\n  music = WONDER\n}\n')
+    z.writestr("graphics/interpic.png", _png(426, 200, b"inter"))
+    z.writestr("graphics/WLFEND.png", _png(1300, 812, b"gate"))
+art = find_title_art(d2, [bwk])
+assert art.data.endswith(b"gate") and not art.fallback  # a known mod's picked title art, a real one
 el = root / "elem2.pk3"
 with zipfile.ZipFile(el, "w") as z:
     z.writestr("MENUDEF.txt", 'ListMenu "MainMenu"\n{\n  StaticPatch 0, 0, "M_SUBTTL"\n}\n')

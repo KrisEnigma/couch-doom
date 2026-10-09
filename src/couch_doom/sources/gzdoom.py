@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..config import DEV_LAUNCHERS, FROZEN, PROJECT_ROOT, home, xdg
+from ..known import IWAD_NAMES
 from ..options import Engine, Options, OptionsError, Preset
 
 NAME = "GZDoom"
@@ -27,17 +28,6 @@ EXES = tuple(n for p in PORTS for n in (f"{p}.exe", p)) + tuple(FLATPAKS)
 SETTINGS_NAMES = EXES
 IWAD_EXTS = (".iwad", ".ipk3", ".ipk7")
 RECURSIVE_LIMIT = 5000
-
-# The port's own iwadinfo decides names and order; without it, these file names are still recognised.
-_FALLBACK_NAMES = (
-    "doom_complete.pk3", "doom2.wad", "doom2xbox.wad", "doom2unity.wad", "doom2kex.wad", "doom2f.wad", "doomu.wad",
-    "doom.wad", "doomxbox.wad", "doomunity.wad", "doomkex.wad", "doom1.wad", "bfgdoom.wad", "bfgdoom2.wad",
-    "doombfg.wad", "doom2bfg.wad", "plutonia.wad", "plutoniaunity.wad", "plutoniakex.wad", "tnt.wad",
-    "tntunity.wad", "tntkex.wad", "freedoom1.wad", "freedoom2.wad", "freedoomu.wad", "freedoom.wad", "freedm.wad",
-    "heretic.wad", "hereticsr.wad", "heretic1.wad", "hexen.wad", "hexdd.wad", "hexendemo.wad", "hexdemo.wad",
-    "strife1.wad", "sve.wad", "strife0.wad", "strife.wad", "blasphem.wad", "blasphemer.wad", "chex.wad",
-    "chex3.wad", "action2.wad", "harm1.wad", "hacx.wad", "hacx2.wad", "square1.pk3", "delaweare.wad", "rotwb.wad",
-)
 
 # Storefront folders the port searches when i_searchdistributors is on (UZDoom src/d_steam.cpp, win32/i_steam.cpp).
 _STEAM_DIRS = (
@@ -473,7 +463,7 @@ def find_iwads(exe: Path, ini: dict[str, list[tuple[str, str]]] | None) -> tuple
     table = load_iwadinfo(exe)
     fallback = table is None
     if table is None:
-        table = IwadTable(names=set(_FALLBACK_NAMES))
+        table = IwadTable(names=set(IWAD_NAMES))
     plain, recursive = search_dirs(exe, ini)
     files: list[Path] = []
     for folder in plain:

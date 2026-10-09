@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .engine_traits import FAMILIES, Traits, compat_flag_args
+from .known import ADDON_IWADS
 from .options import Options, Preset
 
 GAME_EXTS = {".wad", ".pk3", ".pk7", ".ipk3", ".pke", ".zip", ".deh", ".hhe", ".bex"}
@@ -58,11 +59,6 @@ def _expand_mappack(path: Path) -> list[Path]:
             key=lambda p: p.name.lower(),
         )
     return [path]
-
-
-# Add-on IWADs the engine loads on top of their base game (iwadinfo's "Required"); alone they have no title
-# screen, music or logo.
-ADDON_IWADS = {"hexdd.wad": "hexen.wad", "sve.wad": "strife1.wad"}
 
 
 def presented_files(preset: Preset) -> tuple[Path | None, list[Path]]:
