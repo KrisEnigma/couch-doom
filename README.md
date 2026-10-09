@@ -8,19 +8,19 @@ Built for playing on the TV, and just as much at home on a Steam Deck: everythin
 
 It only reads other programs' files, never changes them. Keep setting games up in your launcher.
 
-![CouchDoom on Eviternity II: the WAD's own title art and logo beside a list of DoomRunner presets](docs/screenshots/eviternity-2.jpg)
+![CouchDoom on Eviternity II: the WAD's own title art, logo and description beside a list of DoomRunner presets](docs/screenshots/eviternity-2.jpg)
 
 <p>
-  <img src="docs/screenshots/hexen.jpg" width="49%" alt="Plain Hexen from the Vanilla section">
-  <img src="docs/screenshots/alien-vendetta.jpg" width="49%" alt="Alien Vendetta, a classic megawad, tinted to its art">
-</p>
-<p>
-  <img src="docs/screenshots/requiem.jpg" width="49%" alt="Requiem, a classic megawad, with its author and description from the readme">
+  <img src="docs/screenshots/alien-vendetta.jpg" width="49%" alt="Alien Vendetta, a classic megawad, tinted gold from its art">
   <img src="docs/screenshots/valiant.jpg" width="49%" alt="Valiant, tinted green from its art, with author, year and description">
 </p>
 <p>
-  <img src="docs/screenshots/legacy-of-rust.jpg" width="49%" alt="Legacy of Rust, a preset loading six files">
-  <img src="docs/screenshots/ashes-2063.jpg" width="49%" alt="Ashes 2063 Enriched, a standalone game with mods and its own config">
+  <img src="docs/screenshots/castlevania.jpg" width="49%" alt="Castlevania: Simon's Destiny, a standalone fan game, with its own title art and logo">
+  <img src="docs/screenshots/elementalism.jpg" width="49%" alt="Elementalism, whose title is a 3D map, shown with its loading screen and logo">
+</p>
+<p>
+  <img src="docs/screenshots/legacy-of-rust.jpg" width="49%" alt="Legacy of Rust from the KEX remaster, a preset loading several files">
+  <img src="docs/screenshots/doom-2.jpg" width="49%" alt="Plain Doom II from the Vanilla section, with its title screen, logo and store description">
 </p>
 
 Title art, logos, readmes and ENDOOM screens belong to their WAD authors; CouchDoom reads them from your own files.
