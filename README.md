@@ -4,6 +4,8 @@ Made by [KrisEnigma](https://github.com/KrisEnigma).
 
 A fullscreen, gamepad-friendly front end for the Doom setups you already have. CouchDoom reads your launcher's presets (or the IWADs your source port finds) and shows them big-screen style, with each WAD's own title art, music and readme. Pick one and it starts the engine with the same files and arguments your launcher would use.
 
+Built for playing on the TV, and just as much at home on a Steam Deck: everything works from the controller, and the layout fits the Deck's screen.
+
 It only reads other programs' files, never changes them. Keep setting games up in your launcher.
 
 ![CouchDoom on Eviternity II: the WAD's own title art and logo beside a list of DoomRunner presets](docs/screenshots/eviternity-2.jpg)
@@ -68,6 +70,7 @@ Grab a build from the [latest release](https://github.com/KrisEnigma/couch-doom/
 - **Windows:** `CouchDoom-…-windows-x64.zip`. Unzip anywhere and run `CouchDoom.exe`. If SmartScreen complains, click **More info**, then **Run anyway**.
 - **macOS:** `…-macos-arm64.zip` for Apple Silicon, `…-macos-x64.zip` for Intel (macOS 10.15+). Unzip and open `CouchDoom.app`. If macOS refuses, go to **System Settings → Privacy & Security** and click **Open Anyway**.
 - **Linux:** `…-linux-x64.tar.gz` for PCs, `…-linux-arm64.tar.gz` for ARM boards like the Raspberry Pi 4 and 5. Extract and run `./CouchDoom`. Needs glibc 2.28+ (Ubuntu 20.04, Debian 10, RHEL 8 and later). No 32-bit.
+- **Steam Deck:** in Desktop Mode, extract `…-linux-x64.tar.gz`, then in Steam choose **Add a Non-Steam Game** and browse to `CouchDoom`. It then starts from Game Mode like any other game. GZDoom and DoomRunner from Discover (Flatpak) are found automatically. For library art, use the images in [`packaging/steam`](packaging/steam): right-click the tile, then **Manage → Set custom artwork**, and right-click the banner for the background and logo.
 
 **Arch Linux:** an AUR package is coming. For now, install `python-pygame-ce` from the AUR (e.g. `yay -S python-pygame-ce`), then:
 
@@ -95,7 +98,7 @@ PYTHONPATH=src .venv/bin/python -m couch_doom
 - **Linux:** **Find it myself…** needs `zenity` (or `kdialog` on KDE).
 - **macOS:** click the file dialog once before typing; macOS doesn't give it keyboard focus. If GZDoom was downloaded but never opened, open it once from Finder first, or its "downloaded from the internet" prompt hides behind CouchDoom.
 
-Tested on Arch Linux with DSDA-Doom, DoomRunner and qZDL, and on an M4 MacBook Pro with GZDoom. Steam Deck reports welcome.
+Tested on Arch Linux with DSDA-Doom, DoomRunner and qZDL, and on an M4 MacBook Pro with GZDoom. Players run it on Steam Decks too; reports and tips from the Deck are welcome.
 
 ## Controls
 
@@ -120,9 +123,9 @@ Favorites get their own section at the top. CouchDoom hides while a game runs an
 
 Everything comes from the preset's own files, in the order the engine would load them:
 
-- **Backdrop:** the title screen (MAPINFO `titlepage`, `TITLEPIC`, or Heretic/Hexen's `TITLE`). The UI takes its colours from the most vivid hue.
-- **Logo:** the main-menu logo (`M_DOOM`, `M_HTIC`, `M_STRIFE`), if it's a real custom one.
-- **Title music:** MAPINFO `titlemusic`, the title lump (`D_DM2TTL`, `D_INTRO`, `MUS_TITL`, …) or a title-named track. It plays once and crossfades between presets. MIDI and MUS need a SoundFont: `--soundfont <file>`, any `.sf2`/`.sf3` in a `soundfonts/` folder beside CouchDoom, or one shipped with your engine.
+- **Backdrop:** the title screen (MAPINFO `titlepage`, `TITLEPIC`, or Heretic/Hexen's `TITLE`). Mods without title art of their own show their loading screen instead. The UI takes its colours from the most vivid hue.
+- **Logo:** the logo the main menu draws (`M_DOOM`, `M_HTIC`, `M_STRIFE` or the mod's own), or a logo or title card the mod ships, if it's a real custom one.
+- **Title music:** MAPINFO `titlemusic`, the title map's music, a track the title script starts, the title lump (`D_DM2TTL`, `D_INTRO`, `MUS_TITL`, …) or a title-named track. It plays once and crossfades between presets. MIDI and MUS need a SoundFont: `--soundfont <file>`, any `.sf2`/`.sf3` in a `soundfonts/` folder beside CouchDoom, or one shipped with your engine.
 - **Readme:** a matching `.txt` beside the WAD, a readme inside the PK3, the WAD's own embedded text, or the info a mod browser saved next to it. Notable mods without any get a built-in line.
 - **ENDOOM:** only when the preset ships its own.
 - **Menu sounds:** from your IWAD.
@@ -168,4 +171,4 @@ On Windows from source, `run.bat` passes these through. For no console window, p
 Made and maintained by [KrisEnigma](https://github.com/KrisEnigma). MIT licensed; see [LICENSE](LICENSE).
 
 - **Fonts:** [Barlow](https://github.com/jpt/barlow) and [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono), both SIL OFL.
-- **Button prompts:** [Kenney's Input Prompts](https://kenney.nl/assets/input-prompts), CC0. They match the pad you last used: Xbox, PlayStation or Switch.
+- **Button prompts:** [Kenney's Input Prompts](https://kenney.nl/assets/input-prompts), CC0. They match what you last used: keyboard, or an Xbox, PlayStation or Switch pad.

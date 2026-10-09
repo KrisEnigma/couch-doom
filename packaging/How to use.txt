@@ -1,9 +1,14 @@
-CouchDoom - play your Doom launcher's setups from the couch with a gamepad
+CouchDoom - play your Doom launcher's setups with a gamepad, on the TV or a Steam Deck
 Made by KrisEnigma - https://github.com/KrisEnigma/couch-doom
 
 1. Set up your games in DoomRunner, ZDL or Doom Launcher first. No launcher? GZDoom,
    UZDoom or VKDoom on its own works too: CouchDoom lists the IWADs it can find.
 2. Start it: CouchDoom.exe on Windows, CouchDoom.app on macOS, ./CouchDoom on Linux.
+
+Steam Deck: use the Linux x64 download. In Desktop Mode, extract it, then in Steam
+choose "Add a Non-Steam Game" and browse to CouchDoom. It then starts from Game Mode
+like any other game. GZDoom and DoomRunner from Discover are found automatically.
+Library art for the shortcut: github.com/KrisEnigma/couch-doom/tree/main/packaging/steam
 
 CouchDoom finds your launcher's settings on its own, including portable installs you
 have a Start Menu, Desktop or taskbar shortcut to. You can also put this CouchDoom
