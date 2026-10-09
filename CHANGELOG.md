@@ -2,6 +2,13 @@
 
 Each release's notes on GitHub are its own section below, behind the download instructions in `packaging/release-header.md`. Keep the `**New in X.Y.Z**` heading format: the release workflow and the in-app update notice both look for it.
 
+**New in 0.7.4**
+
+- Fixed a crash when coming back from a long game on Windows: a gamepad used in the game slowly exhausted CouchDoom's window resources. Gamepads are now switched off while a game runs, and the window retries if it still can't open. The taskbar also keeps CouchDoom's icon afterwards.
+- MIDI title music plays at an even loudness (Doom II's title used to be much quieter), and moving between presets that share a track keeps it playing instead of restarting it. Strife plays its real title song.
+- Far more mods show their own title screen, logo and music: content packed in WADs inside a pk3 (Abysm), 3D title maps and their music (Elementalism), title music started by a script (Doom Infinite), logos the main menu draws under any name or through texture definitions (Doom Infinite, Refracted Reality, Bloom, Square), and logos or title cards shipped among a mod's graphics (Brutal Wolfenstein, Simon's Destiny). A small menu logo gives way to a full-size title card, credit logos for editors and engines are skipped, dark title-card backings are dropped, and empty margins are trimmed.
+- Mods without a title picture or logo of their own use their loading screen as the background (Abysm, Elementalism, DoomRL Arsenal). Hexen: Deathkings and Strife: Veteran Edition show their base game's title screen, logo and music.
+
 **New in 0.7.3**
 - Title music now plays for mods that start it from a script instead of declaring it, such as Castlevania: Simon's Destiny: a pk3 track named like a title song is used when nothing else is found.
 - Readmes are found more often: a readme beside the file with a slightly different name (spacing or a version number) now matches, a lone "readme" next to a single game file is used, and inside a pk3 the readme is chosen over the credits file.

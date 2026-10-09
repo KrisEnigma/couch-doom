@@ -60,6 +60,23 @@ def _expand_mappack(path: Path) -> list[Path]:
     return [path]
 
 
+# Add-on IWADs the engine loads on top of their base game (iwadinfo's "Required"); alone they have no title
+# screen, music or logo.
+ADDON_IWADS = {"hexdd.wad": "hexen.wad", "sve.wad": "strife1.wad"}
+
+
+def presented_files(preset: Preset) -> tuple[Path | None, list[Path]]:
+    """The IWAD and files to take title art, logo and music from: an add-on IWAD stands on its base game."""
+    files = load_order(preset)
+    iwad = preset.iwad
+    base_name = ADDON_IWADS.get(iwad.name.lower()) if iwad else None
+    if base_name and iwad.parent.is_dir():
+        base = next((f for f in iwad.parent.iterdir() if f.name.lower() == base_name and f.is_file()), None)
+        if base:
+            return base, [iwad, *files]
+    return iwad, files
+
+
 def load_order(preset: Preset) -> list[Path]:
     """Files after the IWAD, in the order the engine loads them."""
     maps = [f for mp in preset.mappacks if mp.exists() for f in _expand_mappack(mp)]

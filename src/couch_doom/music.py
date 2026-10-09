@@ -6,8 +6,10 @@ digital/tracker formats go straight to SDL_mixer.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import io
+import math
 import os
 import re
 import struct
@@ -25,8 +27,12 @@ from .config import APP_BUNDLE, DATA_DIR, PROJECT_ROOT
 from .options import Options
 
 TITLEMUSIC_RE = re.compile(rb'titlemusic\s*=\s*"([^"]+)"', re.IGNORECASE)
+# Without titlemusic, a mod with a TITLEMAP plays that map's music on the title screen (Elementalism).
+ACS_MUSIC_RE = re.compile(rb'music/[\w\-. ]+\.(?:mp3|ogg|flac|opus|wav|mid|mus|it|xm|s3m|mod)', re.IGNORECASE)
+TITLEMAP_MUSIC_RE = re.compile(rb'\bmap\s+titlemap\b[^{]*\{[^}]*?\bmusic\s*=\s*"([^"]+)"', re.IGNORECASE)
 # Per-game defaults; the IWAD itself tells us which one applies.
-DEFAULT_TITLE_LUMPS = ("D_DM2TTL", "D_INTRO", "MUS_TITL", "HEXEN", "D_LOGO")
+# Strife has D_INTRO too, but its title plays D_LOGO, so that one is checked first.
+DEFAULT_TITLE_LUMPS = ("D_DM2TTL", "D_LOGO", "D_INTRO", "MUS_TITL", "HEXEN")
 MUSIC_FOLDERS = ("music/", "")
 # Mods that start their title music from a script or a custom title map declare it nowhere we can read, so as a last
 # resort a pk3 track named like a title song is used.
@@ -41,8 +47,11 @@ RATE = 44100
 MAX_SECONDS = 30
 CUT_FADE_SECONDS = 2.5  # a track the cap cuts off fades out instead of stopping mid-phrase
 TAIL_SECONDS = 2.0
-VOLUME = 0.55
-PEAK_TARGET = 0.9
+VOLUME = 0.55  # streamed tracks (OGG, MP3, ...) play as mastered, at this level
+# Rendered MIDI has no level of its own; each track is brought to this loudness (RMS, dBFS after gain) so the
+# list sounds even. Matching peaks instead left tracks with one loud hit, like Doom II's title, much quieter.
+MIDI_LOUDNESS_DB = -23.0
+PEAK_TARGET = 0.9  # never louder than this, so nothing clips
 # Just long enough to skip presets flown past while holding a direction (repeat is 70 ms).
 DWELL_SECONDS = 0.12
 FADE_IN_MS = 500
@@ -107,7 +116,7 @@ def find_title_music(iwad: Path | None, files: list[Path]) -> Track | None:
             return f"D_{renames[short]}" if short in renames else lump
 
         names = []
-        if custom := arcs.mapinfo_value(TITLEMUSIC_RE):
+        if custom := arcs.mapinfo_value(TITLEMUSIC_RE) or arcs.mapinfo_value(TITLEMAP_MUSIC_RE) or _acs_title_music(arcs):
             names.append(custom)
         defaults = [renamed(n) for n in DEFAULT_TITLE_LUMPS]
         base = arcs.items[-1] if iwad and arcs.items[-1].path == iwad else None
@@ -123,6 +132,17 @@ def find_title_music(iwad: Path | None, files: list[Path]) -> Track | None:
         if (data := arcs.guess_music(TITLE_GUESS_RE)) and (kind := _classify(data)):
             return Track(kind, data, "TITLE")
         return None
+
+
+def _acs_title_music(arcs: Archives) -> str | None:
+    """A track that a compiled script for the title map starts itself (Doom Infinite)."""
+    for a in arcs.items:
+        for n, real in getattr(a, "names", {}).items():
+            if n.startswith("acs/") and n.endswith(".o"):
+                data = a.read(real)
+                if b"TITLEMAP" in data.upper() and (m := ACS_MUSIC_RE.search(data)):
+                    return m.group(0).decode("ascii", "replace")
+    return None
 
 
 # ---------- MUS -> MIDI ----------
@@ -259,8 +279,8 @@ class MidiRenderer:
             self._synth = synth
         return self._synth
 
-    def render(self, midi: bytes, cancel: threading.Event) -> tuple[bytes, float] | None:
-        """Float32 stereo PCM plus its peak. The synth's float output isn't clipped, so the
+    def render(self, midi: bytes, cancel: threading.Event) -> tuple[bytes, float, float] | None:
+        """Float32 stereo PCM plus its peak and RMS. The synth's float output isn't clipped, so the
         caller can normalize with channel volume (SDL scales before it clamps)."""
         from tinysoundfont import Sequencer, midi as tsf_midi
 
@@ -296,7 +316,8 @@ class MidiRenderer:
                 samples[start + i] *= 1.0 - i / fade
             out = samples.tobytes()
         peak = max(max(samples, default=0.0), -min(samples, default=0.0))
-        return bytes(out), peak
+        rms = math.sqrt(sum(x * x for x in samples) / len(samples)) if samples else 0.0
+        return bytes(out), peak, rms
 
 
 # ---------- playback ----------
@@ -306,26 +327,41 @@ class Prepared:
     kind: str  # "pcm" (rendered float32 stereo) | "stream" (encoded file for mixer.music)
     data: bytes
     volume: float
+    sig: str = ""  # identifies the track itself, so presets sharing one can keep it playing
 
 
-def _prepare(iwad: Path | None, files: list[Path], renderer: MidiRenderer | None, cancel: threading.Event) -> Prepared | None:
+def midi_volume(peak: float, rms: float) -> float:
+    """Channel volume that brings a rendered track to MIDI_LOUDNESS_DB without its peak passing PEAK_TARGET."""
+    if peak <= 0 or rms <= 0:
+        return VOLUME
+    return min(1.0, 10 ** (MIDI_LOUDNESS_DB / 20) / rms, PEAK_TARGET / peak)
+
+
+def _prepare(
+    iwad: Path | None, files: list[Path], renderer: MidiRenderer | None, cancel: threading.Event, ready: dict[str, Prepared]
+) -> Prepared | None:
     track = find_title_music(iwad, files)
     if track is None or cancel.is_set():
         return None
+    sig = hashlib.sha1(track.data).hexdigest()
+    if sig in ready:
+        return ready[sig]  # another preset's copy of the same track, already rendered
     if track.kind == "midi":
         if renderer is None:
             return None
         result = renderer.render(track.data, cancel)
         if not result:
             return None
-        pcm, peak = result
-        return Prepared("pcm", pcm, VOLUME * min(1.0, PEAK_TARGET / peak) if peak > 0 else VOLUME)
-    return Prepared("stream", track.data, VOLUME)
+        pcm, peak, rms = result
+        return Prepared("pcm", pcm, midi_volume(peak, rms), sig)
+    return Prepared("stream", track.data, VOLUME, sig)
 
 
 class MusicPlayer:
     """One preset's title track at a time, crossfading on change.
 
+    Moving to a preset that uses the same track (the stock title music, say) keeps it playing instead of starting
+    it over; the current track keeps going until the next preset's track is known.
     Rendered MIDI alternates between two channels so the old track fades out under the new one.
     Streamed formats share SDL_mixer's single music slot, so a new stream waits for the old one's
     fade-out to finish instead of cutting it.
@@ -338,9 +374,11 @@ class MusicPlayer:
         self.sounds: list[pygame.mixer.Sound | None] = [None, None]
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="music")
         self.want: object = None
-        self.job: tuple[object, Future, threading.Event] | None = None
+        self.job: tuple[object, tuple, Future, threading.Event] | None = None
         self.pending: tuple[object, Prepared] | None = None
-        self.cache: OrderedDict[object, Prepared] = OrderedDict()
+        self.cache: OrderedDict[str, Prepared] = OrderedDict()  # by track sig
+        self.tracks: dict[tuple, str | None] = {}  # (iwad, files) -> track sig, None when it has no title music
+        self.playing: str | None = None  # sig of the track currently audible (not fading out)
         self.streaming = False
 
     def request(self, key: object, iwad: Path | None = None, files: list[Path] | None = None) -> None:
@@ -348,39 +386,62 @@ class MusicPlayer:
         if key == self.want:
             return
         self.want = key
-        self.stop()
+        self._cancel()
         if key is None:
+            self.stop()
             return
-        if key in self.cache:
-            self.cache.move_to_end(key)
-            self.pending = (key, self.cache[key])
-            return
+        ident = (iwad, tuple(files or ()))
+        if ident in self.tracks:
+            sig = self.tracks[ident]
+            if sig is not None and sig == self.playing and self._audible():
+                return  # same track: let it play on
+            self.stop()
+            if sig in self.cache:
+                self.cache.move_to_end(sig)
+                self.pending = (key, self.cache[sig])
+                return
+            if sig is None:
+                return
         cancel = threading.Event()
-        self.job = (key, self.pool.submit(_prepare, iwad, files or [], self.renderer, cancel), cancel)
+        future = self.pool.submit(_prepare, iwad, list(files or ()), self.renderer, cancel, dict(self.cache))
+        self.job = (key, ident, future, cancel)
 
-    def stop(self, fade_ms: int = FADE_OUT_MS) -> None:
+    def _cancel(self) -> None:
         if self.job:
-            self.job[2].set()
+            self.job[3].set()
             self.job = None
         self.pending = None
+
+    def _audible(self) -> bool:
+        if self.streaming:
+            return pygame.mixer.music.get_busy()
+        return self.channels[self.active].get_busy()
+
+    def stop(self, fade_ms: int = FADE_OUT_MS) -> None:
+        self._cancel()
+        self.playing = None
         self.channels[self.active].fadeout(fade_ms)
         if self.streaming:
             pygame.mixer.music.fadeout(fade_ms)
             self.streaming = False
 
     def update(self) -> None:
-        if self.job and self.job[1].done():
-            key, future, _ = self.job
+        if self.job and self.job[2].done():
+            key, ident, future, _ = self.job
             self.job = None
             try:
                 prepared = future.result()
             except Exception:
                 prepared = None
+            self.tracks[ident] = prepared.sig if prepared else None
             if prepared is not None:
-                self.cache[key] = prepared
+                self.cache[prepared.sig] = prepared
+                self.cache.move_to_end(prepared.sig)
                 while len(self.cache) > 1 and sum(len(p.data) for p in self.cache.values()) > CACHE_BYTES:
                     self.cache.popitem(last=False)
-                if key == self.want:
+            if key == self.want and not (prepared and prepared.sig == self.playing and self._audible()):
+                self.stop()
+                if prepared is not None:
                     self.pending = (key, prepared)
         if self.pending:
             self._start()
@@ -404,6 +465,7 @@ class MusicPlayer:
                 snd.set_volume(prepared.volume)
                 self.sounds[self.active] = snd
                 self.channels[self.active].play(snd, fade_ms=FADE_IN_MS)
+            self.playing = prepared.sig
         except pygame.error:
             pass
         self.pending = None
@@ -411,5 +473,3 @@ class MusicPlayer:
     def shutdown(self) -> None:
         self.stop(0)
         self.pool.shutdown(wait=False, cancel_futures=True)
-
-

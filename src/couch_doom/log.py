@@ -62,9 +62,27 @@ class Launched:
         self.reader.join(2)
         out = self.output = bytes(self.tail).decode("utf-8", errors="replace").strip()
         body = f"cmd: {self.command}\ncwd: {self.cwd}\nexit: {code} after {elapsed:.1f}s\n"
+        if objects := gui_objects():
+            body += f"window objects: {objects}\n"
         body += f"--- engine output (last {OUTPUT_TAIL // 1024} KB) ---\n{out}\n" if out else "--- no engine output ---\n"
         write(f"launch: {self.name}", body, path)
         return code, elapsed
+
+
+def gui_objects() -> str:
+    """This process's Windows window-manager (USER) objects, now and at peak; the per-process limit is 10,000."""
+    if sys.platform != "win32":
+        return ""
+    import ctypes
+
+    try:
+        get = ctypes.windll.user32.GetGuiResources
+        get.restype = ctypes.c_ulong
+        get.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        me = ctypes.c_void_p(-1)  # GetCurrentProcess()
+        return f"{get(me, 1)} (peak {get(me, 4)})"
+    except (AttributeError, OSError):
+        return ""
 
 
 def spawn(argv: list[str], cwd: Path | None, env: dict[str, str], name: str, command: str) -> Launched:

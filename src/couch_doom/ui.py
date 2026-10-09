@@ -24,7 +24,8 @@ from . import filedialog
 from .filedialog import open_file
 from .gamepad import Action, Input
 from .glyphs import BUTTON_NAMES, Glyphs
-from .launch import LaunchCommand, build_command, load_order, split_args
+from .launch import LaunchCommand, build_command, load_order, presented_files, split_args
+from . import log
 from .log import closed_early, last_line, needs_extract_retry, spawn
 from .launchers import Launchers
 from .music import DWELL_SECONDS, MusicPlayer, find_soundfont
@@ -35,7 +36,7 @@ from .sfx import Sfx
 from .sources import SOURCES, Choice
 from .state import State
 from .theme import HOUSE, Theme, from_art
-from .titleart import Art, find_logo, find_title_art
+from .titleart import Art, find_logo, find_startup, find_title_art
 
 TEXT = (240, 232, 218)
 MUTED = (164, 150, 134)
@@ -54,6 +55,7 @@ OSK_ROWS = [
 
 QUIT_CONFIRM_SECONDS = 2.0
 LAUNCH_WIPE_SECONDS = 0.38
+WINDOW_RETRIES = 20  # half a second apart
 INPUT_COOLDOWN = 0.45
 ART_FADE_SECONDS = 0.45
 ART_CACHE_SIZE = 24
@@ -134,14 +136,21 @@ def _reset_alpha(surf: pygame.Surface) -> None:
 def _load_extras(preset: Preset) -> tuple[Art | None, Readme | None, Endoom | None, Art | None]:
     unpack(preset)
     files = load_order(preset)
+    iwad, shown = presented_files(preset)
     try:
-        art = find_title_art(preset.iwad, files)
+        art = find_title_art(iwad, shown)
     except Exception:
         art = None
     try:
-        logo = find_logo(preset.iwad, files)
+        logo = find_logo(iwad, files)  # an add-on IWAD is the base game's logo, not a mod's
     except Exception:
         logo = None
+    if shown and (logo is None or art is None or art.fallback):
+        try:
+            if startup := find_startup(shown):
+                art = startup
+        except Exception:
+            pass
     try:
         readme = find_readme(preset)
     except Exception:
@@ -151,6 +160,24 @@ def _load_extras(preset: Preset) -> tuple[Art | None, Readme | None, Endoom | No
     except Exception:
         endoom = None
     return art, readme, endoom, logo
+
+
+def _dark_backed(img: pygame.Surface) -> bool:
+    """An opaque logo on a near-black card (Brutal Wolfenstein's), which the engine draws additively."""
+    w, h = img.get_size()
+    corners = [img.get_at((x, y)) for x in (0, w - 1) for y in (0, h - 1)]
+    return all(c.a == 255 and max(c.r, c.g, c.b) < 40 for c in corners)
+
+
+_DARK_KEY = bytes(min(255, max(0, (v - 20) * 255 // 20)) for v in range(256))  # 20 and below vanish, 40 is solid
+
+
+def _key_out_dark(img: pygame.Surface) -> pygame.Surface:
+    """Brightness becomes opacity, so the card's dark backing disappears and the lettering stays."""
+    rgba = bytearray(pygame.image.tobytes(img, "RGBA"))
+    gray = pygame.image.tobytes(pygame.transform.grayscale(img), "RGBA")[0::4]
+    rgba[3::4] = gray.translate(_DARK_KEY)
+    return pygame.image.frombytes(bytes(rgba), img.get_size(), "RGBA").convert_alpha()
 
 
 def _set_window_icon() -> None:
@@ -317,7 +344,6 @@ class App:
         pygame.mixer.pre_init(44100, 32, 2, 1024)
         pygame.init()
         pygame.display.set_caption("CouchDoom")
-        _set_window_icon()
         self.input = Input()
 
         self.soundfont = find_soundfont(opts, soundfont)
@@ -634,9 +660,8 @@ class App:
             pass  # playing, loading, or finished; title tracks play once, like on the engine's title screen
         elif now - self._music_since >= DWELL_SECONDS:
             p = self.opts.presets[self.current]
-            self.music.request(self.current, p.iwad, load_order(p))
-        else:
-            self.music.request(None)
+            self.music.request(self.current, *presented_files(p))
+        # While the selection is still moving, the current track plays on: the next preset may share it.
 
     def _toggle_music(self) -> None:
         on = not self.state.music
@@ -665,6 +690,23 @@ class App:
     # ---------- window / layout ----------
 
     def _open_window(self) -> None:
+        # Right after a game exits, Windows may still be freeing its window objects, and creating ours fails with
+        # "used all of its system allowance of handles". That clears within seconds, so wait instead of crashing.
+        for attempt in range(WINDOW_RETRIES):
+            try:
+                return self._create_window()
+            except pygame.error as exc:
+                if attempt == WINDOW_RETRIES - 1:
+                    raise
+                if attempt == 0:
+                    log.write("window retry", f"{exc}\nTrying again for up to {WINDOW_RETRIES // 2} seconds.")
+                time.sleep(0.5)
+                pygame.display.quit()
+                pygame.display.init()
+                pygame.display.set_caption("CouchDoom")
+
+    def _create_window(self) -> None:
+        _set_window_icon()  # display.quit() after a game forgets it
         size = (1440, 810) if self.windowed else pygame.display.get_desktop_sizes()[0]
         self.window = None
         self.dpi = 1.0
@@ -963,16 +1005,22 @@ class App:
                 img = pygame.image.load(io.BytesIO(logo.data)).convert_alpha()
         except (pygame.error, ValueError):
             return None
+        if _dark_backed(img):
+            img = _key_out_dark(img)
+        ink = img.get_bounding_rect()
+        if ink.height < 4:
+            return None
+        img = img.subsurface(ink).copy()  # high-res logos often sit in a padded canvas
         w, h = img.get_size()
         aspect = 1.2 if logo.kind == "rgba" else 1.0  # Doom patches have tall pixels too
-        if w < h or img.get_bounding_rect().height < 4:
+        if w < h:
             return None
         s = self.s
         scale = min(self.detail_rect.width / w, LOGO_MAX_H * s / (h * aspect))
         size = (max(1, int(w * scale)), max(1, int(h * aspect * scale)))
-        if logo.kind == "rgba" and scale > 1:
+        if scale > 1:
             # Whole-number nearest-neighbour first, then smooth to the exact size: fractional nearest
-            # scaling makes some pixel rows thicker than others.
+            # scaling makes some pixel rows thicker than others, and smoothing straight up blurs.
             k = math.ceil(scale * aspect)
             img = pygame.transform.scale(img, (w * k, h * k))
         img = pygame.transform.smoothscale(img, size)
@@ -1405,6 +1453,7 @@ class App:
             self.window = None
         pygame.display.quit()
         self._audio_down()
+        self.input.suspend()
         code, elapsed = proc.wait()
         if needs_extract_retry(cmd.argv, cmd.env, proc.output, code, elapsed):
             # No FUSE on this system: run the AppImage by unpacking it instead, and say so in the log.
@@ -1416,6 +1465,7 @@ class App:
                 pass
 
         self._audio_up()
+        self.input.resume()
         pygame.display.init()
         pygame.display.set_caption("CouchDoom")
         self._open_window()

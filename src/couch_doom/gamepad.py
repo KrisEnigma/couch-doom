@@ -150,6 +150,26 @@ class Input:
         except pygame.error:
             pass
 
+    def suspend(self) -> None:
+        """Close every pad and shut SDL's controller support down while a game runs.
+
+        Left open and unread, SDL on Windows piles up window-manager objects as the pad is used in the game, until
+        CouchDoom hits the 10,000 per-process limit and can't create its window again.
+        """
+        self._controllers.clear()
+        self._joysticks.clear()
+        self._families.clear()
+        self._last_pad = None
+        self.reset()
+        controller.quit()
+        pygame.joystick.quit()
+
+    def resume(self) -> None:
+        controller.init()
+        pygame.joystick.init()
+        for i in range(pygame.joystick.get_count()):
+            self._open(i)
+
     def reset(self) -> None:
         self._held.clear()
         self._right_y.clear()

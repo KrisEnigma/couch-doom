@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import re
 import struct
+import threading
 import zipfile
+from collections import OrderedDict
 from pathlib import Path
 
 ZIP_EXTS = {".pk3", ".ipk3", ".zip", ".pke"}
@@ -25,27 +27,65 @@ def _search_mapinfo(read, data: bytes, pattern: re.Pattern, seen: set[str]) -> s
     return None
 
 
+# WADs inside a pk3 are compressed: reaching a lump means decompressing up to it, which takes a noticeable moment
+# in a 100+ MB WAD. Their directories, and the lumps actually read, are kept across lookups.
+_EMBED_LOCK = threading.Lock()
+_EMBED_DIRS: dict[tuple, dict[str, tuple[int, int]]] = {}
+_EMBED_LUMPS: OrderedDict[tuple, bytes] = OrderedDict()
+EMBED_CACHE_BYTES = 48 * 1024 * 1024
+
+
 class Wad:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, f=None, key: tuple | None = None):
         self.path = path
-        self.f = path.open("rb")
+        self.key = key  # set for a WAD inside a pk3, whose reads are cached
+        self.f = f if f is not None else path.open("rb")
+        try:
+            with _EMBED_LOCK:
+                lumps = _EMBED_DIRS.get(key) if key else None
+            if lumps is None:
+                lumps = self._directory()
+                if key:
+                    with _EMBED_LOCK:
+                        _EMBED_DIRS[key] = lumps
+        except Exception:
+            self.f.close()
+            raise
+        self.lumps = lumps
+
+    def _directory(self) -> dict[str, tuple[int, int]]:
         magic, count, offset = struct.unpack("<4sii", self.f.read(12))
         if magic not in (b"IWAD", b"PWAD"):
             raise ValueError("not a wad")
         self.f.seek(offset)
         raw = self.f.read(16 * count)
-        self.lumps: dict[str, tuple[int, int]] = {}
+        lumps: dict[str, tuple[int, int]] = {}
         for i in range(count):
             pos, size, name = struct.unpack_from("<ii8s", raw, i * 16)
-            self.lumps[name.split(b"\0", 1)[0].decode("ascii", "replace").upper()] = (pos, size)
+            lumps[name.split(b"\0", 1)[0].decode("ascii", "replace").upper()] = (pos, size)
+        return lumps
 
     def lump(self, name: str, folders: tuple[str, ...] = ()) -> bytes | None:
         key = Path(name).stem.upper()[:8]
         entry = self.lumps.get(key)
         if not entry or entry[1] <= 0:
             return None
+        if self.key is None:
+            self.f.seek(entry[0])
+            return self.f.read(entry[1])
+        ck = (self.key, key)
+        with _EMBED_LOCK:
+            if (data := _EMBED_LUMPS.get(ck)) is not None:
+                _EMBED_LUMPS.move_to_end(ck)
+                return data
         self.f.seek(entry[0])
-        return self.f.read(entry[1])
+        data = self.f.read(entry[1])
+        if len(data) <= EMBED_CACHE_BYTES // 4:
+            with _EMBED_LOCK:
+                _EMBED_LUMPS[ck] = data
+                while sum(len(v) for v in _EMBED_LUMPS.values()) > EMBED_CACHE_BYTES:
+                    _EMBED_LUMPS.popitem(last=False)
+        return data
 
     def music_names(self) -> list[str]:
         return []  # WAD lumps are found by name; only pk3 folders can be searched blind
@@ -85,6 +125,21 @@ class Zip:
     def music_names(self) -> list[str]:
         return sorted(n for n in self.names if n.startswith("music/") and "/" not in n[6:])
 
+    def embedded(self) -> list[Wad]:
+        """WADs in the pk3's root, which GZDoom loads right after the pk3 itself (big TCs keep everything in one)."""
+        try:
+            stamp = self.path.stat().st_mtime_ns
+        except OSError:
+            return []
+        out = []
+        for n in sorted(n for n in self.names if "/" not in n and Path(n).suffix in WAD_EXTS):
+            real = self.names[n]
+            try:
+                out.append(Wad(self.path / real, self.z.open(real), (str(self.path), stamp, real)))
+            except (OSError, ValueError, struct.error, zipfile.BadZipFile, RuntimeError):
+                pass
+        return out
+
     def mapinfo_value(self, pattern: re.Pattern) -> str | None:
         for n, real in self.names.items():
             if "/" not in n and Path(n).stem in _MAPINFO:
@@ -119,6 +174,8 @@ class Archives:
         self.items: list[Wad | Zip] = []
         for path in [*reversed(files), *([iwad] if iwad else [])]:
             if path.is_file() and (a := open_archive(path)):
+                if isinstance(a, Zip):
+                    self.items += reversed(a.embedded())
                 self.items.append(a)
 
     def __enter__(self) -> "Archives":

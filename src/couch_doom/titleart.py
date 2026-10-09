@@ -14,7 +14,13 @@ from .archive import Archives
 
 PNG_SIG = b"\x89PNG\r\n\x1a\n"
 TITLEPAGE_RE = re.compile(rb'titlepage\s*=\s*"([^"]+)"', re.IGNORECASE)
+TITLEMAP_RE = re.compile(rb'\bmap\s+(titlemap)\b', re.IGNORECASE)
+MAINMENU_RE = re.compile(rb'listmenu\s+"mainmenu"\s*\{(.*?)\}', re.IGNORECASE | re.DOTALL)
+STATICPATCH_RE = re.compile(rb'staticpatch(?:centered)?\s+-?\d+\s*,\s*-?\d+\s*,\s*"([^"]+)"', re.IGNORECASE)
 GRAPHIC_FOLDERS = ("graphics/", "")
+STAND_INS = ("INTERPIC", "INTERBG")
+STARTUP_PLANAR = 48 + 640 * 480 // 2  # Hexen-style startup screen: 16-colour palette, four bit planes
+TEXTURE_PATCH = rb'(?:graphic|texture|walltexture|sprite|flat)\s+"?%s"?\s*,[^{]*\{[^}]*?\bpatch\s+"?([^",\s]+)'
 
 
 @dataclass
@@ -24,6 +30,7 @@ class Art:
     size: tuple[int, int] = (0, 0)
     palette: bytes = b""
     mask: bytes = b""  # indexed only: 255 where a patch has a pixel, 0 where it's transparent
+    fallback: bool = False  # not the mod's own title picture: the base game's, or a stand-in
 
 
 def _decode_patch(data: bytes) -> tuple[int, int, bytes, bytes] | None:
@@ -78,16 +85,28 @@ def find_title_art(iwad: Path | None, files: list[Path]) -> Art | None:
         page = arcs.mapinfo_value(TITLEPAGE_RE)
         candidates = ([page] if page else []) + ["TITLEPIC", "TITLE"]
         palette = _palette(arcs)
-        for name in candidates:
-            for a in arcs.items:
-                data = a.lump(name, GRAPHIC_FOLDERS)
-                if data and (art := _decode(data, palette)):
-                    return art
+        searches = [(candidates, arcs.items)]
+        own = [a for a in arcs.items if a.path != iwad]
+        if any(a.mapinfo_value(TITLEMAP_RE) for a in own):
+            # A mod's 3D title map we can't render: its own intermission backdrop beats the IWAD's picture.
+            searches.insert(0, (candidates + list(STAND_INS), own))
+        for names, items in searches:
+            for name in names:
+                for a in items:
+                    data = a.lump(name, GRAPHIC_FOLDERS)
+                    if data and (art := _decode(data, palette)):
+                        art.fallback = bool(files) and (a.path == iwad or name in STAND_INS)
+                        return art
         return None
 
 
 LOGO_LUMPS = ["M_DOOM", "M_HTIC", "M_STRIFE"]  # main-menu logo: Doom, Heretic/Hexen, Strife
 LOGO_MAX_H = 130  # menu logos are small patches; taller "logos" are full screens or menu frames
+LOGO_MIN_RATIO = 2.5  # a fallback *logo* image must be a wordmark, not an emblem or icon
+LOGO_MIN_W = 160  # smaller ones are icons and HUD bits
+TITLE_MIN_RATIO = 1.5  # a *title* card (Brutal Wolfenstein's 1280x720 ZMCTITLE), not a portrait or tile
+STOCK_TITLES = re.compile(r"^(titlepi\w*|title|titlemap|interpic)$")
+CREDIT_LOGOS = re.compile(r"^(db|udb|gz|zd|uz|lz|id|sd|doombuilder|gzdoom|zdoom|uzdoom)_?logo")  # editor and engine credits
 
 
 def _same_picture(a: tuple, b: tuple) -> bool:
@@ -122,16 +141,136 @@ def find_logo(iwad: Path | None, files: list[Path]) -> Art | None:
         palette = _palette(own) or _palette(base)
         if not palette:
             return None
-        stock = base.find(LOGO_LUMPS, GRAPHIC_FOLDERS)
-        stock_patch = _decode_patch(stock) if stock else None
         if not files:
-            return _logo_rgba(stock_patch, palette) if stock_patch else None
-        data = own.find(LOGO_LUMPS, GRAPHIC_FOLDERS)
-        if not data:
-            return None
-        if data.startswith(PNG_SIG):
-            return Art("encoded", data)
-        patch = _decode_patch(data)
-        if not patch or (stock_patch and _same_picture(patch, stock_patch)):
-            return None
-        return _logo_rgba(patch, palette)
+            return _game_logo(base, palette, None)
+        stock = base.find(LOGO_LUMPS, GRAPHIC_FOLDERS)
+        return _game_logo(own, palette, _decode_patch(stock) if stock else None)
+
+
+def _game_logo(arcs: Archives, palette: bytes, stock_patch: tuple | None) -> Art | None:
+    """In order: the picture the main menu names, the usual logo lump, a wide *logo* image, a TEXTURES
+    alias of the menu's picture (often a plainer menu version), then a *title* card."""
+    name = _menu_logo(arcs)
+    renamed = name if name and name.upper() not in LOGO_LUMPS else None
+    if renamed and (data := _anywhere(arcs, renamed)):
+        return _logo_art(data, palette)
+    if data := arcs.find(LOGO_LUMPS, GRAPHIC_FOLDERS):
+        patch = None if data.startswith(PNG_SIG) else _decode_patch(data)
+        if not (patch and stock_patch and _same_picture(patch, stock_patch)):
+            art = _logo_art(data, palette)  # None when blanked on purpose: the mod wants no logo
+            if art and (card := _named_logo(arcs, "title")) and _width(card) >= 2 * _width(art):
+                return card  # a high-res title card of the same logo (Simon's Destiny's 640px vs its 200px menu logo)
+            return art
+    if art := _named_logo(arcs, "logo"):
+        return art
+    if renamed and (alias := _texture_patch(arcs, renamed)) and (data := _anywhere(arcs, alias)):
+        return _logo_art(data, palette)
+    return _named_logo(arcs, "title")
+
+
+def _logo_art(data: bytes, palette: bytes) -> Art | None:
+    if data.startswith(PNG_SIG) or data.startswith(b"\xff\xd8"):
+        return Art("encoded", data)
+    patch = _decode_patch(data)
+    return _logo_rgba(patch, palette) if patch else None
+
+
+def _width(art: Art) -> int:
+    return art.size[0] if art.kind != "encoded" else (_png_size(art.data) or (0, 0))[0]
+
+
+def _png_size(data: bytes) -> tuple[int, int] | None:
+    if not data.startswith(PNG_SIG) or len(data) < 24:
+        return None
+    return struct.unpack_from(">II", data, 16)
+
+
+def _named_logo(own: Archives, word: str) -> Art | None:
+    """A wide picture named like a logo or title card, which some mods draw on a 3D title map, show in an
+    intro, or keep among their textures instead of a menu logo."""
+    ratio = LOGO_MIN_RATIO if word == "logo" else TITLE_MIN_RATIO
+    for a in own.items:
+        names = getattr(a, "names", None)
+        entries = names.items() if names is not None else ((k.lower(), k) for k in a.lumps)
+        for n, real in entries:
+            stem = Path(n).stem.lower()
+            if word not in stem or STOCK_TITLES.match(stem) or CREDIT_LOGOS.match(stem):
+                continue
+            data = a.read(real) if names is not None else a.lump(real)
+            if data and (size := _png_size(data)) and size[0] >= max(LOGO_MIN_W, size[1] * ratio):
+                return Art("encoded", data)
+    return None
+
+
+def _menu_logo(own: Archives) -> str | None:
+    """The picture a mod's own main menu draws, which is its logo whatever the lump is called."""
+    for a in own.items:
+        data = a.lump("MENUDEF")
+        if data and (menu := MAINMENU_RE.search(data)) and (m := STATICPATCH_RE.search(menu.group(1))):
+            return m.group(1).decode("ascii", "replace")
+    return None
+
+
+def _renamed_menu_logo(arcs: Archives) -> bytes | None:
+    """The main menu's own picture when it isn't a stock logo name. Stock names stay in the usual folders:
+    elsewhere a mod's "M_DOOM" can be an unrelated menu panel."""
+    name = _menu_logo(arcs)
+    if not name or name.upper() in LOGO_LUMPS:
+        return None
+    if data := _anywhere(arcs, name):
+        return data
+    patch = _texture_patch(arcs, name)
+    return _anywhere(arcs, patch) if patch else None
+
+
+def _texture_patch(arcs: Archives, name: str) -> str | None:
+    """A TEXTURES/HIRESTEX alias (Bloom's menu draws "LOGO", defined as its M_BLOOM picture)."""
+    pattern = re.compile(TEXTURE_PATCH % re.escape(name.encode()), re.IGNORECASE | re.DOTALL)
+    for a in arcs.items:
+        for lump in ("TEXTURES", "HIRESTEX"):
+            data = a.lump(lump)
+            if data and (m := pattern.search(re.sub(rb"//[^\n]*", b"", data))):
+                return m.group(1).decode("ascii", "replace")
+    return None
+
+
+def _anywhere(own: Archives, name: str) -> bytes | None:
+    """A lump by name, in any folder: menus can draw sprites and textures, not just graphics."""
+    stem = Path(name).stem.lower()
+    for a in own.items:
+        names = getattr(a, "names", None)
+        if names is None:
+            if data := a.lump(name):
+                return data
+            continue
+        for n, real in names.items():
+            if not n.endswith("/") and Path(n).stem == stem:
+                return a.read(real)
+    return None
+
+
+_BITS = [[bytes(((b >> (7 - k)) & 1) << plane for k in range(8)) for b in range(256)] for plane in range(4)]
+
+
+def _planar(data: bytes) -> Art:
+    """Hexen's 640x480 startup screen: a 6-bit 16-colour palette, then one bit plane per colour bit."""
+    palette = bytes((c << 2) | (c >> 4) for c in data[:48]).ljust(768, b"\0")
+    size = 640 * 480 // 8
+    pixels = 0
+    for plane in range(4):
+        bits = _BITS[plane]
+        chunk = data[48 + plane * size : 48 + (plane + 1) * size]
+        pixels |= int.from_bytes(b"".join(bits[b] for b in chunk), "big")
+    return Art("indexed", pixels.to_bytes(640 * 480, "big"), (640, 480), palette)
+
+
+def find_startup(files: list[Path]) -> Art | None:
+    """The screen the engine shows while a mod loads. Mods without a title picture or logo of their own
+    often put their real key art here."""
+    with Archives(None, files) as own:
+        data = own.find(["STARTUP"], GRAPHIC_FOLDERS)
+    if not data:
+        return None
+    if data.startswith(PNG_SIG) or data.startswith(b"\xff\xd8"):
+        return Art("encoded", data)
+    return _planar(data) if len(data) == STARTUP_PLANAR else None

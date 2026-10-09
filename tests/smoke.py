@@ -330,4 +330,170 @@ assert r and r.source != "readme.txt" and r.author == "Bloom Team" and "Crossove
 assert "Just thanks to everyone" in r.text  # the readme's own text stays below the entry
 r = _readme_for("kn2", {"Bloom.pk3": b"x", "Bloom.txt": b"Title : B\nAuthor : A\nDescription : the readme's own words are used when it has them"}, "Bloom.pk3")
 assert r and r.source == "Bloom.txt", r
+import couch_doom.ui as ui_mod  # noqa: E402
+
+real_create, fails = app._create_window, [2]
+real_sleep, ui_mod.time.sleep = ui_mod.time.sleep, lambda _s: None
+real_log, ui_mod.log.write = ui_mod.log.write, lambda *a, **k: None
+
+
+def flaky_create() -> None:
+    if fails[0]:
+        fails[0] -= 1
+        raise pygame.error("Couldn't create window: used all of its system allowance of handles")
+    real_create()
+
+
+app._create_window = flaky_create
+app._open_window()  # a window that only opens on the third try still opens
+assert fails[0] == 0 and app.screen.get_size() == (1440, 810)
+del app._create_window
+ui_mod.time.sleep, ui_mod.log.write = real_sleep, real_log
+pads = app.input.pad_count
+app.input.suspend()
+assert app.input.pad_count == 0 and not pygame.joystick.get_init()
+app.input.resume()
+assert app.input.pad_count == pads and pygame.joystick.get_init()  # pads come back after a game
+from couch_doom.launch import presented_files  # noqa: E402
+from couch_doom.music import midi_volume, VOLUME  # noqa: E402
+
+midi = b"MThd\0\0\0\x06\0\0\0\x01\0\x60MTrk\0\0\0\x04\0\xff\x2f\0"
+strife = root / "strife1.wad"
+strife.write_bytes(_wad_with({"D_INTRO": midi, "D_LOGO": midi + b"\0"}))
+assert find_title_music(strife, []).data == midi + b"\0"  # Strife's title plays D_LOGO, not its intro song
+
+dk = root / "dk"
+dk.mkdir()
+(dk / "HEXEN.WAD").write_bytes(b"x")
+(dk / "hexdd.wad").write_bytes(b"x")
+base, shown = presented_files(Preset("DK", "s", "e", dk / "hexdd.wad", []))
+assert base == dk / "HEXEN.WAD" and shown == [dk / "hexdd.wad"]  # an add-on IWAD stands on its base game
+assert presented_files(Preset("H", "s", "e", dk / "HEXEN.WAD", [])) == (dk / "HEXEN.WAD", [])
+
+spiky, even = midi_volume(2.6, 0.22), midi_volume(1.0, 0.22)
+assert spiky == even and spiky * 0.22 == even * 0.22  # one loud hit no longer pulls the whole track down
+assert midi_volume(1.0, 0.03) == 0.9  # a quiet track is raised only until its peak would clip
+assert midi_volume(0.5, 0.01) == 1.0 and midi_volume(0.0, 0.0) == VOLUME
+from couch_doom.music import MusicPlayer, Prepared  # noqa: E402
+
+if pygame.mixer.get_init():
+    mp = MusicPlayer(None, (pygame.mixer.Channel(0), pygame.mixer.Channel(1)))
+    tune = Prepared("pcm", bytes(44100 * 8 * 3), 0.5, "stock")
+    mp.cache["stock"] = tune
+    a, b, quiet = (root / "a.wad", ()), (root / "b.wad", ()), (root / "c.wad", ())
+    mp.tracks.update({a: "stock", b: "stock", quiet: None})
+    mp.request(1, a[0], [])
+    mp.update()
+    channel = mp.active
+    assert mp.playing == "stock" and mp.channels[channel].get_busy()
+    mp.request(2, b[0], [])
+    mp.update()
+    assert mp.active == channel and mp.playing == "stock" and mp.pending is None  # same track plays on, not restarted
+    mp.request(3, quiet[0], [])
+    assert mp.playing is None  # a preset without title music fades it out
+    mp.shutdown()
 print("smoke ok:", ", ".join(sorted(found)), "| UI", app.screen.get_size())
+from couch_doom.titleart import find_logo, find_title_art  # noqa: E402
+
+
+def _png(w: int, h: int, tag: bytes = b"") -> bytes:
+    return b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR" + w.to_bytes(4, "big") + h.to_bytes(4, "big") + tag
+
+
+d2 = root / "doom2.wad"
+d2.write_bytes(_wad_with({"PLAYPAL": b"\x80" * 768, "TITLEPIC": _png(320, 200, b"stock"), "D_DM2TTL": midi}))
+emb = root / "emb.pk3"
+with zipfile.ZipFile(emb, "w", zipfile.ZIP_DEFLATED) as z:
+    z.writestr("main.wad", _wad_with({"TITLEPIC": _png(320, 200, b"mine"), "D_DM2TTL": midi + b"\1"}))
+    z.writestr("maps/MAP01.wad", _wad_with({"TITLEPIC": _png(320, 200, b"map")}))
+assert find_title_art(d2, [emb]).data.endswith(b"mine")  # a WAD at a pk3's root loads with it, like the engine does
+assert find_title_music(d2, [emb]).data == midi + b"\1"
+tm = root / "titlemap.pk3"
+with zipfile.ZipFile(tm, "w") as z:
+    z.writestr("zmapinfo.txt", 'map TITLEMAP "Welcome"\n{\n  sky1 = "SKY1"\n  music = "D_TITLE"\n}\n')
+    z.writestr("music/D_TITLE.ogg", b"OggS" + b"\2" * 20)
+    z.writestr("textures/runes/logo1.png", _png(512, 512))
+    z.writestr("textures/logo2021.png", _png(986, 180, b"word"))
+assert find_title_music(d2, [tm]).data[4] == 2  # no titlemusic: the title map's own song
+assert find_title_art(d2, [tm]).data.endswith(b"stock")  # a 3D title map and nothing of its own: the IWAD's picture
+with zipfile.ZipFile(tm, "a") as z:
+    z.writestr("graphics/interbg.png", _png(1920, 1080, b"inter"))
+assert find_title_art(d2, [tm]).data.endswith(b"inter")  # the mod's own intermission backdrop stands in
+assert find_logo(d2, [tm]).data.endswith(b"word")  # the wide wordmark, not the square emblem
+ipk = root / "tc.ipk3"
+with zipfile.ZipFile(ipk, "w") as z:
+    z.writestr("mapinfo.txt", 'map TITLEMAP "Title" { music = "D_TITLE" }')
+    z.writestr("graphics/titlepic.png", _png(320, 200, b"tc"))
+assert find_title_art(ipk, []).data.endswith(b"tc")  # a standalone game's own title map doesn't hide its picture
+di = root / "infinite.pk3"
+with zipfile.ZipFile(di, "w") as z:
+    z.writestr("MAPINFO", 'map TITLEMAP ""\n{\n  music = ""\n}\n')
+    z.writestr("acs/intro.o", b"ACSE\0\0ResetTitlemap\0music/DIM_1.mp3\0TITLEMAP\0")
+    z.writestr("music/DIM_1.mp3", b"ID3" + b"\3" * 20)
+    z.writestr("MENUDEF", 'LISTMENU "MainMenu"\n{\n  StaticPatch 94, 0, "DILSC0"\n  TextItem "START", "s", "x"\n}\n')
+    z.writestr("sprites/intro/DILSC0.png", _png(123, 82, b"dils"))
+track = find_title_music(d2, [di])
+assert track and track.name == "DIM_1" and track.data[3] == 3, track  # started by the title map's own script
+assert find_logo(d2, [di]).data.endswith(b"dils")  # whatever the main menu draws is the logo
+from couch_doom.titleart import find_startup  # noqa: E402
+
+pal16 = bytes(range(0, 48))
+planes = [b"\x80" + b"\0" * (640 * 480 // 8 - 1), b"\0" * (640 * 480 // 8), b"\0" * (640 * 480 // 8), b"\x80" + b"\0" * (640 * 480 // 8 - 1)]
+st = root / "startup.pk3"
+with zipfile.ZipFile(st, "w") as z:
+    z.writestr("STARTUP", pal16 + b"".join(planes))
+art = find_startup([st])
+assert art and art.size == (640, 480) and art.data[0] == 9 and art.data[1] == 0  # bit planes 0 and 3 set the first pixel
+assert art.palette[27:30] == bytes((c << 2) | (c >> 4) for c in pal16[27:30])  # 6-bit colours widened
+assert find_startup([emb]) is None
+assert find_title_art(d2, [emb]).fallback is False and find_title_art(d2, [tm]).fallback  # Doom 2's picture stands in
+bl = root / "bloom.pk3"
+with zipfile.ZipFile(bl, "w") as z:
+    z.writestr("MENUDEF.txt", 'ListMenu "MainMenu"\n{\n  IfGame(Doom)\n  {\n    StaticPatch 73, -20, "LOGO"\n  }\n}\n')
+    z.writestr("HIRESTEX.txt", '//Graphic "LOGO", 1, 1 { Patch "WRONG", 0, 0 }\nGraphic "LOGO", 825, 825\n{\n  XScale 5.0\n  Patch "M_BLOOM", 140, 0\n}\n')
+    z.writestr("graphics/m_bloom.png", _png(625, 340, b"bloom"))
+    z.writestr("graphics/misc/m_doom.png", _png(480, 240, b"panel"))
+assert find_logo(d2, [bl]).data.endswith(b"bloom")  # a TEXTURES alias resolves to its picture
+bw = root / "bw.pk3"
+with zipfile.ZipFile(bw, "w") as z:
+    z.writestr("MENUDEF", 'ListMenu "MainMenu"\n{\n  StaticPatch 99, 2, "M_DOOM"\n}\n')
+    z.writestr("graphics/misc/m_doom.png", _png(480, 240, b"panel"))
+assert find_logo(d2, [bw]) is None  # a stock name buried in a subfolder is some other menu graphic
+sq = root / "square.ipk3"
+with zipfile.ZipFile(sq, "w") as z:
+    z.writestr("PLAYPAL", b"\x80" * 768)
+    z.writestr("MENUDEF.txt", 'ListMenu "MainMenu"\n{\n  StaticPatchCentered 160, 4, "M_SQUARE"\n}\n')
+    z.writestr("graphics/M_SQUARE.png", _png(200, 60, b"square"))
+assert find_logo(sq, []).data.endswith(b"square")  # a standalone game's own menu logo
+zt = root / "zmc.pk3"
+with zipfile.ZipFile(zt, "w") as z:
+    z.writestr("textures.wad", _wad_with({"ZMCTITLE": _png(1280, 720, b"zmc"), "TITLEPI2": _png(640, 400, b"no")}))
+    z.writestr("graphics/titlepic.png", _png(320, 200, b"pic"))
+assert find_logo(d2, [zt]).data.endswith(b"zmc")  # a title card among its textures, inside a WAD in the pk3
+el = root / "elem2.pk3"
+with zipfile.ZipFile(el, "w") as z:
+    z.writestr("MENUDEF.txt", 'ListMenu "MainMenu"\n{\n  StaticPatch 0, 0, "M_SUBTTL"\n}\n')
+    z.writestr("TEXTURES.txt", 'Graphic "M_SUBTTL", 1024, 600 { Patch "SUBTTL", 0, 0 }')
+    z.writestr("graphics/subttl.png", _png(1024, 600, b"menu"))
+    z.writestr("textures/logo2021.png", _png(986, 180, b"word"))
+assert find_logo(d2, [el]).data.endswith(b"word")  # a wide *logo* picture beats a menu texture alias
+cv = root / "castle.ipk3"
+with zipfile.ZipFile(cv, "w") as z:
+    z.writestr("PLAYPAL", b"\x80" * 768)
+    z.writestr("graphics/CVTITLE.png", _png(640, 400, b"cv"))
+    z.writestr("graphics/titlepic.png", _png(320, 200, b"pic"))
+assert find_logo(cv, []).data.endswith(b"cv")  # a standalone game's intro title card
+card = pygame.Surface((40, 20))
+card.fill((10, 10, 10))
+card.fill((200, 40, 40), pygame.Rect(10, 5, 20, 10))
+assert ui_mod._dark_backed(card)
+keyed = ui_mod._key_out_dark(card)
+assert keyed.get_at((0, 0)).a == 0 and keyed.get_at((20, 10)).a == 255  # backing gone, lettering kept
+with zipfile.ZipFile(cv, "a") as z:
+    z.writestr("graphics/M_DOOM.png", _png(200, 80, b"small"))
+assert find_logo(cv, []).data.endswith(b"cv")  # the intro's 640px title card beats the 200px menu copy
+ash = root / "ashes.pk3"
+with zipfile.ZipFile(ash, "w") as z:
+    z.writestr("textures/dblogo.png", _png(500, 150, b"db"))
+    z.writestr("textures/gzlogo.png", _png(500, 150, b"gz"))
+assert find_logo(d2, [ash]) is None  # editor and engine credit logos aren't the mod's
