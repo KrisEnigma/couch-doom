@@ -20,8 +20,10 @@ Controls (Xbox names; PlayStation and Switch pads work too)
   X           Info sheet    Y   Search
   LB / RB     Jump section  R3  Add to favorites
   L3          Switch launcher
-  Keyboard: arrows, Enter to play, Esc to quit, F4 to switch launcher,
-  or just type to search.
+  View/Back   Music on or off
+  LT / RT     Page up / down; in the info sheet the right stick scrolls too
+  Keyboard: arrows, Enter to play, Esc to quit, Tab for info, F2 music,
+  F3 favorite, F4 switch launcher, Page Up / Down, or just type to search.
   Mouse: click a preset to select it, click again to play. Wheel scrolls,
   right-click goes back, and the button hints at the bottom are clickable.
 
@@ -30,6 +32,8 @@ CouchDoom isn't code-signed, so the first start needs one extra step:
   macOS: if it says the app can't be opened or verified, open System Settings >
   Privacy & Security, scroll down, and click "Open Anyway" next to CouchDoom.
 
-MIDI title music needs a SoundFont: drop any .sf2 file into a "soundfonts" folder next
-to CouchDoom.exe, CouchDoom.app or CouchDoom. Without one, MIDI music stays silent and
-everything else works.
+MIDI title music needs a SoundFont. CouchDoom uses the ones that come with GZDoom,
+UZDoom or VKDoom, so usually there's nothing to do. To use a different one, drop any
+.sf2 file into a "soundfonts" folder next to CouchDoom.exe, CouchDoom.app or CouchDoom;
+the largest file there wins. Without any, MIDI music stays silent and everything else
+works.
