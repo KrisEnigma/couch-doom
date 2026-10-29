@@ -9,7 +9,8 @@ ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "packaging" / "dmg-background.png"
 ICON = ROOT / "packaging" / "couch-doom.png"
 FONT_DIR = ROOT / "src" / "couch_doom" / "assets" / "fonts"
-SCALE = 2
+# Finder treats the background's pixel dimensions as its logical size; keep this at 1x to match --window-size.
+SCALE = 1
 WIDTH, HEIGHT = 800 * SCALE, 450 * SCALE
 
 INK = (19, 19, 21)
@@ -75,6 +76,15 @@ def main() -> None:
     # Small terminal-like ticks link the arrow to the two Finder icon positions.
     for x in (245, 555):
         draw.line((x * SCALE, 238 * SCALE, x * SCALE, 264 * SCALE), fill=(246, 235, 216, 70), width=2)
+
+    # Finder draws icon names in dark text; these warm label beds keep them readable on the charcoal artwork.
+    label_y = 342 * SCALE
+    label_width, label_height = 140 * SCALE, 24 * SCALE
+    for center_x in (195, 605):
+        left = center_x * SCALE - label_width // 2
+        top = label_y * SCALE - label_height // 2
+        draw.rounded_rectangle((left, top, left + label_width, top + label_height), radius=12 * SCALE,
+                               fill=(246, 235, 216, 235), outline=(197, 177, 150, 130), width=1)
 
     draw.text((64 * SCALE, 401 * SCALE), "macOS 10.15+  /  HELP + LICENSE INCLUDED", font=font("JetBrainsMono-Regular.ttf", 8), fill=MUTED + (235,))
     image.save(OUTPUT, optimize=True)
