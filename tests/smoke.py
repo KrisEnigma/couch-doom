@@ -11,10 +11,12 @@ import sqlite3
 import struct
 import sys
 import tempfile
+import threading
 import time
 import zipfile
 from concurrent.futures import Future
 from pathlib import Path
+from unittest.mock import patch
 
 root = Path(tempfile.mkdtemp(prefix="couchdoom-smoke-"))
 if os.name == "nt":
@@ -193,7 +195,13 @@ assert upd.whats_new(notes_md, "0.7.0") == ["Thing with code and a link.", "Seco
 assert upd.check("0.1.0") is None  # disabled by the env var set above
 
 state = State(root / "state.json")
-app = App(dr, state, windowed=True)
+check_started = threading.Event()
+def fake_update_check(*args):
+    check_started.set()
+    return None
+with patch.object(upd, "disabled", return_value=False), patch.object(upd, "check", side_effect=fake_update_check):
+    app = App(dr, state, windowed=True)
+assert app.update_job is not None and app.update_pool is not None and check_started.wait(1)
 app._draw_loading("Handover", 0.5)  # the splash keeps drawing on the dummy display
 now = time.monotonic()
 app._open_update({"version": "9.9.9", "current": "0.6.0", "url": "https://github.com/KrisEnigma/couch-doom/releases", "notes": ["x"]})
@@ -219,6 +227,8 @@ for _ in range(3):
     pygame.event.pump()
     app.tick(now, 1 / 60)
     app._draw(now)
+if app.update_pool:
+    app.update_pool.shutdown(wait=True)
 from couch_doom import log as clog  # noqa: E402
 
 lp = root / "log" / "couch-doom.log"

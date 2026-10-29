@@ -124,6 +124,20 @@ class DownloadTests(unittest.TestCase):
                 self_update._extract_zip(archive.getvalue(), Path(temp) / "stage")
             self.assertFalse((Path(temp) / "escaped").exists())
 
+    def test_zip_executable_mode_is_preserved(self):
+        if os.name == "nt":
+            self.skipTest("Unix executable bits are not represented by Windows file permissions")
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zf:
+            executable = zipfile.ZipInfo("CouchDoom/CouchDoom")
+            executable.create_system = 3
+            executable.external_attr = 0o100755 << 16
+            zf.writestr(executable, b"app")
+        with tempfile.TemporaryDirectory() as temp:
+            self_update._extract_zip(archive.getvalue(), Path(temp) / "stage")
+            mode = (Path(temp) / "stage/CouchDoom/CouchDoom").stat().st_mode
+            self.assertTrue(mode & 0o111, oct(mode))
+
     def test_internal_symlink_is_preserved_and_escaping_symlink_rejected(self):
         good = io.BytesIO()
         with zipfile.ZipFile(good, "w") as zf:
@@ -196,6 +210,7 @@ class DownloadTests(unittest.TestCase):
             app = root / "stage" / "extracted" / "CouchDoom"
             app.mkdir(parents=True)
             (app / "CouchDoom.exe").write_text("binary")
+            (app / "CouchDoom.exe").chmod(0o755)
             staged = self_update.StagedUpdate("1.2.0", root / "stage", app, root / "archive.zip")
             install = root / "installed" / "CouchDoom"
             install.parent.mkdir()

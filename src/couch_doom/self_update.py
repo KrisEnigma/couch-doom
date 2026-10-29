@@ -151,6 +151,9 @@ def _extract_zip(data: bytes, destination: Path) -> None:
                     path.parent.mkdir(parents=True, exist_ok=True)
                     with archive.open(item) as src, path.open("wb") as dst:
                         shutil.copyfileobj(src, dst)
+                    permissions = (item.external_attr >> 16) & 0o777 if item.create_system == 3 else 0
+                    if permissions:
+                        path.chmod(permissions)
     except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
         if isinstance(exc, UpdateError):
             raise
@@ -218,7 +221,7 @@ def launch_apply_helper(staged: StagedUpdate, install_path: Path, pid: int, plat
     helper_app = helper_root / staged.app_path.name
     shutil.copytree(staged.app_path, helper_app, symlinks=True)
     helper = helper_executable(helper_app, platform)
-    if not helper.is_file():
+    if not helper.is_file() or (os.name != "nt" and not os.access(helper, os.X_OK)):
         raise UpdateError("The staged update helper was missing.")
     subprocess.Popen([str(helper), "--apply-update", str(staged.app_path), str(install_path), str(pid), platform, str(staged.root)],
                      cwd=str(helper_root), close_fds=True)

@@ -67,7 +67,7 @@ ART_MIN_FILL = 0.62  # of the art panel's height
 ART_MAX_ZOOM = 1.25
 FAVORITES = "Favorites"
 INFO_TABS = ("Readme", "ENDOOM")
-UPDATE_DELAY_SECONDS = 3.0  # let the list settle before a notice appears over it
+UPDATE_DELAY_SECONDS = 1.0  # let the list settle briefly before a notice appears over it
 # (key, label, caption) for the update notice; "later" is index 1 because B and a click outside both mean it.
 UPDATE_CHOICES = (
     ("open", "Open release page", "Opens GitHub in your browser"),
@@ -361,6 +361,9 @@ class App:
         self.update_progress: tuple[int, int | None] = (0, None)
         self.update_error: str | None = None
         self.soundfont_choice = soundfont
+
+        # Check while the window, assets, and music are being initialized so a ready notice can appear promptly.
+        self._start_update_check(time.monotonic())
 
         _set_dpi_aware()
         if not windowed:
@@ -2522,7 +2525,6 @@ class App:
     def run(self) -> int:
         clock = pygame.time.Clock()
         last = time.monotonic()
-        self._start_update_check(last)
         try:
             while self.running:
                 now = time.monotonic()
