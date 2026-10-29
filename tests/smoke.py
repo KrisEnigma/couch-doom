@@ -96,7 +96,9 @@ wad(port / "freedoom2.wad", ["MAP01", "FREEDOOM"])
 wad(wads / "hexdd.wad", ["TITLE", "MAP60"])  # needs Hexen, which isn't there: the port hides it
 (wads / "doom.wad").write_bytes(b"not a wad")
 wad(wads / "own.iwad", ["IWADINFO"], data={"IWADINFO": b'IWad { Name = "Own Game" MustContain = "MAP01" }'})
-ini_dir = port if os.name == "nt" else root / "config" / "uzdoom"
+ini_dir = (port if os.name == "nt"
+           else root / "Library" / "Preferences" if sys.platform == "darwin"
+           else root / "config" / "uzdoom")
 ini_dir.mkdir(parents=True, exist_ok=True)
 (ini_dir / ("uzdoom_portable.ini" if os.name == "nt" else "uzdoom.ini")).write_text(
     f"[IWADSearch.Directories]\nPath=$PROGDIR\nPath={wads}\nPath=$COUCHDOOM_UNSET\n[GlobalSettings]\ni_searchdistributors=false\n")
