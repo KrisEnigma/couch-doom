@@ -89,13 +89,13 @@ jobs:
                 --volname "CouchDoom" \
                 --background "$PWD/packaging/dmg-background.png" \
                 --window-pos 180 120 \
-                --window-size 800 450 \
-                --icon-size 112 \
-                --text-size 12 \
-                --icon "CouchDoom.app" 195 270 \
+                --window-size 640 360 \
+                --icon-size 90 \
+                --text-size 11 \
+                --icon "CouchDoom.app" 156 216 \
                 --hide-extension "CouchDoom.app" \
-                --app-drop-link 605 270 \
-                --icon "Help & License" 735 370 \
+                --app-drop-link 484 216 \
+                --icon "Help & License" 584 296 \
                 --no-internet-enable \
                 "$name.dmg" stage-dmg
               ;;
