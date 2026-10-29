@@ -30,8 +30,10 @@ def candidates() -> list[Path]:
     env = os.environ.get("DOOMRUNNER_OPTIONS")
     if env:
         return [Path(env)]
-    # Portable DoomRunner keeps options.json beside its exe; installed, in the per-user app data folder.
-    found = [PROJECT_ROOT / "options.json", PROJECT_ROOT.parent / "options.json"] if FROZEN else []
+    # Portable DoomRunner keeps options.json beside its exe; it may sit in a sibling folder to CouchDoom.
+    # Installed DoomRunner keeps it in the per-user app data folder.
+    found = [PROJECT_ROOT / "options.json", PROJECT_ROOT.parent / "options.json",
+             PROJECT_ROOT.parent / "DoomRunner" / "options.json"] if FROZEN else []
     if DEV_LAUNCHERS:
         found.append(DEV_LAUNCHERS / "DoomRunner" / "options.json")
     if os.name == "nt":
