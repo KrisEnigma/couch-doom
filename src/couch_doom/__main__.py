@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 import traceback
+from pathlib import Path
 
 from . import log
 from .config import STATE_FILE
@@ -36,6 +37,18 @@ def _dry_run(opts, name: str | None) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if raw_argv and raw_argv[0] == "--apply-update":
+        if len(raw_argv) != 6:
+            return 2
+        from . import self_update
+        try:
+            return self_update.apply_staged_update(Path(raw_argv[1]), Path(raw_argv[2]),
+                                                   pid=int(raw_argv[3]), platform=raw_argv[4],
+                                                   cleanup_root=Path(raw_argv[5]))
+        except Exception:
+            log.write("update", traceback.format_exc())
+            return 1
     ap = argparse.ArgumentParser(prog="couch-doom", description=__doc__)
     ap.add_argument("--options", help="Launcher settings file: DoomRunner options.json, ZDL qZDL.ini or .zdl, DoomLauncher.sqlite, "
                                        "or a GZDoom/UZDoom/VKDoom program")
@@ -44,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="Print launch commands and exit")
     ap.add_argument("--preset", help="With --dry-run: only presets whose name contains this text")
     ap.add_argument("--soundfont", help="SoundFont (.sf2/.sf3) for MIDI title music; overrides auto-detection")
-    args = ap.parse_args(argv)
+    args = ap.parse_args(raw_argv)
 
     state = State(STATE_FILE)
     explicit = Choice(*plan(args.options, args.launcher)[0]) if args.options else None

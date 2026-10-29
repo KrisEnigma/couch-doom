@@ -25,5 +25,8 @@ jobs:
       - name: Lint
         run: python -m pyflakes src tests
 
+      - name: Updater tests
+        run: python -m unittest tests.test_self_update -v
+
       - name: Smoke test
         run: python tests/smoke.py

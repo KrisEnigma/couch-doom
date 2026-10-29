@@ -3,12 +3,54 @@ from __future__ import annotations
 
 import json
 import os
+import platform as _platform
 import re
+import sys
+from dataclasses import dataclass
 import urllib.request
 
 API = "https://api.github.com/repos/KrisEnigma/couch-doom/releases/latest"
 TIMEOUT = 4.0
 MAX_NOTES = 4
+
+
+@dataclass(frozen=True)
+class ReleaseAsset:
+    name: str
+    url: str
+    sha256_url: str
+    target: str
+
+
+def asset_for_platform(os_name: str, machine: str) -> str | None:
+    os_name, machine = os_name.lower(), machine.lower()
+    arch = {"amd64": "x64", "x86_64": "x64", "arm64": "arm64", "aarch64": "arm64"}.get(machine)
+    if os_name in ("win32", "windows") and arch == "x64":
+        return "windows-x64"
+    if os_name in ("darwin", "mac", "macos") and arch:
+        return f"macos-{arch}"
+    if os_name.startswith("linux") and arch:
+        return f"linux-{arch}"
+    return None
+
+
+def _fetch_latest() -> dict:
+    req = urllib.request.Request(API, headers={"User-Agent": "CouchDoom", "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        return json.load(resp)
+
+
+def _release_asset(data: dict, tag: str, target: str | None) -> ReleaseAsset | None:
+    if not target:
+        return None
+    suffix = ".zip" if target.startswith(("windows-", "macos-")) else ".tar.gz"
+    name = f"CouchDoom-{tag}-{target}{suffix}"
+    found = {str(item.get("name")): str(item.get("browser_download_url", ""))
+             for item in data.get("assets", []) if isinstance(item, dict)}
+    url, digest_url = found.get(name, ""), found.get(name + ".sha256", "")
+    if url.startswith("https://github.com/") and digest_url.startswith("https://github.com/"):
+        return ReleaseAsset(name, url, digest_url, target)
+    return None
 
 
 def parse_version(text: str) -> tuple[int, ...]:
@@ -44,14 +86,12 @@ def disabled() -> bool:
     return bool(os.environ.get("COUCHDOOM_NO_UPDATE_CHECK"))
 
 
-def check(current: str, skipped: str | None = None) -> dict | None:
+def check(current: str, skipped: str | None = None, *, platform: str | None = None) -> dict | None:
     """{"version", "current", "notes", "url"} when a newer, not-skipped release exists, else None."""
     if disabled():
         return None
     try:
-        req = urllib.request.Request(API, headers={"User-Agent": f"CouchDoom/{current}", "Accept": "application/vnd.github+json"})
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-            data = json.load(resp)
+        data = _fetch_latest()
         tag = str(data["tag_name"])
         url = str(data["html_url"])
         body = str(data.get("body") or "")
@@ -62,4 +102,6 @@ def check(current: str, skipped: str | None = None) -> dict | None:
         return None
     if not url.startswith("https://github.com/"):
         return None
-    return {"version": version, "current": current, "notes": whats_new(body, version), "url": url}
+    target = platform or asset_for_platform(sys.platform, _platform.machine())
+    return {"version": version, "current": current, "notes": whats_new(body, version), "url": url,
+            "asset": _release_asset(data, tag, target)}

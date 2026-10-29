@@ -70,19 +70,29 @@ jobs:
               cp -R dist/CouchDoom/. stage/CouchDoom/
               cp "packaging/How to use.txt" LICENSE stage/CouchDoom/
               (cd stage && 7z a -tzip "../$name.zip" CouchDoom >/dev/null)
-              echo "file=$name.zip" >> "$GITHUB_OUTPUT" ;;
+              ;;
             macos-*)
               cp -R dist/CouchDoom.app stage/CouchDoom/
               cp "packaging/How to use.txt" LICENSE stage/CouchDoom/
               # ditto keeps the bundle's symlinks and ad-hoc signature intact; plain zip breaks them.
               ditto -c -k --keepParent stage/CouchDoom "$name.zip"
-              echo "file=$name.zip" >> "$GITHUB_OUTPUT" ;;
+              ;;
             linux-*)
               cp -R dist/CouchDoom/. stage/CouchDoom/
               cp "packaging/How to use.txt" LICENSE stage/CouchDoom/
               tar -C stage -czf "$name.tar.gz" CouchDoom
-              echo "file=$name.tar.gz" >> "$GITHUB_OUTPUT" ;;
+              ;;
           esac
+          python - "$name" <<'PY'
+          import hashlib, pathlib, sys
+          archive = pathlib.Path(sys.argv[1] + (".zip" if sys.argv[1].endswith(("windows-x64", "macos-arm64", "macos-x64")) else ".tar.gz"))
+          digest = hashlib.sha256()
+          with archive.open("rb") as stream:
+              for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                  digest.update(chunk)
+          archive.with_name(archive.name + ".sha256").write_text(f"{digest.hexdigest()}  {archive.name}\n", encoding="ascii")
+          PY
+          echo "file=$name.*" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v7
         with:

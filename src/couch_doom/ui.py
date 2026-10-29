@@ -7,6 +7,7 @@ import io
 import math
 import os
 import sys
+import threading
 import time
 import webbrowser
 from collections import OrderedDict
@@ -19,6 +20,7 @@ import pygame
 
 from . import __version__, draw
 from . import update as updates
+from . import self_update
 from .config import ASSET_DIR
 from . import filedialog, handover, asset_cache
 from .filedialog import open_file
@@ -72,6 +74,13 @@ UPDATE_CHOICES = (
     ("later", "Remind me later", "Ask again the next time CouchDoom starts"),
     ("skip", "Don't remind me again", "Stay quiet about {v}; a newer release will still show"),
 )
+
+
+def update_choices(info: dict | None, packaged: bool) -> tuple[tuple[str, str, str], ...]:
+    choices = list(UPDATE_CHOICES)
+    if info and info.get("asset") and packaged:
+        choices.insert(0, ("install", "Update and restart", "Download, install and restart CouchDoom"))
+    return tuple(choices)
 ENDOOM_TAB = 1
 LOGO_MAX_H = 168  # design px; menu logos are compact, so they need more height than a text title to read as big
 INFO_SLIDE_SECONDS = 0.22
@@ -347,6 +356,10 @@ class App:
         self.update_job: Future | None = None
         self.update_pool: ThreadPoolExecutor | None = None
         self.update_started = 0.0
+        self.update_install_job: Future | None = None
+        self.update_cancel: threading.Event | None = None
+        self.update_progress: tuple[int, int | None] = (0, None)
+        self.update_error: str | None = None
         self.soundfont_choice = soundfont
 
         _set_dpi_aware()
@@ -522,22 +535,29 @@ class App:
 
     def _open_update(self, info: dict) -> None:
         self.update = info
-        self.update_sel = 1  # "Remind me later": the safe default, and what B does
+        choices = update_choices(info, bool(getattr(sys, "frozen", False)))
+        self.update_sel = next(i for i, item in enumerate(choices) if item[0] == "later")
         self.update_choice = None
         self.update_opened = time.monotonic()
         self.mode = "update"
         self._sound("open")
 
     def _on_update_action(self, action: Action) -> None:
+        choices = update_choices(self.update, bool(getattr(sys, "frozen", False)))
+        if action == Action.BACK and self.update_install_job is not None and self.update_cancel:
+            self.update_cancel.set()
+            return
+        if self.update_install_job is not None:
+            return
         if action in (Action.UP, Action.DOWN):
-            sel = max(0, min(len(UPDATE_CHOICES) - 1, self.update_sel + (-1 if action == Action.UP else 1)))
+            sel = max(0, min(len(choices) - 1, self.update_sel + (-1 if action == Action.UP else 1)))
             if sel != self.update_sel:
                 self.update_sel = sel
                 self._sound("move")
         elif action in (Action.CONFIRM, Action.MENU):
             self._update_pick(self.update_sel)
         elif action == Action.BACK:
-            self._update_pick(1)
+            self._update_pick(next(i for i, item in enumerate(choices) if item[0] == "later"))
 
     def _update_hover(self, i: int) -> None:
         if i != self.update_sel:
@@ -545,9 +565,20 @@ class App:
             self._sound("move")
 
     def _update_pick(self, i: int) -> None:
+        choices = update_choices(self.update, bool(getattr(sys, "frozen", False)))
+        if not 0 <= i < len(choices):
+            return
         self.update_sel = i
-        self.update_choice = UPDATE_CHOICES[i][0]
+        self.update_choice = choices[i][0]
         info = self.update or {}
+        if self.update_install_job is not None and self.update_choice != "install":
+            return
+        if self.update_choice == "install":
+            if self.update_install_job is not None and self.update_cancel:
+                self.update_cancel.set()
+                return
+            self._start_update_install()
+            return
         if self.update_choice == "open" and info.get("url"):
             try:
                 webbrowser.open(info["url"])
@@ -558,6 +589,28 @@ class App:
             self.state.skip_update(info["version"])
         self._close_overlay()
 
+    def _start_update_install(self) -> None:
+        info = self.update or {}
+        asset = info.get("asset")
+        if not asset or self.update_install_job and not self.update_install_job.done():
+            return
+        install_path = self_update.installation_path(Path(sys.executable), asset.target)
+        if install_path is None:
+            self.update_error = "Automatic updating is available in packaged builds only."
+            return
+        self.update_error = None
+        self.update_progress = (0, None)
+        self.update_cancel = threading.Event()
+        if self.update_pool is None:
+            self.update_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="update")
+        def download():
+            return self_update.download_and_stage(
+                asset, info["version"], staging_root=install_path.parent, platform=asset.target,
+                progress=lambda done, total: setattr(self, "update_progress", (done, total)),
+                cancel=self.update_cancel,
+            )
+        self.update_install_job = self.update_pool.submit(download)
+
     def _start_update_check(self, now: float) -> None:
         if not self.state.update_check or updates.disabled():
             return
@@ -567,6 +620,25 @@ class App:
 
     def _poll_update(self, now: float) -> None:
         """Show the notice once, a few seconds in, and only from the plain list so it never interrupts anything."""
+        install_job = self.update_install_job
+        if install_job is not None and install_job.done():
+            self.update_install_job = None
+            staged = None
+            try:
+                staged = install_job.result()
+                if self.update_cancel and self.update_cancel.is_set():
+                    self_update.discard_staged(staged)
+                    self.update_error = "Update cancelled."
+                    return
+                info = self.update or {}
+                install_path = self_update.installation_path(Path(sys.executable), info["asset"].target)
+                self_update.launch_apply_helper(staged, install_path, os.getpid(), info["asset"].target)
+                self.running = False
+            except Exception as exc:
+                if staged:
+                    self_update.discard_staged(staged)
+                self.update_error = str(exc)
+                self._sound("error")
         job = self.update_job
         if job is None or not job.done() or now - self.update_started < UPDATE_DELAY_SECONDS:
             return
@@ -2140,6 +2212,7 @@ class App:
     def _draw_update(self, now: float) -> None:
         s = self.s
         info = self.update or {}
+        choices = update_choices(info, bool(getattr(sys, "frozen", False)))
         t = _ease_out((now - self.update_opened) / 0.25)
         pad, row_h, head_h = int(34 * s), int(84 * s), int(118 * s)
         width = min(self.w - 2 * self.margin, int(980 * s))
@@ -2150,14 +2223,17 @@ class App:
             wrapped = self._wrap(item, notes_font, inner - int(26 * s), 2)
             notes += [(("•  " if i == 0 else "    ") + line) for i, line in enumerate(wrapped)]
         notes_h = (int(34 * s) + len(notes) * int(32 * s)) if notes else 0
-        box = pygame.Rect(0, 0, width, 2 * pad + head_h + notes_h + len(UPDATE_CHOICES) * row_h)
+        downloading = self.update_install_job is not None
+        status_h = int(28 * s) if self.update_error or downloading else 0
+        box = pygame.Rect(0, 0, width, 2 * pad + head_h + notes_h + status_h + len(choices) * row_h)
         box.center = (self.w // 2, (self.h - self.footer_h) // 2 + int(24 * s * (1 - t)))
 
         shade = pygame.Surface((self.w, self.h - self.footer_h), pygame.SRCALPHA)
         shade.fill((0, 0, 0, int(150 * t)))
         self.screen.blit(shade, (0, 0))
         self.screen.blit(draw.rounded_rect(box.width, box.height, 18 * s, (*PANEL, 248), (78, 62, 55), 1.5 * s), box)
-        self.hits.append(Hit(shade.get_rect(), lambda: self._update_pick(1)))
+        later = next(i for i, item in enumerate(choices) if item[0] == "later")
+        self.hits.append(Hit(shade.get_rect(), lambda: self._update_pick(later)))
         self.hits.append(Hit(box, lambda: None))
 
         x, y = box.x + pad, box.y + pad
@@ -2174,15 +2250,25 @@ class App:
                 y += int(32 * s)
 
         name_font, sel_font, sub_font = self._font(31), self._font(31, bold=True), self._font(21)
-        for i, (_, name, sub) in enumerate(UPDATE_CHOICES):
+        if self.update_error:
+            self.screen.blit(self._text(self._fit(self.update_error, sub_font := self._font(20), inner), sub_font, ERROR), (x, y))
+            y += int(28 * s)
+        elif downloading:
+            done, total = self.update_progress
+            progress = f"Downloading update: {done // 1024} KB" + (f" / {total // 1024} KB" if total else "")
+            self.screen.blit(self._text(self._fit(progress, self._font(20), inner), self._font(20), MUTED), (x, y))
+            y += int(28 * s)
+        for i, (_, name, sub) in enumerate(choices):
             rect = pygame.Rect(box.x + int(12 * s), y, box.width - int(24 * s), row_h - int(6 * s))
             selected = i == self.update_sel
             if selected:
                 self.screen.blit(draw.rounded_rect(rect.width, rect.height, 10 * s, (255, 255, 255, 16)), rect)
                 pygame.draw.rect(self.screen, self.theme.accent, (rect.x, rect.y + int(10 * s), int(5 * s), rect.height - int(20 * s)))
-            self.hits.append(Hit(rect, lambda i=i: self._update_pick(i), lambda i=i: self._update_hover(i)))
+            if not downloading or choices[i][0] == "install":
+                self.hits.append(Hit(rect, lambda i=i: self._update_pick(i), lambda i=i: self._update_hover(i)))
             font = sel_font if selected else name_font
-            self.screen.blit(self._text(name, font, TEXT if selected else MUTED), (x, self._text_top(font, rect.y + int(26 * s))))
+            label = ("Cancel download" if downloading and choices[i][0] == "install" else name)
+            self.screen.blit(self._text(label, font, TEXT if selected else MUTED), (x, self._text_top(font, rect.y + int(26 * s))))
             sub = sub.replace("{v}", str(info.get("version", "")))
             self.screen.blit(self._text(self._fit(sub, sub_font, inner), sub_font, DIM), (x, rect.y + int(52 * s)))
             y += row_h
