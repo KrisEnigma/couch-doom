@@ -224,7 +224,8 @@ def launch_apply_helper(staged: StagedUpdate, install_path: Path, pid: int, plat
     if not helper.is_file() or (os.name != "nt" and not os.access(helper, os.X_OK)):
         raise UpdateError("The staged update helper was missing.")
     subprocess.Popen([str(helper), "--apply-update", str(staged.app_path), str(install_path), str(pid), platform, str(staged.root)],
-                     cwd=str(helper_root), close_fds=True)
+                     cwd=str(helper_root), close_fds=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
 
 
 def _wait_for_exit(pid: int, timeout: float = 120) -> None:
@@ -266,7 +267,8 @@ def apply_staged_update(staged_app: Path, install_path: Path, *, pid: int, platf
             raise
         if relaunch:
             subprocess.Popen([str(helper_executable(install_path, platform))], cwd=str(install_path.parent),
-                             close_fds=True, env=_installed_app_environment())
+                             close_fds=True, env=_installed_app_environment(), stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     except Exception as exc:
         try:
             if moved_new and install_path.exists():
@@ -278,7 +280,8 @@ def apply_staged_update(staged_app: Path, install_path: Path, *, pid: int, platf
                 shutil.rmtree(failed, ignore_errors=True)
             if relaunch and install_path.exists():
                 subprocess.Popen([str(helper_executable(install_path, platform))], cwd=str(install_path.parent),
-                                 close_fds=True, env=_installed_app_environment())
+                                 close_fds=True, env=_installed_app_environment(), stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         except OSError:
             pass
         if isinstance(exc, UpdateError):

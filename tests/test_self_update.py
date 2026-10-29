@@ -203,6 +203,9 @@ class DownloadTests(unittest.TestCase):
             with patch.object(self_update, "_wait_for_exit"), patch.object(self_update.subprocess, "Popen") as popen:
                 self_update.apply_staged_update(staged, install, pid=79, platform="windows-x64")
             self.assertNotIn("COUCHDOOM_UPDATE_TEST_MANIFEST", popen.call_args.kwargs["env"])
+            self.assertTrue(popen.call_args.kwargs["start_new_session"])
+            for stream in ("stdin", "stdout", "stderr"):
+                self.assertIs(popen.call_args.kwargs[stream], self_update.subprocess.DEVNULL)
 
     def test_apply_helper_runs_from_a_copy_outside_install(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -220,6 +223,9 @@ class DownloadTests(unittest.TestCase):
             self.assertNotEqual(Path(helper_argv[0]).parent, app)
             self.assertTrue(Path(helper_argv[0]).is_relative_to(staged.root))
             self.assertTrue(Path(helper_argv[0]).is_file())
+            self.assertTrue(popen.call_args.kwargs["start_new_session"])
+            for stream in ("stdin", "stdout", "stderr"):
+                self.assertIs(popen.call_args.kwargs[stream], self_update.subprocess.DEVNULL)
 
     def test_wrong_digest_does_not_leave_partial_stage(self):
         class Response(io.BytesIO):
