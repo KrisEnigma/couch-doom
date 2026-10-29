@@ -62,8 +62,8 @@ def test_bundled_freedoom_menu_sounds_load_without_iwad(monkeypatch):
     assert all(isinstance(path, Path) and path.is_file() for path in requested)
 
 
-@pytest.mark.parametrize(("secret_lump", "expected_tag"), [("DSSECRET", 2), ("DSITMBK", 3), (None, None)])
-def test_secret_sound_prefers_dssecret_then_dsitmbk_then_bundled(monkeypatch, tmp_path, secret_lump, expected_tag):
+@pytest.mark.parametrize(("has_getpow", "expected_tag"), [(True, 2), (False, None)])
+def test_easter_egg_sound_uses_powerup_pickup_then_bundled(monkeypatch, tmp_path, has_getpow, expected_tag):
     iwad = tmp_path / "doom2.wad"
     iwad.touch()
 
@@ -94,10 +94,11 @@ def test_secret_sound_prefers_dssecret_then_dsitmbk_then_bundled(monkeypatch, tm
     loaded = []
     monkeypatch.setattr(sfx, "_source_iwad", lambda _opts: iwad)
     lumps = {"DSPSTOP": dmx(1)}
-    if secret_lump == "DSSECRET":
-        lumps["DSSECRET"] = dmx(2)
+    if has_getpow:
+        lumps["DSGETPOW"] = dmx(2)
+        lumps["DSSECRET"] = dmx(4)
         lumps["DSITMBK"] = dmx(3)
-    elif secret_lump == "DSITMBK":
+    else:
         lumps["DSITMBK"] = dmx(3)
     monkeypatch.setattr(sfx, "open_archive", lambda _path: FakeWad(lumps))
     monkeypatch.setattr(sfx.pygame.mixer, "Sound", lambda file: loaded.append(file) or FakeSound(
@@ -106,7 +107,7 @@ def test_secret_sound_prefers_dssecret_then_dsitmbk_then_bundled(monkeypatch, tm
     result = Sfx(options(iwad), SimpleNamespace(play=lambda _sound: None))
 
     if expected_tag is None:
-        assert result.sounds["secret"].data == (sfx.FREEDOOM_SOUNDS / "dsitmbk.wav").read_bytes()
+        assert result.sounds["secret"].data == (sfx.FREEDOOM_SOUNDS / "dsgetpow.wav").read_bytes()
     else:
         assert result.sounds["secret"].data.endswith(bytes([expected_tag]) * 20)
     assert len(loaded) == 6

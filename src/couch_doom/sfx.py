@@ -21,7 +21,7 @@ LUMPS = {
     "error": "DSOOF",
 }
 VOLUMES = {"move": 0.22, "confirm": 0.30, "open": 0.30, "close": 0.30, "error": 0.32}
-SECRET_LUMP = "DSSECRET"
+EASTER_EGG_LUMP = "DSGETPOW"
 IWAD_NAMES = {
     "doom.wad", "doom1.wad", "doom2.wad", "tnt.wad", "plutonia.wad",
     "freedoom1.wad", "freedoom2.wad", "freedm.wad",
@@ -70,11 +70,9 @@ class Sfx:
                 sound = self._from_lump(archive, lump) if archive else None
                 sound = sound or self._from_file(FREEDOOM_SOUNDS / f"{lump.lower()}.wav")
                 self._store(name, sound, VOLUMES[name])
-            secret = self._from_lump(archive, SECRET_LUMP) if archive else None
+            secret = self._from_lump(archive, EASTER_EGG_LUMP) if archive else None
             if secret is None:
-                secret = self._from_lump(archive, "DSITMBK") if archive else None
-            if secret is None:
-                secret = self._from_file(FREEDOOM_SOUNDS / "dsitmbk.wav")
+                secret = self._from_file(FREEDOOM_SOUNDS / "dsgetpow.wav")
             self._store("secret", secret, 0.42)
         finally:
             if archive:
