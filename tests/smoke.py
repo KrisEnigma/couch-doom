@@ -600,11 +600,31 @@ r = _readme_for("kn2", {"Bloom.pk3": b"x", "Bloom.txt": b"Title : B\nAuthor : A\
 assert r and r.source == "Bloom.txt", r
 import couch_doom.ui as ui_mod  # noqa: E402
 
-# Tahoe draws SDL's fullscreen window shadow as a faint one-pixel edge. Keep the Cocoa shadow disabled.
+# Tahoe draws SDL's fullscreen window shadow as a faint one-pixel edge. Find the Pygame.Window Cocoa window.
 shadow_calls = []
-with patch.object(ui_mod, "_appkit", return_value=(None, lambda *args, **kwargs: shadow_calls.append((args, kwargs)), None)):
-    ui_mod._disable_macos_fullscreen_shadow(123)
-assert shadow_calls == [((123, b"setHasShadow:", False), {"restype": None, "argtypes": [ui_mod.ctypes.c_bool]})]
+titles = {100: b"Other", 200: b"CouchDoom"}
+
+
+def fake_appkit_send(obj, selector, *args, **kwargs):
+    if selector == b"windows":
+        return 1
+    if selector == b"count":
+        return 2
+    if selector == b"objectAtIndex:":
+        return (10, 20)[args[0].value]
+    if selector == b"title":
+        return {10: 100, 20: 200}[obj]
+    if selector == b"UTF8String":
+        return titles[obj]
+    if selector == b"setHasShadow:":
+        shadow_calls.append((obj, args[0], kwargs))
+
+
+with patch.object(ui_mod, "_appkit", return_value=(None, fake_appkit_send, 1)):
+    ui_mod._disable_macos_fullscreen_shadow()
+assert len(shadow_calls) == 1 and shadow_calls[0][0] == 20
+assert shadow_calls[0][1] is False
+assert shadow_calls[0][2] == {"restype": None, "argtypes": [ui_mod.ctypes.c_bool]}
 
 real_create, fails = app._create_window, [2]
 real_sleep, ui_mod.time.sleep = ui_mod.time.sleep, lambda _s: None

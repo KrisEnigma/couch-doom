@@ -284,17 +284,22 @@ def _appkit():
     return (objc, send, NSApp) if NSApp else None
 
 
-def _disable_macos_fullscreen_shadow(window: int | None = None) -> None:
+def _disable_macos_fullscreen_shadow() -> None:
     """Avoid Tahoe's visible one-pixel fullscreen edge from the SDL Cocoa window shadow."""
     try:
-        if window is None:
-            window = pygame.display.get_wm_info().get("window")
         kit = _appkit()
-        if not window or not kit:
+        if not kit:
             return
-        _, send, _ = kit
-        send(window, b"setHasShadow:", False, restype=None, argtypes=[ctypes.c_bool])
-    except (AttributeError, OSError, TypeError, ValueError, pygame.error):
+        _, send, app = kit
+        windows = send(app, b"windows")
+        count = send(windows, b"count", restype=ctypes.c_ulong)
+        for index in range(count):
+            window = send(windows, b"objectAtIndex:", ctypes.c_ulong(index), argtypes=[ctypes.c_ulong])
+            title = send(window, b"title")
+            if title and send(title, b"UTF8String", restype=ctypes.c_char_p) == b"CouchDoom":
+                send(window, b"setHasShadow:", False, restype=None, argtypes=[ctypes.c_bool])
+                return
+    except (AttributeError, OSError, TypeError, ValueError, ctypes.ArgumentError, pygame.error):
         pass
 
 
