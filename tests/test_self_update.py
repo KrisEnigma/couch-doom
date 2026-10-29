@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import json
 import tempfile
 import unittest
 import zipfile
@@ -15,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from couch_doom import self_update, update
 from couch_doom.__main__ import main
 from couch_doom.ui import update_choices
+from tests.make_update_test_manifest import write_manifest
 
 
 class ReleaseTargetTests(unittest.TestCase):
@@ -46,6 +48,45 @@ class ReleaseTargetTests(unittest.TestCase):
 
     def test_private_updater_mode_rejects_incomplete_arguments_before_ui(self):
         self.assertEqual(main(["--apply-update"]), 2)
+
+    def test_test_manifest_is_loaded_only_when_explicitly_enabled(self):
+        data = {"tag_name": "v99.0.0", "html_url": "https://github.com/KrisEnigma/couch-doom/releases/tag/v99.0.0"}
+        with tempfile.TemporaryDirectory() as temp:
+            manifest = Path(temp) / "latest.json"
+            manifest.write_text(json.dumps(data))
+            with patch.dict(os.environ, {"COUCHDOOM_UPDATE_TEST_MANIFEST": str(manifest)}):
+                self.assertEqual(update._fetch_latest(), data)
+
+    def test_local_asset_urls_are_allowed_only_in_test_mode(self):
+        with tempfile.TemporaryDirectory() as temp:
+            file = Path(temp) / "payload.txt"
+            file.write_text("fixture")
+            with self.assertRaises(self_update.UpdateError):
+                self_update._request(file.as_uri())
+            with patch.dict(os.environ, {"COUCHDOOM_UPDATE_TEST_MANIFEST": str(Path(temp) / "latest.json")}):
+                with self_update._request(file.as_uri()) as response:
+                    self.assertEqual(response.read(), b"fixture")
+
+    def test_manifest_builder_repackages_local_artifact_with_matching_checksum(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "CouchDoom-dev-macos-arm64.zip"
+            payload = io.BytesIO()
+            with zipfile.ZipFile(payload, "w") as zf:
+                zf.writestr("CouchDoom/CouchDoom.app/Contents/MacOS/CouchDoom", b"app")
+            source.write_bytes(payload.getvalue())
+            manifest_path = write_manifest(source, root / "test-release", target="macos-arm64")
+            manifest = json.loads(manifest_path.read_text())
+            asset = manifest["assets"][0]
+            self.assertEqual(asset["name"], "CouchDoom-v99.0.0-macos-arm64.zip")
+            self.assertTrue(asset["browser_download_url"].startswith("file://"))
+            with patch.dict(os.environ, {"COUCHDOOM_UPDATE_TEST_MANIFEST": str(manifest_path)}):
+                info = update.check("0.6.0", platform="macos-arm64")
+            self.assertEqual(info["asset"].name, asset["name"])
+            with patch.dict(os.environ, {"COUCHDOOM_UPDATE_TEST_MANIFEST": str(manifest_path)}):
+                staged = self_update.download_and_stage(info["asset"], info["version"],
+                                                        staging_root=root / "staging", platform="macos-arm64")
+            self.assertEqual((staged.app_path / "Contents/MacOS/CouchDoom").read_bytes(), b"app")
 
 
 class DownloadTests(unittest.TestCase):
@@ -136,6 +177,18 @@ class DownloadTests(unittest.TestCase):
                     self_update.apply_staged_update(staged, install, pid=78, platform="windows-x64")
             self.assertEqual((install / "CouchDoom.exe").read_text(), "old")
             self.assertEqual(popen.call_count, 2)
+
+    def test_relaunched_app_does_not_inherit_local_test_manifest(self):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"COUCHDOOM_UPDATE_TEST_MANIFEST": "fixture.json"}):
+            base = Path(temp)
+            install, staged = base / "CouchDoom", base / "new" / "CouchDoom"
+            install.mkdir()
+            staged.mkdir(parents=True)
+            (install / "CouchDoom.exe").write_text("old")
+            (staged / "CouchDoom.exe").write_text("new")
+            with patch.object(self_update, "_wait_for_exit"), patch.object(self_update.subprocess, "Popen") as popen:
+                self_update.apply_staged_update(staged, install, pid=79, platform="windows-x64")
+            self.assertNotIn("COUCHDOOM_UPDATE_TEST_MANIFEST", popen.call_args.kwargs["env"])
 
     def test_apply_helper_runs_from_a_copy_outside_install(self):
         with tempfile.TemporaryDirectory() as temp:

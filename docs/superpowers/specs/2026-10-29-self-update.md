@@ -47,6 +47,8 @@ Each archive filename maps to one target exactly:
 
 Each published archive has a same-name `.sha256` sidecar containing its lowercase SHA-256 digest and filename. The updater selects only a strict version-matched target asset; it rejects unknown OS/architecture combinations and malformed metadata.
 
+For end-to-end local testing, setting `COUCHDOOM_UPDATE_TEST_MANIFEST` makes update discovery load the named JSON manifest instead of contacting GitHub. In this mode only, `file://` archive URLs are allowed. The installed app's relaunch removes this variable so the test source cannot affect normal startup.
+
 ## Acceptance criteria
 
 1. A packaged app offers an install action only when a newer release contains a matching target asset and checksum.

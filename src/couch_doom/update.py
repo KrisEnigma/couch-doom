@@ -35,6 +35,10 @@ def asset_for_platform(os_name: str, machine: str) -> str | None:
 
 
 def _fetch_latest() -> dict:
+    test_manifest = os.environ.get("COUCHDOOM_UPDATE_TEST_MANIFEST")
+    if test_manifest:
+        with open(test_manifest, encoding="utf-8") as stream:
+            return json.load(stream)
     req = urllib.request.Request(API, headers={"User-Agent": "CouchDoom", "Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
         return json.load(resp)
@@ -48,7 +52,10 @@ def _release_asset(data: dict, tag: str, target: str | None) -> ReleaseAsset | N
     found = {str(item.get("name")): str(item.get("browser_download_url", ""))
              for item in data.get("assets", []) if isinstance(item, dict)}
     url, digest_url = found.get(name, ""), found.get(name + ".sha256", "")
-    if url.startswith("https://github.com/") and digest_url.startswith("https://github.com/"):
+    def allowed(value: str) -> bool:
+        return value.startswith("https://github.com/") or (
+            bool(os.environ.get("COUCHDOOM_UPDATE_TEST_MANIFEST")) and value.startswith("file://"))
+    if allowed(url) and allowed(digest_url):
         return ReleaseAsset(name, url, digest_url, target)
     return None
 

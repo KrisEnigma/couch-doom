@@ -26,6 +26,7 @@
 
 - Modify `src/couch_doom/update.py`: define supported update targets, parse release metadata, and select exact matching assets/checksums.
 - Create `src/couch_doom/self_update.py`: download, digest validation, safe extraction, staging cleanup, and installation orchestration.
+- Create `tests/make_update_test_manifest.py`: produce a local fake latest-release manifest and checksummed archive so packaged self-update can be exercised without publishing a release.
 - Modify `src/couch_doom/__main__.py`: route a private updater mode before normal UI startup so a staged executable can apply a prepared update after the old process exits.
 - Modify `src/couch_doom/ui.py`: show install/download progress and errors, dispatch background work, and preserve existing update actions.
 - Modify `src/couch_doom/state.py` only if needed to keep the existing state layout out of replacement and persist completion safely.
@@ -114,6 +115,7 @@
 - [ ] On successful staging, start the staged app in apply mode with current PID and install path, then close the old UI. On helper-launch failure, keep the old app open and offer the release link.
 - [ ] On next startup, detect successful version change through the normal current version and avoid repeating the now-obsolete notice.
 - [ ] Run focused tests, `python -m pyflakes src tests`, and `python tests/smoke.py`.
+- [ ] Verify `COUCHDOOM_UPDATE_TEST_MANIFEST` loads a local manifest, enables only local file asset URLs, and is removed from the relaunched installed app environment.
 
 ## Task 5: Publish checksums and verify release asset contract
 

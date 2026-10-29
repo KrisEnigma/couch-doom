@@ -39,7 +39,9 @@ def discard_staged(staged: StagedUpdate) -> None:
 
 
 def _request(url: str):
-    if not url.startswith("https://github.com/"):
+    allowed = url.startswith("https://github.com/") or (
+        bool(os.environ.get("COUCHDOOM_UPDATE_TEST_MANIFEST")) and url.startswith("file://"))
+    if not allowed:
         raise UpdateError("The release download URL was invalid.")
     req = urllib.request.Request(url, headers={"User-Agent": "CouchDoom updater"})
     return urllib.request.urlopen(req, timeout=30)
@@ -204,6 +206,12 @@ def helper_executable(app_path: Path, platform: str) -> Path:
     return app_path / ("CouchDoom.exe" if platform.startswith("windows-") else "CouchDoom")
 
 
+def _installed_app_environment() -> dict[str, str]:
+    env = os.environ.copy()
+    env.pop("COUCHDOOM_UPDATE_TEST_MANIFEST", None)
+    return env
+
+
 def launch_apply_helper(staged: StagedUpdate, install_path: Path, pid: int, platform: str) -> None:
     helper_root = Path(tempfile.mkdtemp(prefix="couchdoom-updater-"))
     helper_app = helper_root / staged.app_path.name
@@ -253,7 +261,8 @@ def apply_staged_update(staged_app: Path, install_path: Path, *, pid: int, platf
             backup.rename(install_path)
             raise
         if relaunch:
-            subprocess.Popen([str(helper_executable(install_path, platform))], cwd=str(install_path.parent), close_fds=True)
+            subprocess.Popen([str(helper_executable(install_path, platform))], cwd=str(install_path.parent),
+                             close_fds=True, env=_installed_app_environment())
     except Exception as exc:
         try:
             if moved_new and install_path.exists():
@@ -264,7 +273,8 @@ def apply_staged_update(staged_app: Path, install_path: Path, *, pid: int, platf
             if "failed" in locals():
                 shutil.rmtree(failed, ignore_errors=True)
             if relaunch and install_path.exists():
-                subprocess.Popen([str(helper_executable(install_path, platform))], cwd=str(install_path.parent), close_fds=True)
+                subprocess.Popen([str(helper_executable(install_path, platform))], cwd=str(install_path.parent),
+                                 close_fds=True, env=_installed_app_environment())
         except OSError:
             pass
         if isinstance(exc, UpdateError):
