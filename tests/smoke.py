@@ -236,7 +236,7 @@ from couch_doom import handover  # noqa: E402
 
 
 def _window(**changes):
-    values = dict(hwnd=100, pid=11, visible=True, class_name="SDL_app", width=1280, height=720, owner=0, tool=False)
+    values = dict(handle=100, pid=11, visible=True, class_name="SDL_app", width=1280, height=720, owner=0, tool=False)
     values.update(changes)
     return handover.Window(**values)
 
@@ -253,6 +253,14 @@ assert not handover._usable(_window(owner=7), pids, None)  # an owned dialog, no
 assert not handover._usable(_window(width=80, height=60), pids, None)
 assert handover._descendants(10, [(11, 10), (12, 11), (20, 1), (10, 1)]) == {10, 11, 12}
 assert handover._descendants(10, []) == {10}
+# /proc/<pid>/stat puts the command in parentheses, and that command may contain spaces and parentheses itself.
+assert handover._stat_ppid(b"42 (my ) game (x)) S 7 42 42 0 -1") == 7
+maps = b"7f00-7f01 r-xp 00000000 08:01 1 /usr/lib/libwayland-client.so.0\n"
+assert handover._loads_library(maps, b"libwayland-client")
+assert not handover._loads_library(maps, b"libX11.so")
+assert isinstance(handover.available(), bool)
+if not handover.LINUX:
+    assert not handover.engine_uses_wayland(os.getpid())
 
 
 class _Clock:
@@ -297,7 +305,7 @@ frames = []
 assert handover.hold(lambda: None, lambda: False, lambda: frames.append(1), 0.05, clock, clock.sleep) == "timeout"
 assert frames
 if os.name != "nt":
-    assert not handover.engine_window_visible(os.getpid(), None)  # other platforms keep the old launch path
+    assert not handover.engine_window_visible(os.getpid(), None)  # the dummy display has no window to find
 from couch_doom.launch import engine_environ  # noqa: E402
 
 pyi = {"PATH": "/usr/bin", "LD_LIBRARY_PATH": "/app/_internal:/mine", "LD_LIBRARY_PATH_ORIG": "/mine", "LANG": "C"}

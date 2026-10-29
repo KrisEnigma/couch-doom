@@ -1508,9 +1508,10 @@ class App:
     def _hold_loading(self, name: str, launched: log.Launched) -> None:
         """Keep the LOADING screen up until the engine has a window, so a big WAD does not show the desktop.
 
-        Windows only for now; other platforms release the display immediately, as they always have.
+        Windows, X11/XWayland and macOS. A native-Wayland game cannot be seen, so covering stops once the engine
+        is known to be using Wayland; a pure Wayland session without XWayland releases the display immediately.
         """
-        if sys.platform != "win32":
+        if not handover.available():
             return
         try:
             own = pygame.display.get_wm_info().get("window")
@@ -1519,6 +1520,8 @@ class App:
         started = time.monotonic()
 
         def ready() -> bool:
+            if handover.engine_uses_wayland(launched.proc.pid):
+                return True  # native Wayland hides other apps' windows: stop covering and let the compositor show it
             return handover.engine_window_visible(launched.proc.pid, own)
 
         def frame() -> None:
