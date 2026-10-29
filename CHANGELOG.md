@@ -4,15 +4,11 @@ Each release's notes on GitHub are its own section below, behind the download in
 
 **New in 0.8.0**
 
-- Install checksum-verified updates from CouchDoom on Windows, macOS and Linux, then restart automatically.
-- Non-MIDI title tracks stream from disk cache, while background caching makes browsing faster.
-- GZDoom and UZDoom SoundFonts are detected per engine, with a bundled fallback for MIDI music.
-- macOS and Linux keep CouchDoom fullscreen while games launch and return; macOS fullscreen loses its faint edge.
-- Portable DoomRunner settings are found in a sibling `DoomRunner` folder.
-- Controller prompts follow the keyboard or controller last used, and unquoted MAPINFO music names are read correctly.
-- Steam Deck download instructions and library shortcut art are updated.
-- macOS UZDoom settings are now found in Library/Preferences.
-- Clean game exits no longer show false launch warnings, and Vulkan teardown output is quieter.
+- Install verified updates from CouchDoom on Windows, macOS and Linux, then restart automatically.
+- Faster music browsing, streamed non-MIDI tracks, broader MAPINFO support, and per-engine SoundFonts with a bundled fallback.
+- macOS and Linux stay fullscreen as games launch and return; the faint macOS fullscreen edge is gone.
+- Find portable DoomRunner and macOS UZDoom settings automatically; controller prompts follow your last-used device.
+- Steam Deck download and shortcut art are updated; clean exits no longer warn, and Vulkan shutdowns are quieter.
 
 **New in 0.7.4**
 
