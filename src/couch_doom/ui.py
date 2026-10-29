@@ -20,7 +20,7 @@ import pygame
 from . import __version__, draw
 from . import update as updates
 from .config import ASSET_DIR
-from . import filedialog
+from . import filedialog, handover
 from .filedialog import open_file
 from .gamepad import Action, Input
 from .glyphs import BUTTON_NAMES, Glyphs
@@ -55,6 +55,8 @@ OSK_ROWS = [
 
 QUIT_CONFIRM_SECONDS = 2.0
 LAUNCH_WIPE_SECONDS = 0.38
+HANDOVER_TIMEOUT_SECONDS = handover.DEFAULT_TIMEOUT
+HANDOVER_GRACE_FRAMES = 4  # ~66 ms: cover the engine's first paint without lingering over the game
 WINDOW_RETRIES = 20  # half a second apart
 INPUT_COOLDOWN = 0.45
 ART_FADE_SECONDS = 0.45
@@ -1447,13 +1449,15 @@ class App:
             self._sound("error")
             return
         self.state.record(preset.name)
-        # Spawn before hiding so the engine inherits foreground rights.
+        self._audio_down()
+        self.input.suspend()
+        # The engine inherits foreground rights from the spawn above. Keep our loading frame up until it has a
+        # window of its own, or a large WAD would show the desktop for as long as it takes to load.
+        self._hold_loading(preset.name, proc)
         if self.window is not None:
             self.window.destroy()
             self.window = None
         pygame.display.quit()
-        self._audio_down()
-        self.input.suspend()
         code, elapsed = proc.wait()
         if needs_extract_retry(cmd.argv, cmd.env, proc.output, code, elapsed):
             # No FUSE on this system: run the AppImage by unpacking it instead, and say so in the log.
@@ -1464,11 +1468,13 @@ class App:
             except OSError:
                 pass
 
-        self._audio_up()
-        self.input.resume()
+        # Recreate our window first: audio and pads can take a moment, and every one of those milliseconds is
+        # desktop showing through after the engine has already torn its own window down.
         pygame.display.init()
         pygame.display.set_caption("CouchDoom")
         self._open_window()
+        self._audio_up()
+        self.input.resume()
         pygame.event.clear()
         self.input.reset()
         self.ignore_until = time.monotonic() + INPUT_COOLDOWN
@@ -1483,7 +1489,7 @@ class App:
     def _play_wipe(self, name: str) -> None:
         clock = pygame.time.Clock()
         start = time.monotonic()
-        label = self._tracked(f"LOADING   {name}", 40, self.theme.bg_top, bold=True, tracking=0.08)
+        label = self._loading_label(name)
         while (t := (time.monotonic() - start) / LAUNCH_WIPE_SECONDS) < 1:
             pygame.event.pump()
             self._draw(time.monotonic())
@@ -1497,6 +1503,46 @@ class App:
             clock.tick(60)
         self.screen.fill(self.theme.accent)
         self.screen.blit(label, (self.margin, self.h // 2 - label.get_height() // 2))
+        self._flip()
+
+    def _hold_loading(self, name: str, launched: log.Launched) -> None:
+        """Keep the LOADING screen up until the engine has a window, so a big WAD does not show the desktop.
+
+        Windows only for now; other platforms release the display immediately, as they always have.
+        """
+        if sys.platform != "win32":
+            return
+        try:
+            own = pygame.display.get_wm_info().get("window")
+        except pygame.error:
+            own = None
+        started = time.monotonic()
+
+        def ready() -> bool:
+            return handover.engine_window_visible(launched.proc.pid, own)
+
+        def frame() -> None:
+            pygame.event.pump()  # keep Windows from calling the window unresponsive during a long load
+            self._draw_loading(name, time.monotonic() - started)
+
+        reason = handover.hold(launched.proc.poll, ready, frame, HANDOVER_TIMEOUT_SECONDS,
+                               grace_frames=HANDOVER_GRACE_FRAMES)
+        if reason == "timeout":
+            log.write("handover timeout", f"{name}: no engine window after {HANDOVER_TIMEOUT_SECONDS:.0f} seconds")
+
+    def _loading_label(self, name: str) -> pygame.Surface:
+        return self._tracked(f"LOADING   {name}", 40, self.theme.bg_top, bold=True, tracking=0.08)
+
+    def _draw_loading(self, name: str, elapsed: float) -> None:
+        """The wipe's end frame, kept alive with a ticking ellipsis while the engine starts."""
+        self.screen.fill(self.theme.accent)
+        label = self._loading_label(name)
+        y = self.h // 2 - label.get_height() // 2
+        self.screen.blit(label, (self.margin, y))
+        dots = "." * (int(elapsed * 2) % 4)
+        if dots:
+            self.screen.blit(self._tracked(dots, 40, self.theme.bg_top, bold=True, tracking=0.08),
+                             (self.margin + label.get_width() + int(8 * self.s), y))
         self._flip()
 
     # ---------- text helpers ----------

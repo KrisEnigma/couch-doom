@@ -189,6 +189,7 @@ assert upd.check("0.1.0") is None  # disabled by the env var set above
 
 state = State(root / "state.json")
 app = App(dr, state, windowed=True)
+app._draw_loading("Handover", 0.5)  # the splash keeps drawing on the dummy display
 now = time.monotonic()
 app._open_update({"version": "9.9.9", "current": "0.6.0", "url": "https://github.com/KrisEnigma/couch-doom/releases", "notes": ["x"]})
 app._draw(now)
@@ -231,6 +232,72 @@ assert not clog.needs_extract_retry(["/o/nugget-doom"], {}, fuse, 1, 0.2)  # not
 assert not clog.needs_extract_retry(["/o/n.AppImage"], {}, "some other error", 1, 0.2)
 assert not clog.needs_extract_retry(["/o/n.AppImage"], {"APPIMAGE_EXTRACT_AND_RUN": "1"}, fuse, 1, 0.2)  # no retry loop
 assert not clog.needs_extract_retry(["/o/n.AppImage"], {}, fuse, 0, 0.2)
+from couch_doom import handover  # noqa: E402
+
+
+def _window(**changes):
+    values = dict(hwnd=100, pid=11, visible=True, class_name="SDL_app", width=1280, height=720, owner=0, tool=False)
+    values.update(changes)
+    return handover.Window(**values)
+
+
+# Handover trusts only a real, visible window belonging to the engine or a process it started.
+pids = {10, 11, 12}
+assert handover._usable(_window(), pids, None)
+assert not handover._usable(_window(), pids, 100)  # CouchDoom's own window
+assert not handover._usable(_window(pid=99), pids, None)  # another program
+assert not handover._usable(_window(visible=False), pids, None)
+assert not handover._usable(_window(class_name="ConsoleWindowClass"), pids, None)
+assert not handover._usable(_window(tool=True), pids, None)
+assert not handover._usable(_window(owner=7), pids, None)  # an owned dialog, not the game
+assert not handover._usable(_window(width=80, height=60), pids, None)
+assert handover._descendants(10, [(11, 10), (12, 11), (20, 1), (10, 1)]) == {10, 11, 12}
+assert handover._descendants(10, []) == {10}
+
+
+class _Clock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+clock = _Clock()
+ready_calls, frames = [], []
+
+
+def ready():
+    ready_calls.append(1)
+    return len(ready_calls) >= 3
+
+
+assert handover.hold(lambda: None, ready, lambda: frames.append(1), 10, clock, clock.sleep) == "window"
+assert frames and len(ready_calls) == 3  # checked every POLL_SECONDS, not every frame
+clock = _Clock()
+frames = []
+assert handover.hold(lambda: None, lambda: True, lambda: frames.append(1), 10, clock, clock.sleep,
+                     grace_frames=2) == "window"
+assert len(frames) == 2  # two more frames cover the engine's first paint
+polls = []
+
+
+def poll_once_then_exit():
+    polls.append(1)
+    return 1 if len(polls) >= 3 else None
+
+
+assert handover.hold(poll_once_then_exit, lambda: True, lambda: None, grace_frames=2) == "exited"
+assert handover.hold(lambda: 7, lambda: True, lambda: None, clock=clock, sleep=clock.sleep) == "exited"
+clock = _Clock()
+frames = []
+assert handover.hold(lambda: None, lambda: False, lambda: frames.append(1), 0.05, clock, clock.sleep) == "timeout"
+assert frames
+if os.name != "nt":
+    assert not handover.engine_window_visible(os.getpid(), None)  # other platforms keep the old launch path
 from couch_doom.launch import engine_environ  # noqa: E402
 
 pyi = {"PATH": "/usr/bin", "LD_LIBRARY_PATH": "/app/_internal:/mine", "LD_LIBRARY_PATH_ORIG": "/mine", "LANG": "C"}
@@ -378,6 +445,72 @@ app.input.suspend()
 assert app.input.pad_count == 0 and not pygame.joystick.get_init()
 app.input.resume()
 assert app.input.pad_count == pads and pygame.joystick.get_init()  # pads come back after a game
+
+# Launch order: pads off before the splash, window back before audio/pads on, and never resumed while the game runs.
+order = []
+
+
+class _FakeLaunched:
+    output = ""
+
+    class proc:
+        pid = 1234
+
+        @staticmethod
+        def poll():
+            return None
+
+    @staticmethod
+    def wait():
+        order.append("wait")
+        return 0, 5.0
+
+
+originals = {
+    name: getattr(ui_mod, name) for name in ("spawn", "needs_extract_retry", "closed_early")
+}
+display_originals = {name: getattr(pygame.display, name) for name in ("init", "quit", "set_caption")}
+installed: dict[str, tuple] = {}
+
+
+def patched(owner, name, source, result=None):
+    old = getattr(owner, name)
+    installed[f"{owner}.{name}"] = (owner, name, old)
+
+    def replacement(*args, **kwargs):
+        order.append(source)
+        return result
+
+    setattr(owner, name, replacement)
+
+
+try:
+    patched(ui_mod, "spawn", "spawn", _FakeLaunched())
+    patched(ui_mod, "needs_extract_retry", "retry", False)
+    patched(ui_mod, "closed_early", "closed-early", False)
+    patched(pygame.display, "init", "display-init")
+    patched(pygame.display, "quit", "display-quit")
+    patched(pygame.display, "set_caption", "caption")
+    patched(app, "_play_wipe", "wipe")
+    patched(app, "_hold_loading", "hold")
+    patched(app, "_audio_down", "audio-down")
+    patched(app, "_audio_up", "audio-up")
+    patched(app, "_open_window", "window")
+    patched(app.input, "suspend", "suspend")
+    patched(app.input, "resume", "resume")
+    patched(app.input, "reset", "reset")
+    app.current = 0
+    app._launch_selected()
+finally:
+    for owner, name, old in installed.values():
+        setattr(owner, name, old)
+    for name, old in display_originals.items():
+        setattr(pygame.display, name, old)
+
+assert order.index("suspend") < order.index("hold") < order.index("wait"), order
+assert order.index("wait") < order.index("window") < order.index("audio-up") < order.index("resume"), order
+assert order.index("suspend") < order.index("wait") < order.index("resume"), order  # pads stay off while the game runs
+assert order.count("resume") == 1, order
 from couch_doom.launch import presented_files  # noqa: E402
 from couch_doom.music import midi_volume, VOLUME  # noqa: E402
 
