@@ -29,13 +29,13 @@ from .config import DATA_DIR, PROJECT_ROOT, home, xdg
 from .options import Engine
 
 # MAPINFO accepts music names with or without quotes (Brutal Wolfenstein: `music = WONDER`).
-TITLEMUSIC_RE = re.compile(rb'titlemusic\s*=\s*"?([^"\s;}]+)', re.IGNORECASE)
+TITLEMUSIC_RE = re.compile(rb'titlemusic\s*=\s*"?([^"\s;}]*)', re.IGNORECASE)
 # Without titlemusic, a mod with a TITLEMAP plays that map's music on the title screen (Elementalism).
 ACS_MUSIC_RE = re.compile(rb'music/[\w\-. ]+\.(?:mp3|ogg|flac|opus|wav|mid|mus|it|xm|s3m|mod)', re.IGNORECASE)
-TITLEMAP_MUSIC_RE = re.compile(rb'\bmap\s+titlemap\b[^{]*\{[^}]*?\bmusic\s*=\s*"?([^"\s;}]+)', re.IGNORECASE)
+TITLEMAP_MUSIC_RE = re.compile(rb'\bmap\s+titlemap\b[^{]*\{[^}]*?\bmusic\s*=\s*"?([^"\s;}]*)', re.IGNORECASE)
 # Per-game defaults; the IWAD itself tells us which one applies.
 # Strife has D_INTRO too, but its title plays D_LOGO, so that one is checked first.
-DEFAULT_TITLE_LUMPS = ("D_DM2TTL", "D_LOGO", "D_INTRO", "MUS_TITL", "HEXEN")
+DEFAULT_TITLE_LUMPS = ("D_DM2TTL", "D_LOGO", "D_INTRO", "MUS_TITL", "HEXEN", "D_SQUARE")
 MUSIC_FOLDERS = ("music/", "")
 # Mods that start their title music from a script or a custom title map declare it nowhere we can read, so as a last
 # resort a pk3 track named like a title song is used.
@@ -142,7 +142,7 @@ def find_title_music(iwad: Path | None, files: list[Path], *, materialize_midi: 
             names.append(custom)
         defaults = [renamed(n) for n in DEFAULT_TITLE_LUMPS]
         base = arcs.items[-1] if iwad and arcs.items[-1].path == iwad else None
-        default = next((n for n in defaults if base and base.has_lump(n)), None)
+        default = next((n for n in defaults if base and base.lump_source(n, MUSIC_FOLDERS)), None)
         names += [default] if default else defaults
         for name in names:
             source = arcs.find_source([name], MUSIC_FOLDERS)
