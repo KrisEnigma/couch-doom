@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Collection
@@ -52,17 +53,21 @@ def list_entries(
     show_all: bool = False,
     names: Collection[str] = (),
     suffixes: Collection[str] = (".zdl",),
+    app_bundles: bool = sys.platform == "darwin",
 ) -> list[Entry]:
     """List child directories and matching files, without following directory symlinks or recursing."""
     wanted_names = {name.casefold() for name in names}
     wanted_suffixes = {suffix.casefold() for suffix in suffixes}
+    if app_bundles:
+        wanted_suffixes.add(".app")
     entries: list[Entry] = []
     try:
         with os.scandir(directory) as scan:
             for item in scan:
                 try:
-                    is_dir = item.is_dir(follow_symlinks=False)
-                    is_file = item.is_file(follow_symlinks=True)
+                    is_bundle = app_bundles and item.name.casefold().endswith(".app") and item.is_dir(follow_symlinks=False)
+                    is_dir = item.is_dir(follow_symlinks=False) and not is_bundle
+                    is_file = is_bundle or item.is_file(follow_symlinks=True)
                     if is_dir or (is_file and (show_all or item.name.casefold() in wanted_names
                                                or Path(item.name).suffix.casefold() in wanted_suffixes)):
                         entries.append(Entry(Path(item.path), is_dir))
@@ -77,17 +82,20 @@ class Browser:
     """Small navigation state model; UI code decides how actions and rows are presented."""
 
     def __init__(self, home: Path | None = None, *, candidates: Collection[Path] | None = None,
-                 names: Collection[str] = (), suffixes: Collection[str] = (".zdl",)):
+                 names: Collection[str] = (), suffixes: Collection[str] = (".zdl",),
+                 app_bundles: bool = sys.platform == "darwin"):
         self.roots = roots(home, candidates=candidates)
         self.directory = self.roots[0]
         self.names, self.suffixes = tuple(names), tuple(suffixes)
+        self.app_bundles = app_bundles
         self.show_all = False
         self.selected = 0
         self.entries: list[Entry] = []
         self.refresh()
 
     def refresh(self) -> None:
-        self.entries = list_entries(self.directory, show_all=self.show_all, names=self.names, suffixes=self.suffixes)
+        self.entries = list_entries(self.directory, show_all=self.show_all, names=self.names, suffixes=self.suffixes,
+                                    app_bundles=self.app_bundles)
         self.selected = max(0, min(self.selected, len(self.entries) - 1))
 
     def move(self, amount: int) -> None:

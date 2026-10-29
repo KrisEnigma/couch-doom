@@ -2326,7 +2326,7 @@ class App:
             label = entry.display_name
             font = self._font(25, bold=selected)
             self.screen.blit(self._text(self._fit(label, font, inner - int(16 * s)), font, TEXT if selected else MUTED),
-                             (x, self._text_top(font, rect.y + int(14 * s))))
+                             (x, self._text_top(font, rect.centery)))
             y += row_h
 
         note = "All files shown" if browser.show_all else "Doom launchers and settings files"

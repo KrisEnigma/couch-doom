@@ -25,6 +25,24 @@ def test_all_files_mode_includes_unmatched_files_without_recursing(tmp_path):
     assert [e.path.name for e in list_entries(tmp_path, show_all=True, names={"launcher.exe"})] == ["folder", "readme.txt"]
 
 
+def test_macos_app_bundle_is_selectable_as_a_file(tmp_path):
+    bundle = tmp_path / "GZDoom.app"
+    executable = bundle / "Contents" / "MacOS" / "gzdoom"
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    browser = Browser(tmp_path, candidates=[tmp_path], suffixes=(".app",), app_bundles=True)
+
+    assert len(browser.entries) == 1
+    assert browser.entries[0].path == bundle
+    assert browser.entries[0].is_dir is False
+    assert browser.entries[0].display_name == "GZDoom.app"
+    assert browser.open_selected() == bundle
+
+    from couch_doom.sources import identify
+    choice = identify(bundle)
+    assert choice is not None and choice.path == executable
+
+
 def test_missing_directory_is_an_empty_listing(tmp_path):
     assert list_entries(tmp_path / "gone") == []
 
