@@ -249,7 +249,7 @@ def _fonts_in(folder: Path | None) -> list[Path]:
 
 
 def _app_bundle_soundfont_roots(exe: Path) -> list[Path]:
-    """For macOS .app bundles, look inside Contents/ for soundfonts."""
+    """Find soundfonts inside a macOS app bundle and beside its app directory."""
     roots: list[Path] = []
     try:
         p = exe.resolve()
@@ -261,6 +261,8 @@ def _app_bundle_soundfont_roots(exe: Path) -> list[Path]:
                 roots.append(contents / "Resources" / "soundfonts")
                 roots.append(contents / "Resources")
                 roots.append(app / "soundfonts")
+                # UZDoom's macOS archive keeps uzdoom.app beside soundfonts/.
+                roots.append(app.parent / "soundfonts")
     except Exception:
         pass
     return roots
