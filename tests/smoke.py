@@ -600,6 +600,12 @@ r = _readme_for("kn2", {"Bloom.pk3": b"x", "Bloom.txt": b"Title : B\nAuthor : A\
 assert r and r.source == "Bloom.txt", r
 import couch_doom.ui as ui_mod  # noqa: E402
 
+# Tahoe draws SDL's fullscreen window shadow as a faint one-pixel edge. Keep the Cocoa shadow disabled.
+shadow_calls = []
+with patch.object(ui_mod, "_appkit", return_value=(None, lambda *args, **kwargs: shadow_calls.append((args, kwargs)), None)):
+    ui_mod._disable_macos_fullscreen_shadow(123)
+assert shadow_calls == [((123, b"setHasShadow:", False), {"restype": None, "argtypes": [ui_mod.ctypes.c_bool]})]
+
 real_create, fails = app._create_window, [2]
 real_sleep, ui_mod.time.sleep = ui_mod.time.sleep, lambda _s: None
 real_log, ui_mod.log.write = ui_mod.log.write, lambda *a, **k: None

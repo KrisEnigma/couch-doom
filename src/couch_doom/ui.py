@@ -284,6 +284,20 @@ def _appkit():
     return (objc, send, NSApp) if NSApp else None
 
 
+def _disable_macos_fullscreen_shadow(window: int | None = None) -> None:
+    """Avoid Tahoe's visible one-pixel fullscreen edge from the SDL Cocoa window shadow."""
+    try:
+        if window is None:
+            window = pygame.display.get_wm_info().get("window")
+        kit = _appkit()
+        if not window or not kit:
+            return
+        _, send, _ = kit
+        send(window, b"setHasShadow:", False, restype=None, argtypes=[ctypes.c_bool])
+    except (AttributeError, OSError, TypeError, ValueError, pygame.error):
+        pass
+
+
 def _macos_window_levels(levels: list[int] | None = None) -> list[int]:
     """Drop this app's windows to the normal level (the fullscreen one sits above dialogs), or restore `levels`.
     Returns the levels they had."""
@@ -814,6 +828,7 @@ class App:
                 for _ in range(30):
                     pygame.event.pump()
                     time.sleep(0.01)
+                _disable_macos_fullscreen_shadow()
             self.screen = self.window.get_surface()
             self.dpi = self.screen.get_width() / self.window.size[0]
         elif self.windowed:
