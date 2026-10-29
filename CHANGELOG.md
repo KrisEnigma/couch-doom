@@ -2,6 +2,13 @@
 
 Each release's notes on GitHub are its own section below, behind the download instructions in `packaging/release-header.md`. Keep the `**New in X.Y.Z**` heading format: the release workflow and the in-app update notice both look for it.
 
+**New in 1.0.0**
+
+- Browse for launchers right inside CouchDoom, using your controller to navigate folders and choose files.
+- Menu sounds are available even when no Doom IWAD is installed.
+- Improved macOS window cleanup to prevent crashes.
+- Fixed title music detection for standalone game archives.
+
 **New in 0.8.0**
 
 - Update CouchDoom from inside the app on Windows, macOS and Linux; it restarts when the update is done.
