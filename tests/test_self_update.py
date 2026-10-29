@@ -203,6 +203,7 @@ class DownloadTests(unittest.TestCase):
                 self_update.launch_apply_helper(staged, install, 42, "windows-x64")
             helper_argv = popen.call_args.args[0]
             self.assertNotEqual(Path(helper_argv[0]).parent, app)
+            self.assertTrue(Path(helper_argv[0]).is_relative_to(staged.root))
             self.assertTrue(Path(helper_argv[0]).is_file())
 
     def test_wrong_digest_does_not_leave_partial_stage(self):

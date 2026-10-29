@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 import zipfile
+from concurrent.futures import Future
 from pathlib import Path
 
 root = Path(tempfile.mkdtemp(prefix="couchdoom-smoke-"))
@@ -105,7 +106,7 @@ ini_dir.mkdir(parents=True, exist_ok=True)
 
 import pygame  # noqa: E402
 from couch_doom.launch import build_command  # noqa: E402
-from couch_doom.options import Preset  # noqa: E402
+from couch_doom.options import OptionsError, Preset  # noqa: E402
 from couch_doom.readme import find_readme  # noqa: E402
 from couch_doom.sources import discover, identify, load_choice  # noqa: E402
 from couch_doom.state import State  # noqa: E402
@@ -204,6 +205,16 @@ app._open_update({"version": "9.9.9", "current": "0.6.0", "url": "", "notes": []
 app._on_action(Action.DOWN, now)
 app._on_action(Action.CONFIRM, now)
 assert app.mode == "list" and state.update_skip == "9.9.9" and State(root / "state.json").update_skip == "9.9.9"
+app.problem = OptionsError("No IWADs found", "Set up a game first.", [])
+pending = Future()
+pending.set_result({"version": "9.9.9", "current": "0.6.0", "url": "https://github.com/KrisEnigma/couch-doom/releases", "notes": []})
+app.update_job = pending
+app.update_started = now - 4
+app._poll_update(now)
+assert app.mode == "update"  # an update notice is still available on the first-run/setup screen
+app._on_action(Action.BACK, now)
+assert app.mode == "list" and app.blocked
+app.problem = None
 for _ in range(3):
     pygame.event.pump()
     app.tick(now, 1 / 60)

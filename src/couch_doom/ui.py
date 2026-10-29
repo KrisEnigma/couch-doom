@@ -642,7 +642,7 @@ class App:
         job = self.update_job
         if job is None or not job.done() or now - self.update_started < UPDATE_DELAY_SECONDS:
             return
-        if self.mode != "list" or self.blocked or now < self.ignore_until:
+        if self.mode != "list" or now < self.ignore_until:
             return
         self.update_job = None
         try:

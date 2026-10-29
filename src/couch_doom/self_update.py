@@ -213,7 +213,8 @@ def _installed_app_environment() -> dict[str, str]:
 
 
 def launch_apply_helper(staged: StagedUpdate, install_path: Path, pid: int, platform: str) -> None:
-    helper_root = Path(tempfile.mkdtemp(prefix="couchdoom-updater-"))
+    helper_root = staged.root / "apply-helper"
+    helper_root.mkdir(parents=True, exist_ok=True)
     helper_app = helper_root / staged.app_path.name
     shutil.copytree(staged.app_path, helper_app, symlinks=True)
     helper = helper_executable(helper_app, platform)
