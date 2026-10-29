@@ -1,7 +1,4 @@
-"""Launcher UI sounds, taken from the game data itself (Doom's menu sounds in the IWAD).
-
-Nothing engine-specific: any Doom-format IWAD carries these lumps. Without one the launcher is silent.
-"""
+"""Launcher UI sounds from a Doom-family IWAD or the bundled Freedoom fallback."""
 from __future__ import annotations
 
 import io
@@ -12,6 +9,7 @@ from pathlib import Path
 import pygame
 
 from .archive import Wad, open_archive
+from .config import ASSET_DIR
 from .options import Options
 
 # Same lumps Doom's own menu uses for each gesture.
@@ -23,6 +21,12 @@ LUMPS = {
     "error": "DSOOF",
 }
 VOLUMES = {"move": 0.22, "confirm": 0.30, "open": 0.30, "close": 0.30, "error": 0.32}
+SECRET_LUMP = "DSSECRET"
+IWAD_NAMES = {
+    "doom.wad", "doom1.wad", "doom2.wad", "tnt.wad", "plutonia.wad",
+    "freedoom1.wad", "freedoom2.wad", "freedm.wad",
+}
+FREEDOOM_SOUNDS = ASSET_DIR / "freedoom"
 
 
 def _dmx_to_wav(data: bytes) -> bytes | None:
@@ -39,9 +43,11 @@ def _dmx_to_wav(data: bytes) -> bytes | None:
 
 
 def _source_iwad(opts: Options) -> Path | None:
-    """The IWAD most presets use is the one the player knows the menu sounds from."""
+    """Find the most-used known Doom-family IWAD, excluding shared Hexen/Strife lumps."""
     counts = Counter(p.iwad for p in opts.presets if p.iwad and p.iwad.is_file())
     for iwad, _ in counts.most_common():
+        if iwad.name.casefold() not in IWAD_NAMES:
+            continue
         a = open_archive(iwad)
         if isinstance(a, Wad):
             has = a.lump(LUMPS["move"]) is not None
@@ -58,25 +64,40 @@ class Sfx:
         self.channel = channel  # "move" gets its own channel so fast scrolling doesn't stack clicks
         self.sounds: dict[str, pygame.mixer.Sound] = {}
         iwad = _source_iwad(opts)
-        if not iwad:
-            return
-        a = open_archive(iwad)
-        if not a:
-            return
+        archive = open_archive(iwad) if iwad else None
         try:
             for name, lump in LUMPS.items():
-                data = a.lump(lump)
-                wav = _dmx_to_wav(data) if data else None
-                if not wav:
-                    continue
-                try:
-                    snd = pygame.mixer.Sound(file=io.BytesIO(wav))
-                except pygame.error:
-                    continue
-                snd.set_volume(VOLUMES[name])
-                self.sounds[name] = snd
+                sound = self._from_lump(archive, lump) if archive else None
+                sound = sound or self._from_file(FREEDOOM_SOUNDS / f"{lump.lower()}.wav")
+                self._store(name, sound, VOLUMES[name])
+            secret = self._from_lump(archive, SECRET_LUMP) if archive else None
+            if secret is None:
+                secret = self._from_lump(archive, "DSITMBK") if archive else None
+            if secret is None:
+                secret = self._from_file(FREEDOOM_SOUNDS / "dsitmbk.wav")
+            self._store("secret", secret, 0.42)
         finally:
-            a.close()
+            if archive:
+                archive.close()
+
+    @staticmethod
+    def _from_lump(archive, lump: str) -> pygame.mixer.Sound | None:
+        data = archive.lump(lump)
+        wav = _dmx_to_wav(data) if data else None
+        return Sfx._from_file(io.BytesIO(wav)) if wav else None
+
+    @staticmethod
+    def _from_file(source) -> pygame.mixer.Sound | None:
+        try:
+            return pygame.mixer.Sound(file=source)
+        except (pygame.error, OSError):
+            return None
+
+    def _store(self, name: str, sound: pygame.mixer.Sound | None, volume: float) -> None:
+        if sound is None:
+            return
+        sound.set_volume(volume)
+        self.sounds[name] = sound
 
     def play(self, name: str) -> None:
         snd = self.sounds.get(name)
@@ -86,3 +107,8 @@ class Sfx:
             self.channel.play(snd)
         else:
             snd.play()
+
+    def play_secret(self) -> None:
+        sound = self.sounds.get("secret")
+        if sound is not None:
+            sound.play()

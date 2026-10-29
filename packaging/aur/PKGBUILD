@@ -5,7 +5,7 @@ pkgrel=1
 pkgdesc="Fullscreen gamepad front end for DoomRunner, ZDL and Doom Launcher presets, or GZDoom's IWADs"
 arch=('any')
 url="https://github.com/KrisEnigma/couch-doom"
-license=('MIT')
+license=('MIT' 'BSD-3-Clause')
 # The SDL2 build of pygame-ce: its SDL3 variant has no mixer or game controller support.
 depends=('python' 'python-pygame-ce')
 makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
@@ -26,4 +26,6 @@ package() {
   install -Dm644 packaging/linux/couch-doom.desktop "$pkgdir/usr/share/applications/couch-doom.desktop"
   install -Dm644 packaging/couch-doom.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/couch-doom.png"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 src/couch_doom/assets/freedoom/LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/Freedoom-LICENSE.txt"
+  install -Dm644 src/couch_doom/assets/freedoom/THIRD-PARTY-NOTICES.txt "$pkgdir/usr/share/licenses/$pkgname/THIRD-PARTY-NOTICES.txt"
 }

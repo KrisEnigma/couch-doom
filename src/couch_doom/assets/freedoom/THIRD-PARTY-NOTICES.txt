@@ -1,0 +1,10 @@
+Freedoom sound effects
+======================
+
+The WAV files in this directory are sound effects from the Freedoom project:
+https://github.com/freedoom/freedoom
+
+They are redistributed under the Freedoom project's modified 3-clause BSD
+license. See LICENSE.txt for the complete copyright notice, conditions and
+disclaimer. These assets are included as a fallback menu sound set; the
+Freedoom project and its contributors do not endorse CouchDoom.

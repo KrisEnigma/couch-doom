@@ -21,7 +21,7 @@ import pygame
 from . import __version__, draw
 from . import update as updates
 from . import self_update
-from .config import ASSET_DIR
+from .config import ASSET_DIR, FROZEN
 from . import handover, asset_cache
 from .filebrowser import Browser as FileBrowser
 from .gamepad import Action, Input
@@ -35,6 +35,7 @@ from .options import Options, OptionsError, Preset, unpack
 from .endoom import COLS, ROWS, Endoom, find_endoom
 from .readme import Readme, find_readme
 from .sfx import Sfx
+from .self_select import is_self_selection
 from .sources import SOURCES, Choice
 from .state import State
 from .theme import HOUSE, Theme, from_art
@@ -688,6 +689,8 @@ class App:
 
     def _open_browser(self, directory: Path | None = None) -> None:
         names = {name for source in SOURCES for name in (*source.module.EXES, *source.module.SETTINGS_NAMES)}
+        if FROZEN:
+            names.add(Path(sys.executable).name)
         self.file_browser = FileBrowser(home=directory, names=names)
         self.browser_scroll = 0
         self.mode = "browse"
@@ -741,6 +744,11 @@ class App:
 
     def _on_drop(self, path: Path) -> None:
         """A file or folder dropped on the window, or picked in the browser: use the launcher it belongs to."""
+        if is_self_selection(path):
+            self._notify("Doomception! I’m already running.", self.theme.label)
+            if self.sfx:
+                self.sfx.play_secret()
+            return
         if not self.launchers:
             return
         choice = self.launchers.add(path)
@@ -837,9 +845,17 @@ class App:
                 if attempt == 0:
                     log.write("window retry", f"{exc}\nTrying again for up to {WINDOW_RETRIES // 2} seconds.")
                 time.sleep(0.5)
-                pygame.display.quit()
+                self._close_window()
                 pygame.display.init()
                 pygame.display.set_caption("CouchDoom")
+
+    def _close_window(self) -> None:
+        """Release Pygame's display surface before destroying its window or video subsystem."""
+        self.screen = None
+        if self.window is not None:
+            self.window.destroy()
+            self.window = None
+        pygame.display.quit()
 
     def _create_window(self) -> None:
         _set_window_icon()  # display.quit() after a game forgets it
@@ -1661,10 +1677,7 @@ class App:
         # The engine inherits foreground rights from the spawn above. Keep our loading frame up until it has a
         # window of its own, or a large WAD would show the desktop for as long as it takes to load.
         self._hold_loading(preset.name, proc)
-        if self.window is not None:
-            self.window.destroy()
-            self.window = None
-        pygame.display.quit()
+        self._close_window()
         code, elapsed = proc.wait()
         if needs_extract_retry(cmd.argv, cmd.env, proc.output, code, elapsed):
             # No FUSE on this system: run the AppImage by unpacking it instead, and say so in the log.
@@ -2692,6 +2705,7 @@ class App:
                 self.update_pool.shutdown(wait=False, cancel_futures=True)
             if self.music:
                 self.music.shutdown()
+            self._close_window()
             pygame.quit()
         return 0
 

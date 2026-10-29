@@ -229,6 +229,11 @@ manual_dir.mkdir()
 manual_settings = manual_dir / "options.json"
 manual_settings.write_text(dr.path.read_text(encoding="utf-8"), encoding="utf-8")
 app.launchers = Launchers(state)
+before_self_pick = state.launcher
+with patch("couch_doom.ui.is_self_selection", return_value=True):
+    app._on_drop(root / "CouchDoom")
+assert app.toast.text == "Doomception! I’m already running."
+assert state.launcher == before_self_pick
 app._open_browser(root)
 assert app.mode == "browse" and any(entry.path == manual_dir and entry.is_dir for entry in app.file_browser.entries)
 app._draw(now)
