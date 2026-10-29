@@ -350,9 +350,9 @@ def find_soundfont(opts: Options, explicit: str | None = None) -> Path | None:
 
     tiers = [
         ("user/local soundfonts", tier1),
-        ("bundled soundfonts", bundled),
         ("engine soundfonts", engine_fonts),
         ("application soundfonts", app_fonts),
+        ("bundled soundfonts", bundled),
     ]
 
     chosen: Path | None = None
