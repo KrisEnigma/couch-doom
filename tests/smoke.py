@@ -1,5 +1,5 @@
-"""End-to-end smoke test, run in CI on Windows and Linux: fake DoomRunner, qZDL and bare UZDoom setups in each
-OS's real settings folders, then discovery, command lines and one rendered UI frame.
+"""End-to-end smoke test, run in CI on Windows, Linux and macOS: fake DoomRunner, qZDL and bare UZDoom setups in
+each OS's real settings folders, then discovery, command lines and one rendered UI frame.
 
     python tests/smoke.py
 """
@@ -24,7 +24,9 @@ else:
     os.environ["HOME"] = str(root)
     os.environ["XDG_DATA_HOME"] = str(root / "data")
     os.environ["XDG_CONFIG_HOME"] = str(root / "config")
-    dr_dir, zdl_dir = root / "data" / "DoomRunner", root / "config" / "Vectec Software"
+    dr_dir = (root / "Library" / "Application Support" / "DoomRunner" if sys.platform == "darwin"
+              else root / "data" / "DoomRunner")
+    zdl_dir = root / "config" / "Vectec Software"  # Qt's INI files use ~/.config on macOS too
 os.environ["COUCHDOOM_NO_UPDATE_CHECK"] = "1"  # tests never touch the network
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 os.environ["SDL_AUDIODRIVER"] = "dummy"
