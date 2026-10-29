@@ -48,6 +48,10 @@ jobs:
           python -m pip install -r requirements.txt pyinstaller pillow
           python -m pip install --no-deps tinysoundfont || echo "No tinysoundfont for this platform: MIDI title music is left out"
 
+      - name: Install DMG tooling
+        if: startsWith(matrix.target, 'macos-')
+        run: brew install create-dmg
+
       - name: Build
         if: ${{ !matrix.image }}
         run: python -m PyInstaller --noconfirm --clean --distpath dist --workpath build packaging/CouchDoom.spec
@@ -76,12 +80,26 @@ jobs:
               cp "packaging/How to use.txt" LICENSE stage/CouchDoom/
               # ditto keeps the bundle's symlinks and ad-hoc signature intact; plain zip breaks them.
               ditto -c -k --keepParent stage/CouchDoom "$name.zip"
-              # Keep the ZIP for the self-updater and offer a drag-to-Applications DMG for people installing by hand.
-              mkdir -p stage-dmg
+              # Keep the ZIP for the updater and create a Finder-styled drag-to-Applications installer image.
+              python packaging/make_dmg_background.py
+              mkdir -p "stage-dmg/Help & License"
               cp -R dist/CouchDoom.app stage-dmg/
-              cp "packaging/How to use.txt" LICENSE stage-dmg/
-              ln -s /Applications stage-dmg/Applications
-              hdiutil create -volname "CouchDoom" -srcfolder stage-dmg -ov -format UDZO "$name.dmg"
+              cp "packaging/How to use.txt" LICENSE "stage-dmg/Help & License/"
+              sips -s format icns packaging/couch-doom.png --out "$RUNNER_TEMP/CouchDoom.icns"
+              create-dmg \
+                --volname "CouchDoom" \
+                --volicon "$RUNNER_TEMP/CouchDoom.icns" \
+                --background "$PWD/packaging/dmg-background.png" \
+                --window-pos 180 120 \
+                --window-size 800 450 \
+                --icon-size 112 \
+                --text-size 12 \
+                --icon "CouchDoom.app" 195 270 \
+                --hide-extension "CouchDoom.app" \
+                --app-drop-link 605 270 \
+                --icon "Help & License" 735 370 \
+                --no-internet-enable \
+                "$name.dmg" stage-dmg
               ;;
             linux-*)
               cp -R dist/CouchDoom/. stage/CouchDoom/
