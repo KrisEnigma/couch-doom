@@ -1,18 +1,28 @@
-CouchDoom - play your Doom launcher's setups with a gamepad, on the TV or a Steam Deck
-Made by KrisEnigma - https://github.com/KrisEnigma/couch-doom
+CouchDoom
+Play your Doom launcher setups with a gamepad, on the TV or a Steam Deck.
+Made by KrisEnigma: https://github.com/KrisEnigma/couch-doom
 
-1. Set up your games in DoomRunner, ZDL or Doom Launcher first. No launcher? GZDoom,
-   UZDoom or VKDoom on its own works too: CouchDoom lists the IWADs it can find.
-2. Start it: CouchDoom.exe on Windows, CouchDoom.app on macOS, ./CouchDoom on Linux.
+GETTING STARTED
 
-Steam Deck: use the Linux x64 download. In Desktop Mode, extract it, then in Steam
-choose "Add a Non-Steam Game" and browse to CouchDoom. It then starts from Game Mode
-like any other game. GZDoom and DoomRunner from Discover are found automatically.
-Library art for the shortcut: github.com/KrisEnigma/couch-doom/tree/main/packaging/steam
+1. Set up games in DoomRunner, ZDL or Doom Launcher. You can also use GZDoom,
+   UZDoom or VKDoom by itself; CouchDoom lists the IWADs it finds.
+2. Start CouchDoom:
+   Windows: Run CouchDoom.exe.
+   macOS: Open the DMG and drag CouchDoom.app to Applications, then open it there.
+   Linux: Run ./CouchDoom.
 
-CouchDoom finds your launcher's settings on its own, including portable installs you
-have a Start Menu, Desktop or taskbar shortcut to. You can also put this CouchDoom
-folder inside a portable launcher's folder.
+STEAM DECK
+
+Use the Linux x64 download. In Desktop Mode, extract it, then in Steam choose
+"Add a Non-Steam Game" and browse to CouchDoom. It then starts from Game Mode like
+any other game. GZDoom and DoomRunner from Discover are detected automatically.
+Library art: https://github.com/KrisEnigma/couch-doom/tree/main/packaging/steam
+
+FINDING YOUR GAMES
+
+CouchDoom finds launcher settings automatically, including portable installs with
+a Start Menu, Desktop or taskbar shortcut. You can also put the CouchDoom folder
+inside a portable launcher's folder.
 
 If it finds more than one launcher, it asks which one to use and remembers the answer.
 Press L3 (click the left stick) or F4 any time to switch.
@@ -22,7 +32,9 @@ launcher's or port's program, or drag the program (or its folder) onto the Couch
 In the browser use the D-pad/stick to move, A to open or choose, B to go up, X to show
 all files, LB/RB to switch roots, and LT/RT to page.
 
-Controls (Xbox names; PlayStation and Switch pads work too)
+CONTROLS
+Xbox button names are used below. PlayStation and Switch controllers work too.
+
   A / Start   Play          B   Quit (press twice) or close
   X           Info sheet    Y   Search
   LB / RB     Jump section  R3  Add to favorites
@@ -34,26 +46,33 @@ Controls (Xbox names; PlayStation and Switch pads work too)
   Mouse: click a preset to select it, click again to play. Wheel scrolls,
   right-click goes back, and the button hints at the bottom are clickable.
 
-CouchDoom isn't code-signed, so the first start needs one extra step:
-  Windows: on the "unknown publisher" warning, click "More info" then "Run anyway".
-  macOS: if it says the app can't be opened or verified, open System Settings >
-  Privacy & Security, scroll down, and click "Open Anyway" next to CouchDoom.
+FIRST LAUNCH
 
-MIDI title music uses the selected sourceport's configured or included SoundFont when
-available. Chocolate Doom and its forks can use the FluidSynth SoundFont configured in
-their settings. CouchDoom includes a default SoundFont for sourceports without one.
-Use --soundfont <file> to override it. A SoundFont in a "soundfonts" folder beside
-CouchDoom.exe, CouchDoom.app or CouchDoom is used when the sourceport has no own bank.
+CouchDoom isn't code-signed, so your system may ask you to approve the first launch.
+Windows: On the "unknown publisher" warning, click "More info" then "Run anyway".
+macOS: If the app can't be opened or verified, open System Settings > Privacy &
+  Security, scroll down, and click "Open Anyway" next to CouchDoom.
 
-Non-MIDI title music is cached as files so it can stream without keeping the whole track
-in memory. The cache is separate from title images and other menu assets:
+MIDI MUSIC
+
+MIDI title music uses the selected source port's configured or included SoundFont
+when available. Chocolate Doom and its forks can use the FluidSynth SoundFont from
+their settings. CouchDoom includes a default SoundFont for ports without one.
+Use --soundfont <file> to choose another. A SoundFont in a "soundfonts" folder beside
+CouchDoom.exe, CouchDoom.app or CouchDoom is used when the port has no own bank.
+
+MUSIC CACHE
+
+Non-MIDI title music is cached so it can stream without keeping the whole track in
+memory. The cache is separate from title images and other menu assets:
   macOS: ~/Library/Caches/CouchDoom/music
   Windows: %LOCALAPPDATA%\CouchDoom\cache\music
   Linux: $XDG_CACHE_HOME/couch-doom/music (or ~/.cache/couch-doom/music)
 Close CouchDoom before clearing this folder; the cache is recreated as tracks are played.
 
-Troubleshooting & logs:
-CouchDoom logs game launches, soundfont search results, and MIDI music status to:
+TROUBLESHOOTING AND LOGS
+
+CouchDoom logs game launches, SoundFont searches and MIDI music status to:
   macOS: ~/Library/Application Support/CouchDoom/state/couch-doom.log
   Windows: %LOCALAPPDATA%\CouchDoom\state\couch-doom.log
   Linux: ~/.local/share/couch-doom/state/couch-doom.log

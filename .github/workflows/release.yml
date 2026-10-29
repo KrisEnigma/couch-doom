@@ -76,6 +76,12 @@ jobs:
               cp "packaging/How to use.txt" LICENSE stage/CouchDoom/
               # ditto keeps the bundle's symlinks and ad-hoc signature intact; plain zip breaks them.
               ditto -c -k --keepParent stage/CouchDoom "$name.zip"
+              # Keep the ZIP for the self-updater and offer a drag-to-Applications DMG for people installing by hand.
+              mkdir -p stage-dmg
+              cp -R dist/CouchDoom.app stage-dmg/
+              cp "packaging/How to use.txt" LICENSE stage-dmg/
+              ln -s /Applications stage-dmg/Applications
+              hdiutil create -volname "CouchDoom" -srcfolder stage-dmg -ov -format UDZO "$name.dmg"
               ;;
             linux-*)
               cp -R dist/CouchDoom/. stage/CouchDoom/
@@ -85,12 +91,17 @@ jobs:
           esac
           python - "$name" <<'PY'
           import hashlib, pathlib, sys
-          archive = pathlib.Path(sys.argv[1] + (".zip" if sys.argv[1].endswith(("windows-x64", "macos-arm64", "macos-x64")) else ".tar.gz"))
-          digest = hashlib.sha256()
-          with archive.open("rb") as stream:
-              for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                  digest.update(chunk)
-          archive.with_name(archive.name + ".sha256").write_text(f"{digest.hexdigest()}  {archive.name}\n", encoding="ascii")
+          name = sys.argv[1]
+          suffixes = (".zip", ".dmg") if "macos-" in name else (".zip",) if name.endswith("windows-x64") else (".tar.gz",)
+          for suffix in suffixes:
+              archive = pathlib.Path(name + suffix)
+              if not archive.exists():
+                  continue
+              digest = hashlib.sha256()
+              with archive.open("rb") as stream:
+                  for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              archive.with_name(archive.name + ".sha256").write_text(f"{digest.hexdigest()}  {archive.name}\n", encoding="ascii")
           PY
           echo "file=$name.*" >> "$GITHUB_OUTPUT"
 

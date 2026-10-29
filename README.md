@@ -45,10 +45,14 @@ If nothing is found, choose **Find it myself…** and browse with a controller: 
 
 Download a build from the [latest release](https://github.com/KrisEnigma/couch-doom/releases/latest). You don't need Python. CouchDoom isn't code-signed, so your system may ask you to confirm the first launch.
 
-- **Windows:** Download the windows-x64.zip, extract it and run CouchDoom.exe. If SmartScreen appears, choose **More info → Run anyway**.
-- **macOS:** Choose macos-arm64.zip for Apple Silicon or macos-x64.zip for Intel (macOS 10.15 or later). Extract and open CouchDoom.app. If blocked, allow it under **System Settings → Privacy & Security → Open Anyway**.
-- **Linux:** Choose the archive for your processor (linux-x64.tar.gz for most PCs or linux-arm64.tar.gz for ARM boards), extract it and run ./CouchDoom. Requires glibc 2.28 or newer.
-- **Steam Deck:** In Desktop Mode, extract the Linux x64 archive. In Steam, choose **Add a Non-Steam Game** and select CouchDoom; then launch it from Game Mode. GZDoom and DoomRunner installed from Discover are detected automatically.
+- **Windows:** Download `windows-x64.zip`, extract it, and run `CouchDoom.exe`. If SmartScreen appears, choose **More info → Run anyway**.
+- **macOS:** Download the disk image for your Mac:
+  - Apple Silicon: `macos-arm64.dmg`
+  - Intel: `macos-x64.dmg` (macOS 10.15 or later)
+
+  Open the disk image and drag `CouchDoom.app` to Applications. The app isn't code-signed, so macOS may block its first launch. If it does, choose **System Settings → Privacy & Security → Open Anyway**. Matching ZIP downloads are available as a fallback.
+- **Linux:** Download `linux-x64.tar.gz` for most PCs or `linux-arm64.tar.gz` for ARM boards, extract it, and run `./CouchDoom`. Requires glibc 2.28 or newer.
+- **Steam Deck:** In Desktop Mode, extract the Linux x64 archive. In Steam, choose **Add a Non-Steam Game** and select CouchDoom, then launch it from Game Mode. GZDoom and DoomRunner installed from Discover are detected automatically.
 
 ### Run from source
 
