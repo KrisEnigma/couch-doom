@@ -450,6 +450,7 @@ def flaky_create() -> None:
 app._create_window = flaky_create
 app._open_window()  # a window that only opens on the third try still opens
 assert fails[0] == 0 and app.screen.get_size() == (1440, 810)
+ui_size = app.screen.get_size()  # read before the launch-order test destroys the window
 del app._create_window
 ui_mod.time.sleep, ui_mod.log.write = real_sleep, real_log
 pads = app.input.pad_count
@@ -561,7 +562,7 @@ if pygame.mixer.get_init():
     mp.request(3, quiet[0], [])
     assert mp.playing is None  # a preset without title music fades it out
     mp.shutdown()
-print("smoke ok:", ", ".join(sorted(found)), "| UI", app.screen.get_size())
+print("smoke ok:", ", ".join(sorted(found)), "| UI", ui_size)
 from couch_doom.titleart import find_logo, find_title_art  # noqa: E402
 
 
