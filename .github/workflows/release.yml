@@ -65,7 +65,6 @@ jobs:
           name="CouchDoom-$version-${{ matrix.target }}"
           sudo chown -R "$(id -u):$(id -g)" dist 2>/dev/null || true
           mkdir -p "stage/CouchDoom"
-          mkdir -p "stage/CouchDoom/soundfonts"
           case "${{ matrix.target }}" in
             windows-x64)
               cp -R dist/CouchDoom/. stage/CouchDoom/
