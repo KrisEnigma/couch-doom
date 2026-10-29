@@ -684,6 +684,7 @@ class App:
         self._music_sel = None
         self._sound("open" if on else "close")
         self._notify("Title music on" if on else "Title music off", MUTED)
+        log.write("music: toggled", "Title music on" if on else "Title music off")
 
     def _toggle_favorite(self) -> None:
         if not self.rows:

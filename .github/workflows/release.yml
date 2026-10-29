@@ -65,6 +65,8 @@ jobs:
           name="CouchDoom-$version-${{ matrix.target }}"
           sudo chown -R "$(id -u):$(id -g)" dist 2>/dev/null || true
           mkdir -p "stage/CouchDoom"
+          mkdir -p "stage/CouchDoom/soundfonts"
+          cp src/couch_doom/assets/soundfonts/*.sf* stage/CouchDoom/soundfonts/ 2>/dev/null || true
           case "${{ matrix.target }}" in
             windows-x64)
               cp -R dist/CouchDoom/. stage/CouchDoom/
@@ -110,7 +112,7 @@ jobs:
             echo "CHANGELOG.md has no '**New in $version**' section" >&2
             exit 1
           fi
-          {
+          {\
             cat packaging/release-header.md
             printf '\n%s\n\n' "$section"
             echo 'See `How to use.txt` in the download for controls and optional MIDI music setup.'

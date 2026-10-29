@@ -32,6 +32,13 @@ def write(title: str, body: str = "", path: Path | None = None) -> None:
             f.write(head + (body.rstrip("\n") + "\n" if body else "") + "\n")
     except OSError:
         pass
+    try:
+        if sys.stderr and not sys.stderr.closed:
+            msg = f"{title}: {body.strip()}\n" if body.strip() else f"{title}\n"
+            sys.stderr.write(f"[couch-doom] {msg}")
+            sys.stderr.flush()
+    except Exception:
+        pass
 
 
 class Launched:

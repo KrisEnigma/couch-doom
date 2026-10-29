@@ -15,11 +15,19 @@ from couch_doom import __version__  # noqa: E402
 tsf_datas, tsf_binaries, tsf_hidden = collect_all("tinysoundfont") if importlib.util.find_spec("tinysoundfont") else ([], [], [])
 mac = sys.platform == "darwin"
 
+datas = [(str(root / "src" / "couch_doom" / "assets"), "assets"), *tsf_datas]
+sf_dir = root / "src" / "couch_doom" / "assets" / "soundfonts"
+if sf_dir.is_dir():
+    for f in sf_dir.glob("*.sf2"):
+        datas.append((str(f), "soundfonts"))
+    for f in sf_dir.glob("*.sf3"):
+        datas.append((str(f), "soundfonts"))
+
 a = Analysis(
     [str(root / "packaging" / "couch_doom_entry.py")],
     pathex=[str(root / "src")],
     binaries=tsf_binaries,
-    datas=[(str(root / "src" / "couch_doom" / "assets"), "assets"), *tsf_datas],
+    datas=datas,
     hiddenimports=tsf_hidden,
     excludes=["tkinter", "unittest", "pydoc", "pyaudio"],
 )

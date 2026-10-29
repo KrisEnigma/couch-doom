@@ -13,7 +13,9 @@ import math
 import os
 import re
 import struct
+import sys
 import threading
+import time
 from array import array
 from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -23,7 +25,7 @@ from pathlib import Path
 import pygame
 
 from .archive import Archives
-from .config import APP_BUNDLE, DATA_DIR, PROJECT_ROOT
+from .config import DATA_DIR, PROJECT_ROOT
 from .options import Options
 
 # MAPINFO accepts music names with or without quotes (Brutal Wolfenstein: `music = WONDER`).
@@ -240,7 +242,45 @@ def mus_to_midi(mus: bytes) -> bytes:
 def _fonts_in(folder: Path | None) -> list[Path]:
     if not folder or not folder.is_dir():
         return []
-    return [p for p in folder.iterdir() if p.suffix.lower() in SF_EXTS and p.is_file()]
+    try:
+        return [p for p in folder.iterdir() if p.suffix.lower() in SF_EXTS and p.is_file()]
+    except OSError:
+        return []
+
+
+def _app_bundle_soundfont_roots(exe: Path) -> list[Path]:
+    """For macOS .app bundles, look inside Contents/ for soundfonts."""
+    roots: list[Path] = []
+    try:
+        p = exe.resolve()
+        # exe is usually .../Foo.app/Contents/MacOS/foo
+        if p.parent.name == "MacOS":
+            contents = p.parent.parent
+            if contents.name == "Contents":
+                app = contents.parent
+                roots.append(contents / "Resources" / "soundfonts")
+                roots.append(contents / "Resources")
+                roots.append(app / "soundfonts")
+    except Exception:
+        pass
+    return roots
+
+
+def _scan_applications() -> list[Path]:
+    if sys.platform != "darwin":
+        return []
+    out: list[Path] = []
+    try:
+        apps = Path("/Applications")
+        if apps.is_dir():
+            for app in apps.iterdir():
+                if app.suffix == ".app":
+                    contents = app / "Contents"
+                    out += _fonts_in(contents / "Resources" / "soundfonts")
+                    out += _fonts_in(contents / "Resources")
+    except Exception:
+        pass
+    return out
 
 
 def find_soundfont(opts: Options, explicit: str | None = None) -> Path | None:
@@ -248,20 +288,87 @@ def find_soundfont(opts: Options, explicit: str | None = None) -> Path | None:
 
     Within a tier the largest file wins: bigger General MIDI banks are almost always the better-sounding ones.
     """
-    explicit = explicit or os.environ.get("DOOMRUNNER_SOUNDFONT")
+    from . import config, log
+
+    searched: list[str] = []
+
     if explicit and Path(explicit).is_file():
-        return Path(explicit)
-    tiers = [_fonts_in(DATA_DIR / "soundfonts") + (_fonts_in(PROJECT_ROOT / "soundfonts") if APP_BUNDLE else [])]
+        p = Path(explicit)
+        log.write("music: soundfont explicit", f"{p} ({p.stat().st_size} bytes)")
+        return p
+    env_sf = os.environ.get("DOOMRUNNER_SOUNDFONT")
+    if env_sf and Path(env_sf).is_file():
+        p = Path(env_sf)
+        log.write("music: soundfont from DOOMRUNNER_SOUNDFONT", f"{p} ({p.stat().st_size} bytes)")
+        return p
+
+    # Tier 1: User / local soundfonts folder
+    own = DATA_DIR / "soundfonts"
+    searched.append(str(own))
+    tier1 = _fonts_in(own)
+    searched.append(str(PROJECT_ROOT / "soundfonts"))
+    tier1 += _fonts_in(PROJECT_ROOT / "soundfonts")
+
+    # Tier 2: Bundled soundfonts
+    searched.append(str(config.ASSET_DIR / "soundfonts"))
+    bundled = _fonts_in(config.ASSET_DIR / "soundfonts")
+    if getattr(sys, "frozen", False):
+        try:
+            exe = Path(sys.executable)
+            if sys.platform == "darwin":
+                for base in (
+                    exe.parent / "soundfonts",
+                    exe.parent.parent / "Resources" / "soundfonts",
+                    exe.parent.parent / "Resources" / "assets" / "soundfonts",
+                    exe.parent.parent / "Frameworks" / "soundfonts",
+                    exe.parent.parent / "Frameworks" / "assets" / "soundfonts",
+                ):
+                    searched.append(str(base))
+                    bundled += _fonts_in(base)
+            else:
+                searched.append(str(exe.parent / "soundfonts"))
+                bundled += _fonts_in(exe.parent / "soundfonts")
+        except Exception:
+            pass
+
+    # Tier 3: Beside detected engines
     engine_fonts: list[Path] = []
     for e in opts.engines.values():
         root = e.path.parent
         for folder in (root / "soundfonts", root, e.config_dir / "soundfonts" if e.config_dir else None):
+            if folder:
+                searched.append(str(folder))
+                engine_fonts += _fonts_in(folder)
+        for folder in _app_bundle_soundfont_roots(e.path):
+            searched.append(str(folder))
             engine_fonts += _fonts_in(folder)
-    tiers.append(engine_fonts)
-    for tier in tiers:
-        if tier:
-            return max(tier, key=lambda p: p.stat().st_size)
-    return None
+
+    # Tier 4: Installed macOS applications
+    app_fonts = _scan_applications()
+    if app_fonts:
+        searched.append("/Applications/*.app")
+
+    tiers = [
+        ("user/local soundfonts", tier1),
+        ("bundled soundfonts", bundled),
+        ("engine soundfonts", engine_fonts),
+        ("application soundfonts", app_fonts),
+    ]
+
+    chosen: Path | None = None
+    chosen_tier: str = ""
+    for name, fonts in tiers:
+        if fonts:
+            chosen = max(fonts, key=lambda p: p.stat().st_size)
+            chosen_tier = name
+            break
+
+    if chosen:
+        log.write("music: soundfont selected", f"chosen: {chosen} ({chosen.stat().st_size} bytes)\nsource: {chosen_tier}")
+    else:
+        log.write("music: no soundfont found", "Searched in:\n" + "\n".join(f"  {p}" for p in searched))
+
+    return chosen
 
 
 class MidiRenderer:
@@ -274,9 +381,15 @@ class MidiRenderer:
     def _ensure(self):
         if self._synth is None:
             import tinysoundfont
+            from . import log
 
             synth = tinysoundfont.Synth(samplerate=RATE)
-            synth.sfload(str(self.soundfont))
+            try:
+                synth.sfload(str(self.soundfont))
+            except Exception:
+                import traceback
+                log.write("music: sfload failed", f"Failed loading SoundFont {self.soundfont}:\n{traceback.format_exc()}")
+                raise
             self._synth = synth
         return self._synth
 
@@ -284,6 +397,7 @@ class MidiRenderer:
         """Float32 stereo PCM plus its peak and RMS. The synth's float output isn't clipped, so the
         caller can normalize with channel volume (SDL scales before it clamps)."""
         from tinysoundfont import Sequencer, midi as tsf_midi
+        from . import log
 
         synth = self._ensure()
         synth.sounds_off()
@@ -295,7 +409,13 @@ class MidiRenderer:
             except Exception:
                 pass
         seq = Sequencer(synth)
-        seq.add(tsf_midi.load_memory(midi))
+        try:
+            seq.add(tsf_midi.load_memory(midi))
+        except Exception:
+            import traceback
+            log.write("music: MIDI parse failed", f"tinysoundfont could not parse MIDI ({len(midi)} bytes):\n{traceback.format_exc()}")
+            return None
+
         out = bytearray()
         chunk = RATE // 2
         tail = 0.0
@@ -341,20 +461,38 @@ def midi_volume(peak: float, rms: float) -> float:
 def _prepare(
     iwad: Path | None, files: list[Path], renderer: MidiRenderer | None, cancel: threading.Event, ready: dict[str, Prepared]
 ) -> Prepared | None:
+    from . import log
+
     track = find_title_music(iwad, files)
-    if track is None or cancel.is_set():
+    if track is None:
+        log.write("music: track search", f"iwad: {iwad}\nfiles: {[str(f) for f in files]}\nresult: no title music lump found")
+        return None
+    if cancel.is_set():
         return None
     sig = hashlib.sha1(track.data).hexdigest()
     if sig in ready:
         return ready[sig]  # another preset's copy of the same track, already rendered
     if track.kind == "midi":
         if renderer is None:
+            log.write("music: cannot render MIDI", f"Track '{track.name}' ({len(track.data)} bytes) found, but MIDI renderer is disabled (no soundfont or tinysoundfont).")
             return None
-        result = renderer.render(track.data, cancel)
+        t0 = time.monotonic()
+        try:
+            result = renderer.render(track.data, cancel)
+        except Exception:
+            import traceback
+            log.write("music: MIDI render error", f"Track '{track.name}':\n{traceback.format_exc()}")
+            return None
+        elapsed = time.monotonic() - t0
         if not result:
+            if not cancel.is_set():
+                log.write("music: MIDI render failed", f"Track '{track.name}' produced no output after {elapsed:.2f}s")
             return None
         pcm, peak, rms = result
-        return Prepared("pcm", pcm, midi_volume(peak, rms), sig)
+        vol = midi_volume(peak, rms)
+        log.write("music: MIDI rendered", f"Track '{track.name}': {len(track.data)} bytes MIDI -> {len(pcm)} bytes PCM in {elapsed:.2f}s (peak={peak:.3f}, rms={rms:.3f}, vol={vol:.2f})")
+        return Prepared("pcm", pcm, vol, sig)
+    log.write("music: streaming track found", f"Track '{track.name}' ({track.kind}, {len(track.data)} bytes)")
     return Prepared("stream", track.data, VOLUME, sig)
 
 
@@ -369,7 +507,27 @@ class MusicPlayer:
     """
 
     def __init__(self, soundfont: Path | None, channels: tuple[pygame.mixer.Channel, pygame.mixer.Channel]):
-        self.renderer = MidiRenderer(soundfont) if soundfont and importlib.util.find_spec("tinysoundfont") else None
+        from . import log
+
+        tsf_available = False
+        tsf_err = None
+        if importlib.util.find_spec("tinysoundfont"):
+            try:
+                __import__("tinysoundfont")
+                tsf_available = True
+            except Exception as exc:
+                tsf_err = str(exc)
+        else:
+            tsf_err = "module not installed"
+
+        if not tsf_available:
+            log.write("music: tinysoundfont unavailable", f"TinySoundFont is not available ({tsf_err}). MIDI playback disabled.")
+        elif not soundfont:
+            log.write("music: renderer disabled", "No SoundFont available. MIDI playback disabled.")
+        else:
+            log.write("music: renderer ready", f"SoundFont: {soundfont} ({soundfont.stat().st_size} bytes)")
+
+        self.renderer = MidiRenderer(soundfont) if soundfont and tsf_available else None
         self.channels = channels
         self.active = 0  # index of the channel the current PCM track is on
         self.sounds: list[pygame.mixer.Sound | None] = [None, None]
@@ -448,6 +606,8 @@ class MusicPlayer:
             self._start()
 
     def _start(self) -> None:
+        from . import log
+
         key, prepared = self.pending
         if key != self.want:
             self.pending = None
@@ -460,15 +620,18 @@ class MusicPlayer:
                 pygame.mixer.music.set_volume(prepared.volume)
                 pygame.mixer.music.play(fade_ms=FADE_IN_MS)
                 self.streaming = True
+                log.write("music: playback started", f"stream, volume={prepared.volume:.2f}")
             else:
                 self.active ^= 1
                 snd = pygame.mixer.Sound(buffer=prepared.data)
                 snd.set_volume(prepared.volume)
                 self.sounds[self.active] = snd
                 self.channels[self.active].play(snd, fade_ms=FADE_IN_MS)
+                log.write("music: playback started", f"pcm on channel {self.active}, volume={prepared.volume:.2f}")
             self.playing = prepared.sig
-        except pygame.error:
-            pass
+        except Exception:
+            import traceback
+            log.write("music: playback error", f"Error playing {prepared.kind}:\n{traceback.format_exc()}")
         self.pending = None
 
     def shutdown(self) -> None:
