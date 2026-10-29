@@ -32,6 +32,20 @@ class ReleaseTargetTests(unittest.TestCase):
         create_context.assert_called_once_with(cafile="bundle/cacert.pem")
         self.assertIs(urlopen.call_args.kwargs["context"], context)
 
+    def test_current_release_check_records_success_in_local_log(self):
+        data = {
+            "tag_name": "v1.0.0",
+            "html_url": "https://github.com/KrisEnigma/couch-doom/releases/tag/v1.0.0",
+            "body": "",
+            "assets": [],
+        }
+        with patch.object(update, "_fetch_latest", return_value=data), \
+                patch.object(update.log, "write") as write_log:
+            result = update.check("1.0.0")
+
+        self.assertIsNone(result)
+        write_log.assert_called_once_with("update check", "Current version 1.0.0; latest release is 1.0.0.")
+
     def test_target_mapping(self):
         self.assertEqual(update.asset_for_platform("win32", "AMD64"), "windows-x64")
         self.assertEqual(update.asset_for_platform("darwin", "arm64"), "macos-arm64")

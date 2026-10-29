@@ -112,7 +112,11 @@ def check(current: str, skipped: str | None = None, *, platform: str | None = No
         log.write("update check failed", f"{type(exc).__name__}: {exc}")
         return None
     version = tag.lstrip("vV")
-    if not is_newer(version, current) or version == skipped:
+    if version == skipped:
+        log.write("update check", f"Latest release {version} was skipped.")
+        return None
+    if not is_newer(version, current):
+        log.write("update check", f"Current version {current}; latest release is {version}.")
         return None
     if not url.startswith("https://github.com/"):
         return None
