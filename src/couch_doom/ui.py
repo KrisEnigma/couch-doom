@@ -1482,7 +1482,17 @@ class App:
         self.bar_y = self.row_y[self._sel_row()]
         if closed_early(code, elapsed):
             why = last_line(proc.output)
-            self._notify(f"{preset.name} closed right away (exit {code})" + (f": {why}" if why else ". Details are in couch-doom.log"), ERROR)
+            if why:
+                why_low = why.lower()
+                # Keep it short for the toast; full output is in couch-doom.log
+                if why_low.startswith("[mvk-") or "vkinstance" in why_low or "destroying" in why_low and "vulkan" in why_low:
+                    self._notify(f"{preset.name} closed right away (exit {code}). Details are in couch-doom.log", ERROR)
+                else:
+                    if len(why) > 60:
+                        why = why[:57] + "..."
+                    self._notify(f"{preset.name} closed right away (exit {code}): {why}", ERROR)
+            else:
+                self._notify(f"{preset.name} closed right away (exit {code}). Details are in couch-doom.log", ERROR)
         else:
             self._notify(f"Back from {preset.name}", MUTED)
 

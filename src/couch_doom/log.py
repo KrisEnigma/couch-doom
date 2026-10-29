@@ -99,7 +99,9 @@ def spawn(argv: list[str], cwd: Path | None, env: dict[str, str], name: str, com
 
 def closed_early(code: int, seconds: float) -> bool:
     """Whether the engine quit fast enough that the player probably didn't mean it to."""
-    return seconds < 5 or (code != 0 and seconds < 30)
+    if code == 0:
+        return False  # clean exit, even if fast (quitting from menu/title)
+    return seconds < 30
 
 
 def last_line(output: str) -> str:
