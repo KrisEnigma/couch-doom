@@ -20,7 +20,7 @@ import pygame
 from . import __version__, draw
 from . import update as updates
 from .config import ASSET_DIR
-from . import filedialog, handover
+from . import filedialog, handover, asset_cache
 from .filedialog import open_file
 from .gamepad import Action, Input
 from .glyphs import BUTTON_NAMES, Glyphs
@@ -140,6 +140,12 @@ def _load_extras(preset: Preset) -> tuple[Art | None, Readme | None, Endoom | No
     files = load_order(preset)
     iwad, shown = presented_files(preset)
     try:
+        key = asset_cache.key_for(preset, iwad, files)
+        if cached := asset_cache.get(key):
+            return cached.art, cached.readme, cached.endoom, cached.logo
+    except Exception:
+        key = None
+    try:
         art = find_title_art(iwad, shown)
     except Exception:
         art = None
@@ -161,6 +167,11 @@ def _load_extras(preset: Preset) -> tuple[Art | None, Readme | None, Endoom | No
         endoom = find_endoom(files)
     except Exception:
         endoom = None
+    try:
+        if key:
+            asset_cache.put(key, asset_cache.CachedAssets(art, readme, endoom, logo))
+    except Exception:
+        pass
     return art, readme, endoom, logo
 
 
@@ -379,7 +390,7 @@ class App:
         self.running = True
         self.row_offset: dict[tuple[bool, int], float] = {}
 
-        self.art_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="titleart")
+        self.art_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="titleart")
         self.art_jobs: dict[int, Future] = {}
         self.art_cache: OrderedDict[int, pygame.Surface | None] = OrderedDict()
         self.art_layers: list[tuple[int, pygame.Surface | None, float]] = []
@@ -406,6 +417,7 @@ class App:
         self.scroll = self._target_scroll()
         self.bar_y = self.row_y[self._sel_row()] if self.rows else 0
         self.detail_changed = time.monotonic()
+        self._warm_cache()
         if pick:
             self._open_picker()
 
@@ -454,6 +466,7 @@ class App:
         self.scroll = self._target_scroll()
         self.bar_y = self.row_y[self._sel_row()] if self.rows else 0
         self.detail_changed = time.monotonic()
+        self._warm_cache()
         if opts.presets:
             self._sound("open")
             source = f" from {opts.launcher}" if opts.launcher else ""
@@ -1111,6 +1124,69 @@ class App:
             return []
         pos = rows.index(sel)
         return [self.rows[rows[p]].preset for p in (pos - 1, pos + 1) if 0 <= p < len(rows)]
+
+    def _warm_cache(self) -> None:
+        try:
+            import threading
+
+            def worker():
+                try:
+                    present_keys = []
+                    rows = self._preset_rows()
+                    sel = self._sel_row()
+                    if sel in rows:
+                        pos = rows.index(sel)
+                    else:
+                        pos = 0
+                    # BFS outward from current
+                    order = []
+                    seen = set()
+                    q = [pos]
+                    seen.add(pos)
+                    i = 0
+                    while i < len(q):
+                        p = q[i]
+                        i += 1
+                        order.append(p)
+                        for d in (-1, 1):
+                            np = p + d
+                            if 0 <= np < len(rows) and np not in seen:
+                                seen.add(np)
+                                q.append(np)
+                    for p in order:
+                        try:
+                            if getattr(self, "running", True) is False:
+                                break
+                        except Exception:
+                            pass
+                        idx = self.rows[rows[p]].preset
+                        if idx in self.art_cache or idx in self.art_jobs:
+                            continue
+                        try:
+                            preset = self.opts.presets[idx]
+                            unpack(preset)
+                            files = load_order(preset)
+                            iwad, shown = presented_files(preset)
+                            key = asset_cache.key_for(preset, iwad, files)
+                            present_keys.append(key)
+                            if asset_cache.get(key):
+                                continue
+                            # load and cache raw assets
+                            _load_extras(preset)
+                        except Exception:
+                            continue
+                    try:
+                        asset_cache.prune()
+                        asset_cache.invalidate_missing(set(present_keys))
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+
+            t = threading.Thread(target=worker, daemon=True)
+            t.start()
+        except Exception:
+            pass
 
     def _draw_art(self, now: float) -> None:
         if not self.art_layers:

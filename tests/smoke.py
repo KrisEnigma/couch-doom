@@ -215,7 +215,7 @@ engine = [sys.executable, "-c", "import sys; print('boom ' * 9000, flush=True); 
 run = clog.spawn(engine, None, dict(os.environ), "Fake", "fake cmd")
 code, secs = run.wait(lp)
 text = lp.read_text(encoding="utf-8")
-assert code == 3 and clog.closed_early(code, secs) and not clog.closed_early(0, 60) and clog.closed_early(0, 2)
+assert code == 3 and clog.closed_early(code, secs) and not clog.closed_early(0, 60) and not clog.closed_early(0, 2)
 assert "launch: Fake" in text and "exit: 3" in text and "last line" in text and "fake cmd" in text
 assert len(text) < clog.OUTPUT_TAIL + 2048, len(text)  # 45 KB of output was cut to the tail
 for _ in range(80):
