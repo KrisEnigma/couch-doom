@@ -6,7 +6,7 @@ readme = "README.md"
 license = "MIT"
 authors = [{ name = "KrisEnigma" }]
 requires-python = ">=3.11"
-dependencies = ["pygame-ce>=2.5"]
+dependencies = ["pygame-ce>=2.5", "certifi>=2024.2.2"]
 
 [project.urls]
 Homepage = "https://github.com/KrisEnigma/couch-doom"

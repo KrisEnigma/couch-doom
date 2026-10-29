@@ -13,16 +13,17 @@ from couch_doom import __version__  # noqa: E402
 
 # MIDI title music is optional: a platform without a tinysoundfont wheel still builds, just without it.
 tsf_datas, tsf_binaries, tsf_hidden = collect_all("tinysoundfont") if importlib.util.find_spec("tinysoundfont") else ([], [], [])
+certifi_datas, certifi_binaries, certifi_hidden = collect_all("certifi")
 mac = sys.platform == "darwin"
 
-datas = [(str(root / "src" / "couch_doom" / "assets"), "assets"), *tsf_datas]
+datas = [(str(root / "src" / "couch_doom" / "assets"), "assets"), *tsf_datas, *certifi_datas]
 
 a = Analysis(
     [str(root / "packaging" / "couch_doom_entry.py")],
     pathex=[str(root / "src")],
-    binaries=tsf_binaries,
+    binaries=[*tsf_binaries, *certifi_binaries],
     datas=datas,
-    hiddenimports=tsf_hidden,
+    hiddenimports=[*tsf_hidden, *certifi_hidden],
     excludes=["tkinter", "unittest", "pydoc", "pyaudio"],
 )
 pyz = PYZ(a.pure)

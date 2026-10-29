@@ -20,6 +20,18 @@ from tests.make_update_test_manifest import write_manifest
 
 
 class ReleaseTargetTests(unittest.TestCase):
+    def test_latest_release_fetch_uses_bundled_ca_certificates(self):
+        response = io.BytesIO(b'{"tag_name":"v1.0.0","html_url":"https://github.com/KrisEnigma/couch-doom/releases/tag/v1.0.0"}')
+        context = object()
+        with patch.object(update.certifi, "where", return_value="bundle/cacert.pem"), \
+                patch.object(update.ssl, "create_default_context", return_value=context) as create_context, \
+                patch.object(update.urllib.request, "urlopen", return_value=response) as urlopen:
+            data = update._fetch_latest()
+
+        self.assertEqual(data["tag_name"], "v1.0.0")
+        create_context.assert_called_once_with(cafile="bundle/cacert.pem")
+        self.assertIs(urlopen.call_args.kwargs["context"], context)
+
     def test_target_mapping(self):
         self.assertEqual(update.asset_for_platform("win32", "AMD64"), "windows-x64")
         self.assertEqual(update.asset_for_platform("darwin", "arm64"), "macos-arm64")

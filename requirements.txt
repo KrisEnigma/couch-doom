@@ -1,3 +1,4 @@
 pygame-ce>=2.5
+certifi>=2024.2.2
 # MIDI title music also needs: pip install --no-deps tinysoundfont
 # (its PyAudio dependency is only for live playback, which we don't use, and doesn't build on new Pythons)

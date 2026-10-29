@@ -5,12 +5,17 @@ import json
 import os
 import platform as _platform
 import re
+import ssl
 import sys
 from dataclasses import dataclass
 import urllib.request
 
+import certifi
+
+from . import log
+
 API = "https://api.github.com/repos/KrisEnigma/couch-doom/releases/latest"
-TIMEOUT = 4.0
+TIMEOUT = 10.0
 MAX_NOTES = 4
 
 
@@ -40,7 +45,8 @@ def _fetch_latest() -> dict:
         with open(test_manifest, encoding="utf-8") as stream:
             return json.load(stream)
     req = urllib.request.Request(API, headers={"User-Agent": "CouchDoom", "Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+    context = ssl.create_default_context(cafile=certifi.where())
+    with urllib.request.urlopen(req, timeout=TIMEOUT, context=context) as resp:
         return json.load(resp)
 
 
@@ -102,7 +108,8 @@ def check(current: str, skipped: str | None = None, *, platform: str | None = No
         tag = str(data["tag_name"])
         url = str(data["html_url"])
         body = str(data.get("body") or "")
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        log.write("update check failed", f"{type(exc).__name__}: {exc}")
         return None
     version = tag.lstrip("vV")
     if not is_newer(version, current) or version == skipped:
