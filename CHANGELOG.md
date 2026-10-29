@@ -4,11 +4,11 @@ Each release's notes on GitHub are its own section below, behind the download in
 
 **New in 0.8.0**
 
-- In-app updates: download, verify and install new versions on Windows, macOS and Linux, then restart CouchDoom.
-- Faster music browsing, streamed non-MIDI tracks, broader MAPINFO support, and per-engine SoundFonts with a bundled fallback.
-- macOS and Linux stay fullscreen as games launch and return; the faint macOS fullscreen edge is gone.
-- Find portable DoomRunner and macOS UZDoom settings automatically; controller prompts follow your last-used device.
-- Steam Deck download and shortcut art are updated; clean exits no longer warn, and Vulkan shutdowns are quieter.
+- Update CouchDoom from inside the app on Windows, macOS and Linux; it restarts when the update is done.
+- More games and mods now play the right title music, and music starts faster.
+- CouchDoom stays visible while games start and close, with edge-to-edge fullscreen on Mac.
+- CouchDoom finds portable DoomRunner and UZDoom settings more reliably; controller prompts follow your last-used device.
+- Steam Deck setup and library shortcut art are improved, and closing a game no longer shows unnecessary warnings.
 
 **New in 0.7.4**
 
