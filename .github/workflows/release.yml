@@ -85,10 +85,8 @@ jobs:
               mkdir -p "stage-dmg/Help & License"
               cp -R dist/CouchDoom.app stage-dmg/
               cp "packaging/How to use.txt" LICENSE "stage-dmg/Help & License/"
-              sips -s format icns packaging/couch-doom.png --out "$RUNNER_TEMP/CouchDoom.icns"
               create-dmg \
                 --volname "CouchDoom" \
-                --volicon "$RUNNER_TEMP/CouchDoom.icns" \
                 --background "$PWD/packaging/dmg-background.png" \
                 --window-pos 180 120 \
                 --window-size 800 450 \
