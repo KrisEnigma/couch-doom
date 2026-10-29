@@ -22,8 +22,8 @@ from . import __version__, draw
 from . import update as updates
 from . import self_update
 from .config import ASSET_DIR
-from . import filedialog, handover, asset_cache
-from .filedialog import open_file
+from . import handover, asset_cache
+from .filebrowser import Browser as FileBrowser
 from .gamepad import Action, Input
 from .glyphs import BUTTON_NAMES, Glyphs
 from .launch import LaunchCommand, build_command, load_order, presented_files, split_args
@@ -367,6 +367,8 @@ class App:
         self.picker: list[Choice | None] = []  # None is the "find it myself" row
         self.picker_sel = 0
         self.picker_opened = 0.0
+        self.file_browser: FileBrowser | None = None
+        self.browser_scroll = 0
         # A newer release, shown once as a notice: {"version", "current", "notes": [str], "url"}.
         self.update: dict | None = None
         self.update_sel = 1
@@ -403,7 +405,7 @@ class App:
 
         self.commands: list[LaunchCommand] = [build_command(opts, p) for p in opts.presets]
         self.filter = ""
-        self.mode = "list"  # "list" | "search" | "info"
+        self.mode = "list"  # "list" | "search" | "info" | "launcher" | "browse" | "update"
         self.info_tab = 0
         self.info_scrolls = [0.0] * len(INFO_TABS)  # per-tab position, kept while the sheet is open
         self.info_scroll = 0.0
@@ -517,7 +519,7 @@ class App:
         choices = self.launchers.refresh()
         for c in choices:
             self.launchers.preview(c)  # the counts shown; loading here keeps the stall on the button press
-        self.picker = [*choices, None] if filedialog.available() else list(choices)
+        self.picker = [*choices, None]
         current = self.launchers.current
         self.picker_sel = next((i for i, c in enumerate(choices) if current and c.id == current.id), 0)
         self.picker_opened = time.monotonic()
@@ -545,7 +547,7 @@ class App:
         self.picker_sel = i
         choice = self.picker[i]
         if choice is None:
-            self._browse()
+            self._open_browser()
             return
         current = self.launchers.current
         if current and choice.id == current.id and not self.problem:
@@ -684,41 +686,61 @@ class App:
         self.mode = "list"
         self._apply(opts)
 
-    def _browse(self) -> None:
-        patterns = ";".join([*(e for s in SOURCES for e in s.module.EXES), *(n for s in SOURCES for n in s.module.SETTINGS_NAMES), "*.zdl"])
-        owner = pygame.display.get_wm_info().get("window")
-        args = ("Find your Doom launcher", [("Doom launchers and their settings", patterns), ("All files", "*.*")], owner)
-        if sys.platform == "darwin":
-            # The dialog is another process; keep frames (and music) going or macOS shows this window as not responding.
-            self._mouse_on()
-            levels = _macos_window_levels()
-            with ThreadPoolExecutor(1) as pool:
-                job = pool.submit(open_file, *args)
-                last = time.monotonic()
-                while not job.done():
-                    pygame.event.get()
-                    now = time.monotonic()
-                    self.tick(now, now - last)
-                    self._draw(now)
-                    self._flip()
-                    last = now
-                    time.sleep(1 / 60)
-            path = job.result()
-            if any(levels):
-                _macos_window_levels(levels)
-            self._mouse_off()
-        else:
-            path = open_file(*args)
-        # The dialog swallowed the presses that closed it; don't let their releases act on the list.
-        pygame.event.clear()
-        self.input.reset()
-        self.ignore_until = time.monotonic() + INPUT_COOLDOWN
-        _force_foreground()
-        if path:
-            self._on_drop(path)
+    def _open_browser(self, directory: Path | None = None) -> None:
+        names = {name for source in SOURCES for name in (*source.module.EXES, *source.module.SETTINGS_NAMES)}
+        self.file_browser = FileBrowser(home=directory, names=names)
+        self.browser_scroll = 0
+        self.mode = "browse"
+        self._sound("open")
+
+    def _browser_action(self, action: Action) -> None:
+        browser = self.file_browser
+        if browser is None:
+            self.mode = "launcher"
+            return
+        before = browser.directory, browser.selected, browser.show_all
+        if action == Action.UP:
+            browser.move(-1)
+        elif action == Action.DOWN:
+            browser.move(1)
+        elif action == Action.PAGE_UP:
+            browser.move(-8)
+        elif action == Action.PAGE_DOWN:
+            browser.move(8)
+        elif action in (Action.LEFT, Action.PREV_SECTION):
+            browser.change_root(-1)
+        elif action in (Action.RIGHT, Action.NEXT_SECTION):
+            browser.change_root(1)
+        elif action == Action.ALT:
+            browser.toggle_all()
+            self.browser_scroll = 0
+        elif action in (Action.CONFIRM, Action.MENU):
+            path = browser.open_selected()
+            if path is not None:
+                self.file_browser = None
+                self.mode = "launcher"
+                self._on_drop(path)
+        elif action == Action.BACK:
+            if browser.back():
+                browser.move(0)
+            else:
+                self.file_browser = None
+                self.mode = "launcher"
+                self._sound("close")
+        page_size = self._browser_page_size()
+        if browser.selected < self.browser_scroll:
+            self.browser_scroll = browser.selected
+        elif browser.selected >= self.browser_scroll + page_size:
+            self.browser_scroll = browser.selected - page_size + 1
+        self.browser_scroll = max(0, min(self.browser_scroll, max(0, len(browser.entries) - page_size)))
+        if self.mode == "browse" and before != (browser.directory, browser.selected, browser.show_all):
+            self._sound("move")
+
+    def _browser_page_size(self) -> int:
+        return max(1, min(16, (self.h - int(330 * self.s)) // int(54 * self.s)))
 
     def _on_drop(self, path: Path) -> None:
-        """A file or folder dropped on the window, or picked in the dialog: use the launcher it belongs to."""
+        """A file or folder dropped on the window, or picked in the browser: use the launcher it belongs to."""
         if not self.launchers:
             return
         choice = self.launchers.add(path)
@@ -1318,6 +1340,9 @@ class App:
         self.toast = Toast(text, color, time.monotonic())
 
     def _on_action(self, action: Action, now: float) -> None:
+        if self.mode == "browse":
+            self._browser_action(action)
+            return
         if self.mode == "launcher":
             self._on_picker_action(action)
             return
@@ -1481,6 +1506,8 @@ class App:
                 self.free_scroll = self._target_scroll()  # clamped, so scrolling back from an end responds at once
             elif self.mode == "info":
                 self.info_scroll = max(0.0, min(self._info_max_scroll(), self.info_scroll + 3 * notches))
+            elif self.mode == "browse" and self.file_browser:
+                self._browser_action(Action.UP if notches < 0 else Action.DOWN)
         elif t == pygame.MOUSEBUTTONDOWN:
             self._mouse_on()
             if event.button == pygame.BUTTON_LEFT:
@@ -1877,6 +1904,8 @@ class App:
             self._draw_info(now)
         elif self.mode == "launcher":
             self._draw_picker(now)
+        elif self.mode == "browse":
+            self._draw_browser(now)
         elif self.mode == "update":
             self._draw_update(now)
         self._draw_toast(now)
@@ -2110,6 +2139,15 @@ class App:
         pad = self.input.pad_mode
         A = Action
         launcher = [(("L3",) if pad else ("KEY:F4",), "Launcher", (A.LAUNCHER,))] if self.launchers else []
+        if self.mode == "browse":
+            toggle = "All files" if not self.file_browser or not self.file_browser.show_all else "Doom files"
+            if pad:
+                return [(("A",), "Open", (A.CONFIRM,)), (("B",), "Back", (A.BACK,)),
+                        (("X",), toggle, (A.ALT,)), (("LB", "RB"), "Roots", (A.PREV_SECTION, A.NEXT_SECTION)),
+                        (("LT", "RT"), "Page", (A.PAGE_UP, A.PAGE_DOWN))]
+            return [(("KEY:ENTER",), "Open", (A.CONFIRM,)), (("KEY:ESC",), "Back", (A.BACK,)),
+                    (("KEY:TAB",), toggle, (A.ALT,)), (("KEY:LEFT", "KEY:RIGHT"), "Roots", (A.PREV_SECTION, A.NEXT_SECTION)),
+                    (("KEY:PGUP", "KEY:PGDN"), "Page", (A.PAGE_UP, A.PAGE_DOWN))]
         if self.mode == "launcher":
             return [(("A",) if pad else ("KEY:ENTER",), "Choose", (A.CONFIRM,)), (("B",) if pad else ("KEY:ESC",), "Close", (A.BACK,))]
         if self.mode == "update":
@@ -2231,6 +2269,69 @@ class App:
         note = f"Not listed? Drag its {PROGRAM} or settings file onto this window."
         note_font = self._font(21)
         self.screen.blit(self._text(self._fit(note, note_font, inner), note_font, DIM), (x, y + int(18 * s)))
+
+    def _browser_pick(self, index: int) -> None:
+        if not self.file_browser or not 0 <= index < len(self.file_browser.entries):
+            return
+        self.file_browser.selected = index
+        self._browser_action(Action.CONFIRM)
+
+    def _browser_hover(self, index: int) -> None:
+        if self.file_browser and index != self.file_browser.selected:
+            self.file_browser.selected = index
+            page = self._browser_page_size()
+            if index < self.browser_scroll:
+                self.browser_scroll = index
+            elif index >= self.browser_scroll + page:
+                self.browser_scroll = index - page + 1
+
+    def _draw_browser(self, now: float) -> None:
+        browser = self.file_browser
+        if browser is None:
+            return
+        s = self.s
+        page = self._browser_page_size()
+        shown = browser.entries[self.browser_scroll:self.browser_scroll + page]
+        pad, row_h, head_h, note_h = int(28 * s), int(54 * s), int(118 * s), int(52 * s)
+        width = min(self.w - 2 * self.margin, int(1120 * s))
+        height = min(self.h - self.footer_h - int(32 * s), 2 * pad + head_h + max(1, len(shown)) * row_h + note_h)
+        box = pygame.Rect(0, 0, width, height)
+        box.center = (self.w // 2, (self.h - self.footer_h) // 2)
+        shade = pygame.Surface((self.w, self.h - self.footer_h), pygame.SRCALPHA)
+        shade.fill((0, 0, 0, 155))
+        self.screen.blit(shade, (0, 0))
+        self.screen.blit(draw.rounded_rect(box.width, box.height, 18 * s, (*PANEL, 250), (78, 62, 55), 1.5 * s), box)
+        self.hits.append(Hit(shade.get_rect(), self._act(Action.BACK)))
+        self.hits.append(Hit(box, lambda: None))
+
+        x, y = box.x + pad, box.y + pad
+        inner = box.width - 2 * pad
+        self.screen.blit(self._tracked("Find your Doom launcher", 16, self.theme.label, tracking=0.3), (x, y))
+        self.screen.blit(self._text("Choose a file or open a folder", self._font(35, bold=True), TEXT), (x, y + int(26 * s)))
+        path_font = self._font(17, mono=True)
+        path = self._fit(str(browser.directory), path_font, inner)
+        self.screen.blit(self._text(path, path_font, MUTED), (x, y + int(72 * s)))
+        y += head_h
+
+        if not shown:
+            self.screen.blit(self._text("No matching files or folders here", self._font(24), DIM), (x, y + int(12 * s)))
+        for offset, entry in enumerate(shown):
+            index = self.browser_scroll + offset
+            rect = pygame.Rect(box.x + int(12 * s), y, box.width - int(24 * s), row_h - int(4 * s))
+            selected = index == browser.selected
+            if selected:
+                self.screen.blit(draw.rounded_rect(rect.width, rect.height, 9 * s, (255, 255, 255, 18)), rect)
+                pygame.draw.rect(self.screen, self.theme.accent, (rect.x, rect.y + int(8 * s), int(5 * s), rect.height - int(16 * s)))
+            self.hits.append(Hit(rect, lambda i=index: self._browser_pick(i), lambda i=index: self._browser_hover(i)))
+            label = entry.display_name
+            font = self._font(25, bold=selected)
+            self.screen.blit(self._text(self._fit(label, font, inner - int(16 * s)), font, TEXT if selected else MUTED),
+                             (x, self._text_top(font, rect.y + int(14 * s))))
+            y += row_h
+
+        note = "All files shown" if browser.show_all else "Doom launchers and settings files"
+        note_font = self._font(18)
+        self.screen.blit(self._text(self._fit(note, note_font, inner), note_font, DIM), (x, box.bottom - pad - int(20 * s)))
 
     def _draw_update(self, now: float) -> None:
         s = self.s

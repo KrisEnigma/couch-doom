@@ -11,9 +11,7 @@ depends=('python' 'python-pygame-ce')
 makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
 optdepends=('doomrunner: a launcher whose presets CouchDoom lists'
             'qzdl: a launcher whose setups CouchDoom lists'
-            'gzdoom: lists its IWADs when no launcher is set up'
-            'zenity: "Find it myself" file picker'
-            'kdialog: "Find it myself" file picker on KDE')
+            'gzdoom: lists its IWADs when no launcher is set up')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('a1e11233a46e77bc5a01c50245f8bb4393bebf03760aeae33a6ffda3528fec2b')
 

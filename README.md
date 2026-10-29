@@ -57,7 +57,7 @@ Beyond the locations above, CouchDoom follows Start Menu, Desktop and taskbar sh
 
 - **One found:** it opens straight on its presets.
 - **Several found:** it asks once and remembers. Switch later with L3 (click the left stick) or F4.
-- **None found:** choose **Find it myself…** and pick the launcher, the port or a settings file. Dragging one onto the window works too.
+- **None found:** choose **Find it myself…** and browse to the launcher, the port or a settings file. On a controller, use the D-pad or stick to move, A to open a folder or choose a file, B to go up, X to show all files, LB/RB to switch roots, and LT/RT to page. Dragging one onto the window works too.
 
 ![The launcher picker listing DoomRunner, ZDL, Doom Launcher and UZDoom with their preset counts](docs/screenshots/launcher-picker.jpg)
 
@@ -95,8 +95,7 @@ PYTHONPATH=src .venv/bin/python -m couch_doom
 
 `pip install .` adds a `couch-doom` command instead.
 
-- **Linux:** **Find it myself…** needs `zenity` (or `kdialog` on KDE).
-- **macOS:** click the file dialog once before typing; macOS doesn't give it keyboard focus. If GZDoom was downloaded but never opened, open it once from Finder first, or its "downloaded from the internet" prompt hides behind CouchDoom.
+- **macOS:** if GZDoom was downloaded but never opened, open it once from Finder first, or its "downloaded from the internet" prompt hides behind CouchDoom.
 
 Tested on Arch Linux with DSDA-Doom, DoomRunner and qZDL, and on an M4 MacBook Pro with GZDoom. Players run it on Steam Decks too; reports and tips from the Deck are welcome.
 

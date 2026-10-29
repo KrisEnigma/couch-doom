@@ -188,6 +188,7 @@ assert not inp._pad_last and not inp.pad_mode
 
 from couch_doom import update as upd  # noqa: E402
 from couch_doom.gamepad import Action  # noqa: E402
+from couch_doom.launchers import Launchers  # noqa: E402
 
 assert upd.is_newer("0.10.0", "0.9.0") and not upd.is_newer("0.6.0", "0.6.0") and not upd.is_newer("junk", "0.6.0")
 notes_md = "**Download**\n- a\n\n**New in 0.7.0**\n- Thing with `code` and [a link](http://x).\n- Second\n\n**New in 0.6.0**\n- Old\n"
@@ -223,6 +224,34 @@ assert app.mode == "update"  # an update notice is still available on the first-
 app._on_action(Action.BACK, now)
 assert app.mode == "list" and app.blocked
 app.problem = None
+manual_dir = root / "Manual"
+manual_dir.mkdir()
+manual_settings = manual_dir / "options.json"
+manual_settings.write_text(dr.path.read_text(encoding="utf-8"), encoding="utf-8")
+app.launchers = Launchers(state)
+app._open_browser(root)
+assert app.mode == "browse" and any(entry.path == manual_dir and entry.is_dir for entry in app.file_browser.entries)
+app._draw(now)
+app.file_browser.selected = next(i for i, entry in enumerate(app.file_browser.entries) if entry.path == manual_dir)
+app._on_action(Action.CONFIRM, now)
+assert app.file_browser.directory == manual_dir
+app.file_browser.selected = next(i for i, entry in enumerate(app.file_browser.entries) if entry.path == manual_settings)
+app._on_action(Action.CONFIRM, now)
+assert app.mode == "list" and app.opts.path == manual_settings and state.launcher[0] == "doomrunner"
+empty_dir = root / "Empty"
+empty_dir.mkdir()
+app._open_browser(root)
+app.file_browser.directory = empty_dir
+app.file_browser.refresh()
+assert not app.file_browser.entries
+app._draw(now)
+app._open_browser(root)
+app._on_action(Action.ALT, now)
+assert app.file_browser.show_all
+app.file_browser.directory = Path(root.anchor)
+app.file_browser.refresh()
+app._on_action(Action.BACK, now)
+assert app.mode == "launcher"
 for _ in range(3):
     pygame.event.pump()
     app.tick(now, 1 / 60)
