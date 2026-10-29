@@ -43,6 +43,13 @@ their settings. CouchDoom includes a default SoundFont for sourceports without o
 Use --soundfont <file> to override it. A SoundFont in a "soundfonts" folder beside
 CouchDoom.exe, CouchDoom.app or CouchDoom is used when the sourceport has no own bank.
 
+Non-MIDI title music is cached as files so it can stream without keeping the whole track
+in memory. The cache is separate from title images and other menu assets:
+  macOS: ~/Library/Caches/CouchDoom/music
+  Windows: %LOCALAPPDATA%\CouchDoom\cache\music
+  Linux: $XDG_CACHE_HOME/couch-doom/music (or ~/.cache/couch-doom/music)
+Close CouchDoom before clearing this folder; the cache is recreated as tracks are played.
+
 Troubleshooting & logs:
 CouchDoom logs game launches, soundfont search results, and MIDI music status to:
   macOS: ~/Library/Application Support/CouchDoom/state/couch-doom.log

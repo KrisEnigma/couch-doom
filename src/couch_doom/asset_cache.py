@@ -8,7 +8,6 @@ from __future__ import annotations
 import base64
 import json
 import os
-import sys
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -18,21 +17,12 @@ from .endoom import Endoom
 from .options import Preset
 from .readme import Readme
 from .titleart import Art
+from .cache_paths import cache_dir as _shared_cache_dir
 
 
 def cache_dir() -> Path:
     """Platform-appropriate cache directory."""
-    if sys.platform == "darwin":
-        d = Path(os.environ.get("HOME") or Path.home()) / "Library" / "Caches" / "CouchDoom"
-    elif os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-        d = base / "CouchDoom" / "cache"
-    else:
-        xdg = os.environ.get("XDG_CACHE_HOME")
-        base = Path(xdg) if xdg and Path(xdg).is_absolute() else Path(os.environ.get("HOME") or Path.home()) / ".cache"
-        d = base / "couch-doom"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    return _shared_cache_dir()
 
 
 def _assets_dir() -> Path:

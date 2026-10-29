@@ -6,7 +6,10 @@ import struct
 import threading
 import zipfile
 from collections import OrderedDict
+from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
+from typing import BinaryIO
 
 ZIP_EXTS = {".pk3", ".ipk3", ".zip", ".pke"}
 WAD_EXTS = {".wad", ".iwad"}
@@ -35,10 +38,97 @@ _EMBED_LUMPS: OrderedDict[tuple, bytes] = OrderedDict()
 EMBED_CACHE_BYTES = 48 * 1024 * 1024
 
 
+@dataclass(frozen=True)
+class ArchiveSource:
+    """Reopenable locator for one WAD range or ZIP member; owns no open handles."""
+
+    kind: str  # "wad", "zip", or "embedded"
+    archive: Path
+    size: int
+    offset: int = 0
+    member: str = ""
+    crc: int | None = None
+
+    @property
+    def identity(self) -> str:
+        try:
+            stat = self.archive.stat()
+            stamp = (stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            stamp = (None, None)
+        raw = "\0".join(map(str, (self.kind, self.archive.resolve(), *stamp, self.member,
+                                   self.offset, self.size, self.crc)))
+        return sha256(raw.encode("utf-8", "replace")).hexdigest()
+
+    def to_dict(self) -> dict:
+        return {"kind": self.kind, "archive": str(self.archive), "size": self.size,
+                "offset": self.offset, "member": self.member, "crc": self.crc}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ArchiveSource":
+        kind = data["kind"]
+        if kind not in {"wad", "zip", "embedded"}:
+            raise ValueError(f"unknown archive source kind: {kind}")
+        return cls(kind, Path(data["archive"]), int(data["size"]), int(data.get("offset", 0)),
+                   str(data.get("member", "")), data.get("crc"))
+
+    def _open(self):
+        if self.kind == "wad":
+            f = self.archive.open("rb")
+            f.seek(self.offset)
+            return f, f
+        z = zipfile.ZipFile(self.archive)
+        try:
+            f = z.open(self.member)
+            if self.kind == "embedded":
+                f.seek(self.offset)
+            return z, f
+        except Exception:
+            z.close()
+            raise
+
+    def read_prefix(self, limit: int) -> bytes:
+        if limit < 0:
+            raise ValueError("prefix limit must not be negative")
+        count = min(limit, 1084, self.size)
+        owner, reader = self._open()
+        try:
+            return reader.read(count)
+        finally:
+            reader.close()
+            if owner is not reader:
+                owner.close()
+
+    def copy_to(self, destination: BinaryIO, cancel: threading.Event | None = None,
+                chunk_size: int = 262144) -> int:
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be positive")
+        owner, reader = self._open()
+        copied = 0
+        try:
+            while copied < self.size:
+                if cancel is not None and cancel.is_set():
+                    raise InterruptedError("archive source copy cancelled")
+                chunk = reader.read(min(chunk_size, self.size - copied))
+                if not chunk:
+                    raise OSError(f"archive source ended after {copied} of {self.size} bytes")
+                destination.write(chunk)
+                copied += len(chunk)
+        finally:
+            reader.close()
+            if owner is not reader:
+                owner.close()
+        return copied
+
+
 class Wad:
-    def __init__(self, path: Path, f=None, key: tuple | None = None):
+    def __init__(self, path: Path, f=None, key: tuple | None = None, *,
+                 source_archive: Path | None = None, source_member: str = "", source_crc: int | None = None):
         self.path = path
         self.key = key  # set for a WAD inside a pk3, whose reads are cached
+        self.source_archive = source_archive
+        self.source_member = source_member
+        self.source_crc = source_crc
         self.f = f if f is not None else path.open("rb")
         try:
             with _EMBED_LOCK:
@@ -87,6 +177,19 @@ class Wad:
                     _EMBED_LUMPS.popitem(last=False)
         return data
 
+    def has_lump(self, name: str) -> bool:
+        entry = self.lumps.get(Path(name).stem.upper()[:8])
+        return bool(entry and entry[1] > 0)
+
+    def lump_source(self, name: str, folders: tuple[str, ...] = ()) -> ArchiveSource | None:
+        entry = self.lumps.get(Path(name).stem.upper()[:8])
+        if not entry or entry[1] <= 0:
+            return None
+        offset, size = entry
+        if self.source_archive is not None:
+            return ArchiveSource("embedded", self.source_archive, size, offset, self.source_member, self.source_crc)
+        return ArchiveSource("wad", self.path, size, offset)
+
     def music_names(self) -> list[str]:
         return []  # WAD lumps are found by name; only pk3 folders can be searched blind
 
@@ -122,20 +225,38 @@ class Zip:
                     return self.read(real)
         return None
 
+    def lump_source(self, name: str, folders: tuple[str, ...] = ("",)) -> ArchiveSource | None:
+        lname = name.lower().replace("\\", "/")
+        real = self.names.get(lname)
+        if real is None:
+            stem = Path(lname).stem
+            real = next((candidate for n, candidate in self.names.items()
+                         if any(n.startswith(folder) and "/" not in n[len(folder):] for folder in folders)
+                         and Path(n).stem == stem), None)
+        if real is None:
+            return None
+        info = self.z.getinfo(real)
+        if info.file_size <= 0:
+            return None
+        return ArchiveSource("zip", self.path, info.file_size, member=real, crc=info.CRC)
+
     def music_names(self) -> list[str]:
         return sorted(n for n in self.names if n.startswith("music/") and "/" not in n[6:])
 
     def embedded(self) -> list[Wad]:
         """WADs in the pk3's root, which GZDoom loads right after the pk3 itself (big TCs keep everything in one)."""
         try:
-            stamp = self.path.stat().st_mtime_ns
+            stat = self.path.stat()
+            stamp = (stat.st_mtime_ns, stat.st_size)
         except OSError:
             return []
         out = []
         for n in sorted(n for n in self.names if "/" not in n and Path(n).suffix in WAD_EXTS):
             real = self.names[n]
             try:
-                out.append(Wad(self.path / real, self.z.open(real), (str(self.path), stamp, real)))
+                info = self.z.getinfo(real)
+                out.append(Wad(self.path / real, self.z.open(real), (str(self.path), *stamp, real),
+                               source_archive=self.path, source_member=real, source_crc=info.CRC))
             except (OSError, ValueError, struct.error, zipfile.BadZipFile, RuntimeError):
                 pass
         return out
@@ -194,6 +315,20 @@ class Archives:
             for n in a.music_names():
                 if pattern.search(Path(n).stem) and (data := a.read(a.names[n])):
                     return data
+        return None
+
+    def guess_music_source(self, pattern: re.Pattern) -> ArchiveSource | None:
+        for a in self.items:
+            for n in a.music_names():
+                if pattern.search(Path(n).stem) and (source := a.lump_source(n)) and source.size > 0:
+                    return source
+        return None
+
+    def find_source(self, names: list[str], folders: tuple[str, ...] = ("",)) -> ArchiveSource | None:
+        for name in names:
+            for a in self.items:
+                if (source := a.lump_source(name, folders)) and source.size > 0:
+                    return source
         return None
 
     def find(self, names: list[str], folders: tuple[str, ...] = ("",)) -> bytes | None:

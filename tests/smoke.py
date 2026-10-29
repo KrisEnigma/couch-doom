@@ -316,17 +316,161 @@ pyi = {"PATH": "/usr/bin", "LD_LIBRARY_PATH": "/app/_internal:/mine", "LD_LIBRAR
 assert engine_environ(pyi, True) == {"PATH": "/usr/bin", "LD_LIBRARY_PATH": "/mine", "LANG": "C"}
 assert "LD_LIBRARY_PATH" not in engine_environ({"LD_LIBRARY_PATH": "/app/_internal"}, True)  # there was none originally
 assert engine_environ(pyi, False) == pyi  # running from source: untouched
-from couch_doom.music import find_title_music  # noqa: E402
+from couch_doom.music import find_title_music, _classify  # noqa: E402
+from couch_doom.archive import Archives, ArchiveSource, Wad  # noqa: E402
 
 pk3 = root / "tc.pk3"
 with zipfile.ZipFile(pk3, "w") as z:
     z.writestr("music/LVL1.ogg", b"OggS" + b"\0" * 20)
     z.writestr("music/TITMUS.ogg", b"OggS" + b"\1" * 20)
 guess = find_title_music(None, [pk3])
-assert guess and guess.name == "TITLE" and guess.kind == "stream" and guess.data[4] == 1, guess
+assert guess and guess.name == "TITLE" and guess.kind == "stream" and guess.source and guess.midi_data is None
+assert guess.format == "ogg" and guess.source.read_prefix(8)[4] == 1
 with zipfile.ZipFile(root / "plain.pk3", "w") as z:
     z.writestr("music/LVL1.ogg", b"OggS" + b"\0" * 20)
 assert find_title_music(None, [root / "plain.pk3"]) is None  # nothing title-like: stay silent rather than guess a level song
+assert _classify(b"MThd\0\0\0\x06") == ("midi", "mid")
+assert _classify(b"MUS\x1a" + b"\0" * 8) == ("midi", "mus")
+assert _classify(b"OggS") == ("stream", "ogg")
+assert _classify(b"fLaC") == ("stream", "flac")
+assert _classify(b"ID3") == ("stream", "mp3")
+assert _classify(b"\xff\xfb") == ("stream", "mp3")
+assert _classify(b"RIFF" + b"\0" * 4 + b"WAVE") == ("stream", "wav")
+assert _classify(b"Extended Module:") == ("stream", "xm")
+assert _classify(b"IMPM") == ("stream", "it")
+assert _classify(b"\0" * 44 + b"SCRM") == ("stream", "s3m")
+assert _classify(b"\0" * 1080 + b"M.K.") == ("stream", "mod")
+
+# ArchiveSource descriptors can outlive the archive context and stream WAD ranges and ZIP members in chunks.
+source_wad = root / "source.wad"
+wad(source_wad, ["D_DM2TTL"], data={"D_DM2TTL": b"OggS" + b"w" * 32})
+source_emb = root / "source-embedded.pk3"
+embedded_body = b"OggS" + b"e" * 32
+embedded_offset = 12
+embedded_bytes = (b"PWAD" + struct.pack("<ii", 1, embedded_offset + len(embedded_body)) + embedded_body
+                  + struct.pack("<ii8s", embedded_offset, len(embedded_body), b"D_DM2TTL"))
+with zipfile.ZipFile(source_emb, "w") as z:
+    z.writestr("inside.wad", embedded_bytes)
+source_zip = root / "source-music.pk3"
+with zipfile.ZipFile(source_zip, "w") as z:
+    z.writestr("music/title.ogg", b"OggS" + b"z" * 32)
+source_empty = root / "source-empty.pk3"
+with zipfile.ZipFile(source_empty, "w") as z:
+    z.writestr("music/title.ogg", b"")
+with Archives(source_wad, []) as archives:
+    wad_source = archives.items[0].lump_source("D_DM2TTL")
+with Archives(None, [source_zip]) as archives:
+    zip_source = archives.items[0].lump_source("music/title.ogg")
+with Archives(None, [source_zip, source_empty]) as archives:
+    assert archives.find_source(["title"], ("music/", "")).size == 36
+with Archives(None, [source_emb]) as archives:
+    embedded_source = archives.items[0].lump_source("D_DM2TTL")
+for source, expected in ((wad_source, b"OggS" + b"w" * 32), (zip_source, b"OggS" + b"z" * 32),
+                         (embedded_source, b"OggS" + b"e" * 32)):
+    assert source and source.size == len(expected)
+    assert source.read_prefix(12) == expected[:12]
+    import io
+    copied = io.BytesIO()
+    assert source.copy_to(copied, chunk_size=7) == len(expected) and copied.getvalue() == expected
+assert wad_source.to_dict()["kind"] == "wad" and ArchiveSource.from_dict(zip_source.to_dict()).identity == zip_source.identity
+cancel = __import__("threading").Event()
+class _CancelAfterOneWrite:
+    def __init__(self):
+        self.data = bytearray()
+    def write(self, chunk):
+        self.data.extend(chunk)
+        cancel.set()
+        return len(chunk)
+cancelled = _CancelAfterOneWrite()
+try:
+    wad_source.copy_to(cancelled, cancel, chunk_size=7)
+    raise AssertionError("cancelled archive source copy completed")
+except InterruptedError:
+    assert len(cancelled.data) == 7
+
+from couch_doom.cache_paths import cache_dir as shared_cache_dir  # noqa: E402
+from couch_doom.asset_cache import cache_dir as assets_cache_dir  # noqa: E402
+from couch_doom import music_cache  # noqa: E402
+
+assert shared_cache_dir() == assets_cache_dir()
+from couch_doom import music as music_mod  # noqa: E402
+music_key = music_cache.selection_key("music-selection-smoke")
+prepared_stream = music_mod._prepare(None, [source_zip], None, __import__("threading").Event(), {}, music_key)
+assert prepared_stream and prepared_stream.kind == "stream" and isinstance(prepared_stream.data, Path)
+original_archives = music_mod.Archives
+try:
+    music_mod.Archives = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("manifest missed"))
+    cached_prepared_stream = music_mod._prepare(None, [source_zip], None, __import__("threading").Event(), {}, music_key)
+finally:
+    music_mod.Archives = original_archives
+assert cached_prepared_stream and cached_prepared_stream.data == prepared_stream.data
+cached_stream = music_cache.cache_stream(zip_source, "ogg", __import__("threading").Event())
+assert cached_stream.is_file() and cached_stream.read_bytes() == b"OggS" + b"z" * 32
+assert music_cache.cache_stream(zip_source, "ogg", __import__("threading").Event()) == cached_stream
+selection_key = "smoke-selection"
+music_cache.put_selection(selection_key, {"track": None})
+assert music_cache.get_selection(selection_key) == (True, {"track": None})
+music_cache.invalidate_selections(set())
+assert music_cache.get_selection(selection_key) == (False, None)
+source_stamp = source_zip.stat()
+key_before_change = music_cache.selection_key("preset-key", None, [source_zip])
+path_before_change = music_cache.cache_stream(zip_source, "ogg", __import__("threading").Event())
+os.utime(source_zip, ns=(source_stamp.st_atime_ns, source_stamp.st_mtime_ns + 1_000_000))
+key_after_change = music_cache.selection_key("preset-key", None, [source_zip])
+path_after_change = music_cache.cache_stream(zip_source, "ogg", __import__("threading").Event())
+os.utime(source_zip, ns=(source_stamp.st_atime_ns, source_stamp.st_mtime_ns))
+assert key_before_change != key_after_change and music_cache.get_selection(key_after_change) == (False, None)
+assert path_before_change != path_after_change
+negative_key = music_cache.selection_key("negative-selection", None, [root / "plain.pk3"])
+assert music_mod._prepare(None, [root / "plain.pk3"], None, __import__("threading").Event(), {}, negative_key) is None
+original_archives_for_negative = music_mod.Archives
+try:
+    music_mod.Archives = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("negative manifest missed"))
+    assert music_mod._prepare(None, [root / "plain.pk3"], None, __import__("threading").Event(), {}, negative_key) is None
+finally:
+    music_mod.Archives = original_archives_for_negative
+cancelled_cache_event = __import__("threading").Event()
+cancelled_cache_event.set()
+try:
+    music_cache.cache_stream(wad_source, "ogg", cancelled_cache_event)
+    raise AssertionError("cancelled cache population completed")
+except InterruptedError:
+    assert not list((shared_cache_dir() / "music").glob("*.part"))
+old_cap = music_cache.MAX_STREAM_BYTES
+music_cache.MAX_STREAM_BYTES = 10
+other_protected_stream = music_cache.cache_stream(wad_source, "ogg", __import__("threading").Event(),
+                                                  protected={cached_stream})
+assert cached_stream.exists() and other_protected_stream.exists()
+music_cache.prune({cached_stream, other_protected_stream})
+assert cached_stream.exists() and other_protected_stream.exists()  # protected paths may exceed target
+music_cache.prune()
+assert not cached_stream.exists() and not other_protected_stream.exists()  # after release they are eligible
+music_cache.MAX_STREAM_BYTES = old_cap
+fallback_cache_stream = music_cache.cache_stream(zip_source, "ogg", __import__("threading").Event())
+original_cache_stream = music_cache.cache_stream
+try:
+    music_cache.cache_stream = lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("cache unavailable"))
+    fallback_prepared = music_mod._prepare(None, [source_zip], None, __import__("threading").Event(), {})
+finally:
+    music_cache.cache_stream = original_cache_stream
+assert fallback_prepared and isinstance(fallback_prepared.data, bytes) and fallback_prepared.format == "ogg"
+oversized_source = ArchiveSource(zip_source.kind, zip_source.archive, 8 * 1024 * 1024 + 1,
+                                 zip_source.offset, zip_source.member, zip_source.crc)
+original_find_music = music_mod.find_title_music
+try:
+    music_mod.find_title_music = lambda *_args, **_kwargs: music_mod.Track("stream", "ogg", "large", source=oversized_source)
+    music_cache.cache_stream = lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("cache unavailable"))
+    assert music_mod._prepare(None, [source_zip], None, __import__("threading").Event(), {}) is None
+finally:
+    music_mod.find_title_music = original_find_music
+    music_cache.cache_stream = original_cache_stream
+original_copy_to = ArchiveSource.copy_to
+try:
+    ArchiveSource.copy_to = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("cache hit recopied source"))
+    no_copy_hit = music_cache.cache_stream(zip_source, "ogg", __import__("threading").Event())
+finally:
+    ArchiveSource.copy_to = original_copy_to
+assert no_copy_hit == fallback_cache_stream
 from couch_doom.readme import find_readme  # noqa: E402
 from couch_doom.options import Preset  # noqa: E402
 
@@ -530,7 +674,24 @@ from couch_doom.music import midi_volume, VOLUME  # noqa: E402
 midi = b"MThd\0\0\0\x06\0\0\0\x01\0\x60MTrk\0\0\0\x04\0\xff\x2f\0"
 strife = root / "strife1.wad"
 strife.write_bytes(_wad_with({"D_INTRO": midi, "D_LOGO": midi + b"\0"}))
-assert find_title_music(strife, []).data == midi + b"\0"  # Strife's title plays D_LOGO, not its intro song
+assert find_title_music(strife, []).midi_data == midi + b"\0"  # Strife's title plays D_LOGO, not its intro song
+original_wad_lump = Wad.lump
+try:
+    Wad.lump = lambda self, name, *args: (_ for _ in ()).throw(AssertionError("default music lump materialized")) \
+        if Path(name).stem.upper() == "D_LOGO" else original_wad_lump(self, name, *args)
+    assert find_title_music(strife, [], materialize_midi=False).source is not None
+finally:
+    Wad.lump = original_wad_lump
+class _RecordingMidiRenderer:
+    soundfont = root / "test.sf2"
+    def __init__(self):
+        self.received = None
+    def render(self, data, _cancel):
+        self.received = data
+        return bytes(8), 0.5, 0.2
+recording_renderer = _RecordingMidiRenderer()
+prepared_midi = music_mod._prepare(strife, [], recording_renderer, __import__("threading").Event(), {})
+assert prepared_midi and prepared_midi.kind == "pcm" and recording_renderer.received == midi + b"\0"
 
 dk = root / "dk"
 dk.mkdir()
@@ -544,13 +705,27 @@ spiky, even = midi_volume(2.6, 0.22), midi_volume(1.0, 0.22)
 assert spiky == even and spiky * 0.22 == even * 0.22  # one loud hit no longer pulls the whole track down
 assert midi_volume(1.0, 0.03) == 0.9  # a quiet track is raised only until its peak would clip
 assert midi_volume(0.5, 0.01) == 1.0 and midi_volume(0.0, 0.0) == VOLUME
+from concurrent.futures import Future
 from couch_doom.music import MusicPlayer, Prepared  # noqa: E402
+from collections import OrderedDict
+old_music_cap = music_mod.CACHE_BYTES
+music_mod.CACHE_BYTES = 8
+pcm_cache_probe = object.__new__(MusicPlayer)
+pcm_cache_probe.cache = OrderedDict()
+pcm_cache_probe._cache_prepared(Prepared("pcm", b"a" * 6, 0.5, "old"))
+pcm_cache_probe._cache_prepared(Prepared("pcm", b"b" * 6, 0.5, "new"))
+assert list(pcm_cache_probe.cache) == ["new"]
+pcm_cache_probe._cache_prepared(Prepared("pcm", b"c" * 16, 0.5, "oversized"))
+assert "oversized" not in pcm_cache_probe.cache and sum(len(p.data) for p in pcm_cache_probe.cache.values()) <= 8
+pcm_cache_probe._cache_prepared(Prepared("stream", root / "music.ogg", 0.5, "stream", "ogg"))
+assert "stream" not in pcm_cache_probe.cache
+music_mod.CACHE_BYTES = old_music_cap
 
 if pygame.mixer.get_init():
     mp = MusicPlayer(None, (pygame.mixer.Channel(0), pygame.mixer.Channel(1)))
     tune = Prepared("pcm", bytes(44100 * 8 * 3), 0.5, "stock")
     mp.cache["stock"] = tune
-    a, b, quiet = (root / "a.wad", ()), (root / "b.wad", ()), (root / "c.wad", ())
+    a, b, quiet = (root / "a.wad", (), None), (root / "b.wad", (), None), (root / "c.wad", (), None)
     mp.tracks.update({a: "stock", b: "stock", quiet: None})
     mp.request(1, a[0], [])
     mp.update()
@@ -562,6 +737,34 @@ if pygame.mixer.get_init():
     mp.request(3, quiet[0], [])
     assert mp.playing is None  # a preset without title music fades it out
     mp.shutdown()
+    unavailable_player = MusicPlayer(None, (pygame.mixer.Channel(0), pygame.mixer.Channel(1)))
+    failed_future = Future()
+    failed_future.set_result(None)  # the worker reports the logged, unavailable-cache result
+    unavailable_player.want = "large-stream"
+    unavailable_ident = (root / "large.pk3", (), None)
+    unavailable_player.job = ("large-stream", unavailable_ident, failed_future, __import__("threading").Event())
+    unavailable_player.update()
+    assert unavailable_player.tracks[unavailable_ident] is None
+    unavailable_player.shutdown()
+    mixer_music = pygame.mixer.music
+    originals = {name: getattr(mixer_music, name) for name in ("load", "get_busy", "set_volume", "play", "fadeout", "unload")}
+    loaded_streams = []
+    try:
+        mixer_music.load = lambda path, *args: loaded_streams.append(path)
+        mixer_music.get_busy = lambda: False
+        mixer_music.set_volume = lambda _volume: None
+        mixer_music.play = lambda **_kwargs: None
+        mixer_music.fadeout = lambda _duration: None
+        mixer_music.unload = lambda: None
+        path_player = MusicPlayer(None, (pygame.mixer.Channel(0), pygame.mixer.Channel(1)))
+        path_player.want = "stream-path"
+        path_player.pending = ("stream-path", Prepared("stream", fallback_cache_stream, 0.5, "path", "ogg"))
+        path_player._start()
+        assert loaded_streams == [str(fallback_cache_stream)]
+        path_player.shutdown()
+    finally:
+        for name, original in originals.items():
+            setattr(mixer_music, name, original)
 print("smoke ok:", ", ".join(sorted(found)), "| UI", ui_size)
 from couch_doom.titleart import find_logo, find_title_art  # noqa: E402
 
@@ -577,14 +780,14 @@ with zipfile.ZipFile(emb, "w", zipfile.ZIP_DEFLATED) as z:
     z.writestr("main.wad", _wad_with({"TITLEPIC": _png(320, 200, b"mine"), "D_DM2TTL": midi + b"\1"}))
     z.writestr("maps/MAP01.wad", _wad_with({"TITLEPIC": _png(320, 200, b"map")}))
 assert find_title_art(d2, [emb]).data.endswith(b"mine")  # a WAD at a pk3's root loads with it, like the engine does
-assert find_title_music(d2, [emb]).data == midi + b"\1"
+assert find_title_music(d2, [emb]).midi_data == midi + b"\1"
 tm = root / "titlemap.pk3"
 with zipfile.ZipFile(tm, "w") as z:
     z.writestr("zmapinfo.txt", 'map TITLEMAP "Welcome"\n{\n  sky1 = "SKY1"\n  music = "D_TITLE"\n}\n')
     z.writestr("music/D_TITLE.ogg", b"OggS" + b"\2" * 20)
     z.writestr("textures/runes/logo1.png", _png(512, 512))
     z.writestr("textures/logo2021.png", _png(986, 180, b"word"))
-assert find_title_music(d2, [tm]).data[4] == 2  # no titlemusic: the title map's own song
+assert find_title_music(d2, [tm]).source.read_prefix(8)[4] == 2  # no titlemusic: the title map's own song
 assert find_title_art(d2, [tm]).data.endswith(b"stock")  # a 3D title map and nothing of its own: the IWAD's picture
 with zipfile.ZipFile(tm, "a") as z:
     z.writestr("graphics/interbg.png", _png(1920, 1080, b"inter"))
@@ -603,7 +806,7 @@ with zipfile.ZipFile(di, "w") as z:
     z.writestr("MENUDEF", 'LISTMENU "MainMenu"\n{\n  StaticPatch 94, 0, "DILSC0"\n  TextItem "START", "s", "x"\n}\n')
     z.writestr("sprites/intro/DILSC0.png", _png(123, 82, b"dils"))
 track = find_title_music(d2, [di])
-assert track and track.name == "DIM_1" and track.data[3] == 3, track  # started by the title map's own script
+assert track and track.name == "DIM_1" and track.source.read_prefix(8)[3] == 3, track  # started by the title map's own script
 assert find_logo(d2, [di]).data.endswith(b"dils")  # whatever the main menu draws is the logo
 from couch_doom.titleart import find_startup  # noqa: E402
 

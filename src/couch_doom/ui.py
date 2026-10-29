@@ -679,7 +679,7 @@ class App:
             overrides = (self.soundfont_choice, os.environ.get("DOOMRUNNER_SOUNDFONT"))
             if not any(font and Path(font).is_file() for font in overrides):
                 engine_font = find_engine_soundfont(self.opts.engine_for(p))
-            self.music.request(self.current, *presented_files(p), soundfont=engine_font or self.soundfont)
+            self.music.request(self.current, *presented_files(p), soundfont=engine_font or self.soundfont, preset=p)
         # While the selection is still moving, the current track plays on: the next preset may share it.
 
     def _toggle_music(self) -> None:
@@ -1137,6 +1137,7 @@ class App:
             def worker():
                 try:
                     present_keys = []
+                    music_keys = []
                     rows = self._preset_rows()
                     sel = self._sel_row()
                     if sel in rows:
@@ -1165,8 +1166,6 @@ class App:
                         except Exception:
                             pass
                         idx = self.rows[rows[p]].preset
-                        if idx in self.art_cache or idx in self.art_jobs:
-                            continue
                         try:
                             preset = self.opts.presets[idx]
                             unpack(preset)
@@ -1174,6 +1173,10 @@ class App:
                             iwad, shown = presented_files(preset)
                             key = asset_cache.key_for(preset, iwad, files)
                             present_keys.append(key)
+                            from . import music_cache
+                            music_keys.append(music_cache.selection_key(key, iwad, shown))
+                            if idx in self.art_cache or idx in self.art_jobs:
+                                continue
                             if asset_cache.get(key):
                                 continue
                             # load and cache raw assets
@@ -1183,6 +1186,7 @@ class App:
                     try:
                         asset_cache.prune()
                         asset_cache.invalidate_missing(set(present_keys))
+                        music_cache.invalidate_selections(set(music_keys))
                     except Exception:
                         pass
                 except Exception:

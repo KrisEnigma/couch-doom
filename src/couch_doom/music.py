@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pygame
 
-from .archive import Archives
+from .archive import ArchiveSource, Archives
 from .config import DATA_DIR, PROJECT_ROOT, home, xdg
 from .options import Engine
 
@@ -63,29 +63,43 @@ PEAK_TARGET = 0.9  # never louder than this, so nothing clips
 DWELL_SECONDS = 0.12
 FADE_IN_MS = 500
 FADE_OUT_MS = 700
-CACHE_BYTES = 96 * 1024 * 1024  # recent tracks kept so flipping back to a preset restarts instantly
+CACHE_BYTES = 24 * 1024 * 1024  # rendered MIDI PCM; encoded streams live in the persistent disk cache
 
 
 @dataclass
 class Track:
     kind: str  # "midi" | "stream" (ogg/mp3/flac/wav and mod/xm/it/s3m, decoded by SDL_mixer)
-    data: bytes
+    format: str
     name: str
+    midi_data: bytes | None = None
+    source: ArchiveSource | None = None
 
 
 # ---------- finding ----------
 
-def _classify(data: bytes) -> str | None:
-    if data.startswith(b"MUS\x1a") or data.startswith(b"MThd"):
-        return "midi"
-    if data[:4] in (b"OggS", b"fLaC") or data.startswith(b"ID3") or (data[:4] == b"RIFF" and data[8:12] == b"WAVE"):
-        return "stream"
+def _classify(data: bytes) -> tuple[str, str] | None:
+    if data.startswith(b"MUS\x1a"):
+        return "midi", "mus"
+    if data.startswith(b"MThd"):
+        return "midi", "mid"
+    if data.startswith(b"OggS"):
+        return "stream", "ogg"
+    if data.startswith(b"fLaC"):
+        return "stream", "flac"
+    if data.startswith(b"ID3"):
+        return "stream", "mp3"
+    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return "stream", "wav"
     if len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0:  # bare MP3 frame sync
-        return "stream"
-    if data.startswith(b"Extended Module:") or data.startswith(b"IMPM") or data[44:48] == b"SCRM":
-        return "stream"
-    if len(data) > 1084 and data[1080:1084] in (b"M.K.", b"M!K!", b"FLT4", b"4CHN", b"6CHN", b"8CHN"):
-        return "stream"
+        return "stream", "mp3"
+    if data.startswith(b"Extended Module:"):
+        return "stream", "xm"
+    if data.startswith(b"IMPM"):
+        return "stream", "it"
+    if data[44:48] == b"SCRM":
+        return "stream", "s3m"
+    if len(data) >= 1084 and data[1080:1084] in (b"M.K.", b"M!K!", b"FLT4", b"4CHN", b"6CHN", b"8CHN"):
+        return "stream", "mod"
     return None
 
 
@@ -112,7 +126,8 @@ def _music_renames(arcs: Archives) -> dict[str, str]:
     return out
 
 
-def find_title_music(iwad: Path | None, files: list[Path]) -> Track | None:
+def find_title_music(iwad: Path | None, files: list[Path], *, materialize_midi: bool = True,
+                     cancel: threading.Event | None = None) -> Track | None:
     with Archives(iwad, files) as arcs:
         if not arcs.items:
             return None
@@ -127,18 +142,35 @@ def find_title_music(iwad: Path | None, files: list[Path]) -> Track | None:
             names.append(custom)
         defaults = [renamed(n) for n in DEFAULT_TITLE_LUMPS]
         base = arcs.items[-1] if iwad and arcs.items[-1].path == iwad else None
-        default = next((n for n in defaults if base and base.lump(n)), None)
+        default = next((n for n in defaults if base and base.has_lump(n)), None)
         names += [default] if default else defaults
         for name in names:
-            for a in arcs.items:
-                data = a.lump(name, MUSIC_FOLDERS)
-                if data and (kind := _classify(data)):
-                    if data.startswith(b"MUS\x1a"):
-                        data = mus_to_midi(data)
-                    return Track(kind, data, Path(name).stem.upper())
-        if (data := arcs.guess_music(TITLE_GUESS_RE)) and (kind := _classify(data)):
-            return Track(kind, data, "TITLE")
+            source = arcs.find_source([name], MUSIC_FOLDERS)
+            if source and (classified := _classify(source.read_prefix(1084))):
+                kind, fmt = classified
+                if kind == "midi":
+                    midi_data = _read_midi(source, cancel) if materialize_midi else None
+                    if midi_data is not None and fmt == "mus":
+                        midi_data = mus_to_midi(midi_data)
+                    return Track(kind, fmt, Path(name).stem.upper(), midi_data=midi_data,
+                                 source=source if not materialize_midi else None)
+                return Track(kind, fmt, Path(name).stem.upper(), source=source)
+        if (source := arcs.guess_music_source(TITLE_GUESS_RE)) and (classified := _classify(source.read_prefix(1084))):
+            kind, fmt = classified
+            if kind == "midi":
+                midi_data = _read_midi(source, cancel) if materialize_midi else None
+                if midi_data is not None and fmt == "mus":
+                    midi_data = mus_to_midi(midi_data)
+                return Track(kind, fmt, "TITLE", midi_data=midi_data,
+                             source=source if not materialize_midi else None)
+            return Track(kind, fmt, "TITLE", source=source)
         return None
+
+
+def _read_midi(source: ArchiveSource, cancel: threading.Event | None = None) -> bytes:
+    out = io.BytesIO()
+    source.copy_to(out, cancel)
+    return out.getvalue()
 
 
 def _acs_title_music(arcs: Archives) -> str | None:
@@ -451,10 +483,11 @@ class MidiRenderer:
 
 @dataclass
 class Prepared:
-    kind: str  # "pcm" (rendered float32 stereo) | "stream" (encoded file for mixer.music)
-    data: bytes
+    kind: str  # "pcm" (rendered float32 stereo) | "stream" (cached file or bounded fallback)
+    data: bytes | Path
     volume: float
     sig: str = ""  # identifies the track itself, so presets sharing one can keep it playing
+    format: str = ""
 
 
 def midi_volume(peak: float, rms: float) -> float:
@@ -465,28 +498,69 @@ def midi_volume(peak: float, rms: float) -> float:
 
 
 def _prepare(
-    iwad: Path | None, files: list[Path], renderer: MidiRenderer | None, cancel: threading.Event, ready: dict[str, Prepared]
+    iwad: Path | None, files: list[Path], renderer: MidiRenderer | None, cancel: threading.Event,
+    ready: dict[str, Prepared], selection_key: str | None = None,
+    protected_streams: set[Path] | None = None,
 ) -> Prepared | None:
     from . import log
 
-    track = find_title_music(iwad, files)
+    from . import music_cache
+
+    track = None
+    if selection_key:
+        found, cached = music_cache.get_selection(selection_key)
+        if found:
+            if cached is None or "track" not in cached:
+                found = False
+                record = None
+            else:
+                record = cached["track"]
+            if found and record is not None:
+                try:
+                    if not isinstance(record, dict) or not isinstance(record.get("source"), dict):
+                        raise ValueError("invalid selection record")
+                    source = ArchiveSource.from_dict(record["source"])
+                    track = Track(record["kind"], record["format"], record["name"], source=source)
+                except (KeyError, TypeError, ValueError):
+                    track = None
+                    found = False
+            elif found and record is None:
+                track = None  # cached negative result
+        if not found:
+            track = find_title_music(iwad, files, materialize_midi=False, cancel=cancel)
+            record = None if track is None else {
+                "kind": track.kind, "format": track.format, "name": track.name,
+                "source": track.source.to_dict() if track.source else None,
+            }
+            try:
+                music_cache.put_selection(selection_key, {"track": record})
+            except Exception as exc:
+                log.write("music: selection cache write failed", str(exc))
+    else:
+        track = find_title_music(iwad, files, cancel=cancel)
     if track is None:
         log.write("music: track search", f"iwad: {iwad}\nfiles: {[str(f) for f in files]}\nresult: no title music lump found")
         return None
     if cancel.is_set():
         return None
-    sig = hashlib.sha1(track.data).hexdigest()
+    if track.kind == "midi" and track.midi_data is None:
+        if track.source is None:
+            return None
+        track.midi_data = _read_midi(track.source, cancel)
+        if track.format == "mus":
+            track.midi_data = mus_to_midi(track.midi_data)
+    sig = track.source.identity if track.source else hashlib.sha1(track.midi_data or b"").hexdigest()
     if track.kind == "midi" and renderer:
-        sig = hashlib.sha1(f"{renderer.soundfont}\0".encode() + track.data).hexdigest()
+        sig = hashlib.sha1(f"{renderer.soundfont}\0".encode() + (track.midi_data or b"")).hexdigest()
     if sig in ready:
         return ready[sig]  # another preset's copy of the same track, already rendered
     if track.kind == "midi":
         if renderer is None:
-            log.write("music: cannot render MIDI", f"Track '{track.name}' ({len(track.data)} bytes) found, but MIDI renderer is disabled (no soundfont or tinysoundfont).")
+            log.write("music: cannot render MIDI", f"Track '{track.name}' ({len(track.midi_data or b'')} bytes) found, but MIDI renderer is disabled (no soundfont or tinysoundfont).")
             return None
         t0 = time.monotonic()
         try:
-            result = renderer.render(track.data, cancel)
+            result = renderer.render(track.midi_data or b"", cancel)
         except Exception:
             import traceback
             log.write("music: MIDI render error", f"Track '{track.name}':\n{traceback.format_exc()}")
@@ -498,10 +572,28 @@ def _prepare(
             return None
         pcm, peak, rms = result
         vol = midi_volume(peak, rms)
-        log.write("music: MIDI rendered", f"Track '{track.name}': {len(track.data)} bytes MIDI -> {len(pcm)} bytes PCM in {elapsed:.2f}s (peak={peak:.3f}, rms={rms:.3f}, vol={vol:.2f})")
+        log.write("music: MIDI rendered", f"Track '{track.name}': {len(track.midi_data or b'')} bytes MIDI -> {len(pcm)} bytes PCM in {elapsed:.2f}s (peak={peak:.3f}, rms={rms:.3f}, vol={vol:.2f})")
         return Prepared("pcm", pcm, vol, sig)
-    log.write("music: streaming track found", f"Track '{track.name}' ({track.kind}, {len(track.data)} bytes)")
-    return Prepared("stream", track.data, VOLUME, sig)
+    if track.source is None:
+        return None
+    try:
+        path = music_cache.cache_stream(track.source, track.format, cancel, protected_streams or ())
+        log.write("music: streaming track cached", f"Track '{track.name}' ({track.format}, {track.source.size} bytes): {path}")
+        return Prepared("stream", path, VOLUME, sig, track.format)
+    except InterruptedError:
+        return None
+    except Exception as exc:
+        if track.source.size <= 8 * 1024 * 1024:
+            try:
+                fallback = io.BytesIO()
+                track.source.copy_to(fallback, cancel)
+                log.write("music: cache unavailable", f"Using bounded memory fallback for {track.name}: {exc}")
+                return Prepared("stream", fallback.getvalue(), VOLUME, sig, track.format)
+            except Exception as fallback_exc:
+                log.write("music: stream preparation failed", f"{track.name}: {fallback_exc}")
+                return None
+        log.write("music: stream preparation failed", f"Cache unavailable for {track.name} ({track.source.size} bytes): {exc}")
+        return None
 
 
 class MusicPlayer:
@@ -549,10 +641,12 @@ class MusicPlayer:
         self.tracks: dict[tuple, str | None] = {}  # (iwad, files, font) -> track sig or no-title marker
         self.playing: str | None = None  # sig of the track currently audible (not fading out)
         self.streaming = False
+        self.stream_path: Path | None = None
+        self._prune_needed = False
 
     def request(
         self, key: object, iwad: Path | None = None, files: list[Path] | None = None,
-        soundfont: Path | None = None,
+        soundfont: Path | None = None, preset=None,
     ) -> None:
         """Ask for `key`'s track; None stops. Cheap to call every frame."""
         if key == self.want:
@@ -581,19 +675,41 @@ class MusicPlayer:
             renderer = self.renderers.get(soundfont)
             if renderer is None:
                 renderer = self.renderers[soundfont] = MidiRenderer(soundfont)
-        future = self.pool.submit(_prepare, iwad, list(files or ()), renderer, cancel, dict(self.cache))
+        selection_key = None
+        if preset is not None:
+            from . import asset_cache, music_cache
+            from .launch import load_order
+            asset_key = asset_cache.key_for(preset, iwad, load_order(preset))
+            selection_key = music_cache.selection_key(asset_key, iwad, list(files or ()))
+        protected = {self.stream_path} if self.stream_path is not None else set()
+        future = self.pool.submit(_prepare, iwad, list(files or ()), renderer, cancel, dict(self.cache),
+                                  selection_key, protected)
         self.job = (key, ident, future, cancel)
 
     def _cancel(self) -> None:
         if self.job:
             self.job[3].set()
             self.job = None
+        if self.pending and self.pending[1].kind == "stream" and isinstance(self.pending[1].data, Path):
+            self._prune_needed = True
         self.pending = None
 
     def _audible(self) -> bool:
         if self.streaming:
             return pygame.mixer.music.get_busy()
         return self.channels[self.active].get_busy()
+
+    def _cache_prepared(self, prepared: Prepared) -> None:
+        if prepared.kind != "pcm" or not isinstance(prepared.data, bytes) or len(prepared.data) > CACHE_BYTES:
+            return
+        self.cache[prepared.sig] = prepared
+        self.cache.move_to_end(prepared.sig)
+        total = sum(len(item.data) for item in self.cache.values()
+                    if item.kind == "pcm" and isinstance(item.data, bytes))
+        while total > CACHE_BYTES and self.cache:
+            _, evicted = self.cache.popitem(last=False)
+            if evicted.kind == "pcm" and isinstance(evicted.data, bytes):
+                total -= len(evicted.data)
 
     def stop(self, fade_ms: int = FADE_OUT_MS) -> None:
         self._cancel()
@@ -613,16 +729,17 @@ class MusicPlayer:
                 prepared = None
             self.tracks[ident] = prepared.sig if prepared else None
             if prepared is not None:
-                self.cache[prepared.sig] = prepared
-                self.cache.move_to_end(prepared.sig)
-                while len(self.cache) > 1 and sum(len(p.data) for p in self.cache.values()) > CACHE_BYTES:
-                    self.cache.popitem(last=False)
+                self._cache_prepared(prepared)
             if key == self.want and not (prepared and prepared.sig == self.playing and self._audible()):
                 self.stop()
                 if prepared is not None:
                     self.pending = (key, prepared)
         if self.pending:
             self._start()
+        self._release_stream_if_idle()
+        if self._prune_needed and self.job is None:
+            self._prune_stream_cache()
+            self._prune_needed = False
 
     def _start(self) -> None:
         from . import log
@@ -635,7 +752,13 @@ class MusicPlayer:
             if prepared.kind == "stream":
                 if pygame.mixer.music.get_busy():
                     return  # previous stream still fading; try again next frame
-                pygame.mixer.music.load(io.BytesIO(prepared.data))
+                self._unload_stream()
+                self._prune_needed = True
+                if isinstance(prepared.data, Path):
+                    pygame.mixer.music.load(str(prepared.data))
+                    self.stream_path = prepared.data
+                else:
+                    pygame.mixer.music.load(io.BytesIO(prepared.data), prepared.format)
                 pygame.mixer.music.set_volume(prepared.volume)
                 pygame.mixer.music.play(fade_ms=FADE_IN_MS)
                 self.streaming = True
@@ -652,7 +775,42 @@ class MusicPlayer:
             import traceback
             log.write("music: playback error", f"Error playing {prepared.kind}:\n{traceback.format_exc()}")
         self.pending = None
+        if self._prune_needed:
+            self._prune_stream_cache()
+            self._prune_needed = False
+
+    def _protected_stream_paths(self) -> set[Path]:
+        paths = {self.stream_path} if self.stream_path is not None else set()
+        if self.pending and self.pending[1].kind == "stream" and isinstance(self.pending[1].data, Path):
+            paths.add(self.pending[1].data)
+        return paths
+
+    def _unload_stream(self) -> None:
+        if self.stream_path is not None:
+            try:
+                pygame.mixer.music.unload()
+            except (pygame.error, AttributeError):
+                pass
+            self.stream_path = None
+
+    def _release_stream_if_idle(self) -> None:
+        if self.stream_path is not None and not pygame.mixer.music.get_busy():
+            self._unload_stream()
+            self._prune_needed = True
+
+    def _prune_stream_cache(self) -> None:
+        try:
+            from . import music_cache
+            music_cache.prune(self._protected_stream_paths())
+        except Exception:
+            pass
 
     def shutdown(self) -> None:
         self.stop(0)
+        try:
+            pygame.mixer.music.unload()
+        except (pygame.error, AttributeError):
+            pass
+        self.stream_path = None
+        self._prune_stream_cache()
         self.pool.shutdown(wait=False, cancel_futures=True)

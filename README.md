@@ -151,6 +151,7 @@ On Windows from source, `run.bat` passes these through. For no console window, p
 
 ## Notes
 
+- **Music cache:** MIDI/MUS is read and rendered when selected; other title tracks are extracted once to a bounded disk cache and streamed from there. Cached music is under `music/` in CouchDoom's user cache (macOS: `~/Library/Caches/CouchDoom/music`; Windows: `%LOCALAPPDATA%\CouchDoom\cache\music`; Linux: `$XDG_CACHE_HOME/couch-doom/music` or `~/.cache/couch-doom/music`). UI assets use the separate `assets/` cache. Close CouchDoom before clearing `music/`; it will recreate files as needed.
 - **Saved state** (last played, favorites, music toggle, chosen launcher) lives in `state/last_played.json`, beside `CouchDoom.exe` or the source checkout. Installed copies use `%LOCALAPPDATA%\CouchDoom`, `~/.local/share/couch-doom` or `~/Library/Application Support/CouchDoom`.
 - **Troubleshooting log:** `state/couch-doom.log` records crashes, "nothing found" reports, and every launch with its command line, exit code and the engine's last output. It never leaves your machine and tops out around 512 KB (older entries rotate into `couch-doom.log.1`). No environment variables, but it does contain file paths, so look it over before sharing.
 - **Update notice:** shortly after start, CouchDoom asks GitHub once (no identifiers) whether there's a newer release. If so, you can open it, be reminded next time, or skip that version. Turn it off with `"update_check": false` in `last_played.json` or the `COUCHDOOM_NO_UPDATE_CHECK` environment variable.
