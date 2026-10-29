@@ -4,7 +4,7 @@ Each release's notes on GitHub are its own section below, behind the download in
 
 **New in 0.8.0**
 
-- Install verified updates from CouchDoom on Windows, macOS and Linux, then restart automatically.
+- In-app updates: download, verify and install new versions on Windows, macOS and Linux, then restart CouchDoom.
 - Faster music browsing, streamed non-MIDI tracks, broader MAPINFO support, and per-engine SoundFonts with a bundled fallback.
 - macOS and Linux stay fullscreen as games launch and return; the faint macOS fullscreen edge is gone.
 - Find portable DoomRunner and macOS UZDoom settings automatically; controller prompts follow your last-used device.
