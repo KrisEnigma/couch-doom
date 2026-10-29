@@ -37,10 +37,11 @@ CouchDoom isn't code-signed, so the first start needs one extra step:
   macOS: if it says the app can't be opened or verified, open System Settings >
   Privacy & Security, scroll down, and click "Open Anyway" next to CouchDoom.
 
-MIDI title music needs a SoundFont. CouchDoom bundles a default SoundFont and also uses
-the ones that come with GZDoom, UZDoom or VKDoom. To use a different one, drop any .sf2
-file into a "soundfonts" folder next to CouchDoom.exe, CouchDoom.app or CouchDoom; the
-largest file there wins. Without any, MIDI music stays silent and everything else works.
+MIDI title music uses the selected sourceport's configured or included SoundFont when
+available. Chocolate Doom and its forks can use the FluidSynth SoundFont configured in
+their settings. CouchDoom includes a default SoundFont for sourceports without one.
+Use --soundfont <file> to override it. A SoundFont in a "soundfonts" folder beside
+CouchDoom.exe, CouchDoom.app or CouchDoom is used when the sourceport has no own bank.
 
 Troubleshooting & logs:
 CouchDoom logs game launches, soundfont search results, and MIDI music status to:

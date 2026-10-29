@@ -125,7 +125,7 @@ Everything comes from the preset's own files, in the order the engine would load
 
 - **Backdrop:** the title screen (MAPINFO `titlepage`, `TITLEPIC`, or Heretic/Hexen's `TITLE`). Mods without title art of their own show their loading screen instead. The UI takes its colours from the most vivid hue.
 - **Logo:** the logo the main menu draws (`M_DOOM`, `M_HTIC`, `M_STRIFE` or the mod's own), or a logo or title card the mod ships, if it's a real custom one.
-- **Title music:** MAPINFO `titlemusic`, the title map's music, a track the title script starts, the title lump (`D_DM2TTL`, `D_INTRO`, `MUS_TITL`, …) or a title-named track. It plays once and crossfades between presets. MIDI and MUS need a SoundFont: `--soundfont <file>`, any `.sf2`/`.sf3` in a `soundfonts/` folder beside CouchDoom, or one shipped with your engine.
+- **Title music:** MAPINFO `titlemusic`, the title map's music, a track the title script starts, the title lump (`D_DM2TTL`, `D_INTRO`, `MUS_TITL`, …) or a title-named track. It plays once and crossfades between presets. MIDI and MUS use the selected engine's configured or included SoundFont when available, with a bundled fallback; `--soundfont <file>` overrides it.
 - **Readme:** a matching `.txt` beside the WAD, a readme inside the PK3, the WAD's own embedded text, or the info a mod browser saved next to it. Notable mods without any get a built-in line.
 - **ENDOOM:** only when the preset ships its own.
 - **Menu sounds:** from your IWAD.

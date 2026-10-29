@@ -1,8 +1,8 @@
 """Title music: find the track a preset's engine would play on the title screen, and render it.
 
-Engine-agnostic: MIDI/MUS is rendered with TinySoundFont using any SoundFont we can find
-(--soundfont, DOOMRUNNER_SOUNDFONT, ./soundfonts, or next to a configured engine), and
-digital/tracker formats go straight to SDL_mixer.
+Engine-agnostic: MIDI/MUS is rendered with TinySoundFont using the selected engine's
+configured or shipped SoundFont, with a bundled fallback; digital/tracker formats go
+straight to SDL_mixer.
 """
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ from pathlib import Path
 import pygame
 
 from .archive import Archives
-from .config import DATA_DIR, PROJECT_ROOT
-from .options import Options
+from .config import DATA_DIR, PROJECT_ROOT, home, xdg
+from .options import Engine
 
 # MAPINFO accepts music names with or without quotes (Brutal Wolfenstein: `music = WONDER`).
 TITLEMUSIC_RE = re.compile(rb'titlemusic\s*=\s*"?([^"\s;}]+)', re.IGNORECASE)
@@ -43,6 +43,10 @@ TITLE_GUESS_RE = re.compile(r"^(tit|intro|menu|opening)|title", re.IGNORECASE)
 DEH_TEXT_RE = re.compile(r"^Text\s+(\d+)\s+(\d+)[^\n]*\n", re.IGNORECASE | re.MULTILINE)
 BEX_MUSIC_RE = re.compile(r"^\[MUSIC\][^\n]*\n(.*?)(?=^\[|\Z)", re.IGNORECASE | re.MULTILINE | re.DOTALL)
 SF_EXTS = (".sf2", ".sf3")
+CHOCOLATE_PORTS = {
+    "chocolate-doom", "chocolate-heretic", "chocolate-hexen", "crispy-doom",
+    "crispy-heretic", "crispy-hexen", "doomretro", "strife-ve",
+}
 
 RATE = 44100
 # Rendering is synchronous before playback (~16 ms per second of dense MIDI) and PCM is float32 stereo at
@@ -268,31 +272,86 @@ def _app_bundle_soundfont_roots(exe: Path) -> list[Path]:
     return roots
 
 
-def _scan_applications() -> list[Path]:
-    if sys.platform != "darwin":
-        return []
-    out: list[Path] = []
-    try:
-        apps = Path("/Applications")
-        if apps.is_dir():
-            for app in apps.iterdir():
-                if app.suffix == ".app":
-                    contents = app / "Contents"
-                    out += _fonts_in(contents / "Resources" / "soundfonts")
-                    out += _fonts_in(contents / "Resources")
-    except Exception:
-        pass
-    return out
+def _chocolate_config_dirs(engine: Engine) -> list[Path]:
+    """Config locations where Chocolate/Crispy Doom may store fsynth_sf_path."""
+    port = engine.path.stem.lower()
+    dirs = [engine.config_dir, engine.path.parent]
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            dirs.append(Path(appdata) / port)
+    elif sys.platform == "darwin":
+        dirs.append(home() / "Library" / "Application Support" / port)
+    else:
+        dirs.append(xdg("XDG_DATA_HOME", ".local/share") / port)
+    return list(dict.fromkeys(p for p in dirs if p))
 
 
-def find_soundfont(opts: Options, explicit: str | None = None) -> Path | None:
-    """Explicit choice first, then our own soundfonts/ folder, then anything shipped beside an engine.
+def _configured_soundfont(engine: Engine) -> Path | None:
+    """Read Chocolate Doom's configured FluidSynth font, when its config is available."""
+    if engine.family != "ChocolateDoom" and engine.path.stem.lower() not in CHOCOLATE_PORTS:
+        return None
+    config_files: list[Path] = []
+    stem = engine.path.stem.lower()
+    for folder in _chocolate_config_dirs(engine):
+        config_files.append(folder / f"{stem}.cfg")
+        try:
+            config_files.extend(sorted(folder.glob("*.cfg")))
+        except OSError:
+            pass
+    for path in dict.fromkeys(config_files):
+        try:
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                match = re.match(r'^\s*fsynth_sf_path\s+(?:"([^"]*)"|(\S+))', line)
+                if match:
+                    value = match.group(1) or match.group(2)
+                    candidate = Path(value).expanduser()
+                    if not candidate.is_absolute():
+                        candidate = path.parent / candidate
+                    if candidate.is_file():
+                        return candidate
+        except OSError:
+            continue
+    return None
 
-    Within a tier the largest file wins: bigger General MIDI banks are almost always the better-sounding ones.
+
+def find_engine_soundfont(engine: Engine | None) -> Path | None:
+    """Find the selected port's own bank, preferring its configured or port-named SF2/SF3."""
+    if not engine:
+        return None
+    from . import log
+
+    if font := _configured_soundfont(engine):
+        log.write("music: sourceport soundfont", f"configured by {engine.name}: {font}")
+        return font
+
+    root = engine.path.parent
+    folders = [root / "soundfonts", root]
+    if engine.config_dir:
+        folders.append(engine.config_dir / "soundfonts")
+    folders.extend(_app_bundle_soundfont_roots(engine.path))
+    candidates: list[Path] = []
+    for folder in dict.fromkeys(folders):
+        candidates.extend(_fonts_in(folder))
+
+    names = {engine.id.casefold(), engine.name.casefold(), engine.path.stem.casefold()}
+    named = [p for p in candidates if p.stem.casefold() in names]
+    if named:
+        font = named[0]
+    elif candidates:
+        font = max(candidates, key=lambda p: p.stat().st_size)
+    else:
+        return None
+    log.write("music: sourceport soundfont", f"{engine.name}: {font} ({font.stat().st_size} bytes)")
+    return font
+
+
+def find_soundfont(explicit: str | None = None) -> Path | None:
+    """Find a global override or fallback bank for engines without their own.
+
+    The selected sourceport's own bank is resolved separately for each preset.
     """
     from . import config, log
-
-    searched: list[str] = []
 
     if explicit and Path(explicit).is_file():
         p = Path(explicit)
@@ -304,72 +363,17 @@ def find_soundfont(opts: Options, explicit: str | None = None) -> Path | None:
         log.write("music: soundfont from DOOMRUNNER_SOUNDFONT", f"{p} ({p.stat().st_size} bytes)")
         return p
 
-    # Tier 1: User / local soundfonts folder
+    # A local bank is the fallback for ports that do not ship or configure one.
     own = DATA_DIR / "soundfonts"
-    searched.append(str(own))
-    tier1 = _fonts_in(own)
-    searched.append(str(PROJECT_ROOT / "soundfonts"))
-    tier1 += _fonts_in(PROJECT_ROOT / "soundfonts")
-
-    # Tier 2: Bundled soundfonts
-    searched.append(str(config.ASSET_DIR / "soundfonts"))
+    local = _fonts_in(own) + _fonts_in(PROJECT_ROOT / "soundfonts")
     bundled = _fonts_in(config.ASSET_DIR / "soundfonts")
-    if getattr(sys, "frozen", False):
-        try:
-            exe = Path(sys.executable)
-            if sys.platform == "darwin":
-                for base in (
-                    exe.parent / "soundfonts",
-                    exe.parent.parent / "Resources" / "soundfonts",
-                    exe.parent.parent / "Resources" / "assets" / "soundfonts",
-                    exe.parent.parent / "Frameworks" / "soundfonts",
-                    exe.parent.parent / "Frameworks" / "assets" / "soundfonts",
-                ):
-                    searched.append(str(base))
-                    bundled += _fonts_in(base)
-            else:
-                searched.append(str(exe.parent / "soundfonts"))
-                bundled += _fonts_in(exe.parent / "soundfonts")
-        except Exception:
-            pass
-
-    # Tier 3: Beside detected engines
-    engine_fonts: list[Path] = []
-    for e in opts.engines.values():
-        root = e.path.parent
-        for folder in (root / "soundfonts", root, e.config_dir / "soundfonts" if e.config_dir else None):
-            if folder:
-                searched.append(str(folder))
-                engine_fonts += _fonts_in(folder)
-        for folder in _app_bundle_soundfont_roots(e.path):
-            searched.append(str(folder))
-            engine_fonts += _fonts_in(folder)
-
-    # Tier 4: Installed macOS applications
-    app_fonts = _scan_applications()
-    if app_fonts:
-        searched.append("/Applications/*.app")
-
-    tiers = [
-        ("user/local soundfonts", tier1),
-        ("engine soundfonts", engine_fonts),
-        ("application soundfonts", app_fonts),
-        ("bundled soundfonts", bundled),
-    ]
-
-    chosen: Path | None = None
-    chosen_tier: str = ""
-    for name, fonts in tiers:
-        if fonts:
-            chosen = max(fonts, key=lambda p: p.stat().st_size)
-            chosen_tier = name
-            break
-
-    if chosen:
-        log.write("music: soundfont selected", f"chosen: {chosen} ({chosen.stat().st_size} bytes)\nsource: {chosen_tier}")
-    else:
-        log.write("music: no soundfont found", "Searched in:\n" + "\n".join(f"  {p}" for p in searched))
-
+    candidates = local or bundled
+    if not candidates:
+        log.write("music: no soundfont found", f"Searched {own}, {PROJECT_ROOT / 'soundfonts'}, and bundled assets")
+        return None
+    chosen = max(candidates, key=lambda p: p.stat().st_size)
+    tier = "local soundfonts" if local else "bundled fallback"
+    log.write("music: soundfont selected", f"chosen: {chosen} ({chosen.stat().st_size} bytes)\nsource: {tier}")
     return chosen
 
 
@@ -472,6 +476,8 @@ def _prepare(
     if cancel.is_set():
         return None
     sig = hashlib.sha1(track.data).hexdigest()
+    if track.kind == "midi" and renderer:
+        sig = hashlib.sha1(f"{renderer.soundfont}\0".encode() + track.data).hexdigest()
     if sig in ready:
         return ready[sig]  # another preset's copy of the same track, already rendered
     if track.kind == "midi":
@@ -529,7 +535,9 @@ class MusicPlayer:
         else:
             log.write("music: renderer ready", f"SoundFont: {soundfont} ({soundfont.stat().st_size} bytes)")
 
-        self.renderer = MidiRenderer(soundfont) if soundfont and tsf_available else None
+        self.soundfont = soundfont
+        self.tsf_available = tsf_available
+        self.renderers: dict[Path, MidiRenderer] = {}
         self.channels = channels
         self.active = 0  # index of the channel the current PCM track is on
         self.sounds: list[pygame.mixer.Sound | None] = [None, None]
@@ -538,11 +546,14 @@ class MusicPlayer:
         self.job: tuple[object, tuple, Future, threading.Event] | None = None
         self.pending: tuple[object, Prepared] | None = None
         self.cache: OrderedDict[str, Prepared] = OrderedDict()  # by track sig
-        self.tracks: dict[tuple, str | None] = {}  # (iwad, files) -> track sig, None when it has no title music
+        self.tracks: dict[tuple, str | None] = {}  # (iwad, files, font) -> track sig or no-title marker
         self.playing: str | None = None  # sig of the track currently audible (not fading out)
         self.streaming = False
 
-    def request(self, key: object, iwad: Path | None = None, files: list[Path] | None = None) -> None:
+    def request(
+        self, key: object, iwad: Path | None = None, files: list[Path] | None = None,
+        soundfont: Path | None = None,
+    ) -> None:
         """Ask for `key`'s track; None stops. Cheap to call every frame."""
         if key == self.want:
             return
@@ -551,7 +562,8 @@ class MusicPlayer:
         if key is None:
             self.stop()
             return
-        ident = (iwad, tuple(files or ()))
+        soundfont = soundfont or self.soundfont
+        ident = (iwad, tuple(files or ()), soundfont)
         if ident in self.tracks:
             sig = self.tracks[ident]
             if sig is not None and sig == self.playing and self._audible():
@@ -564,7 +576,12 @@ class MusicPlayer:
             if sig is None:
                 return
         cancel = threading.Event()
-        future = self.pool.submit(_prepare, iwad, list(files or ()), self.renderer, cancel, dict(self.cache))
+        renderer = None
+        if soundfont and self.tsf_available:
+            renderer = self.renderers.get(soundfont)
+            if renderer is None:
+                renderer = self.renderers[soundfont] = MidiRenderer(soundfont)
+        future = self.pool.submit(_prepare, iwad, list(files or ()), renderer, cancel, dict(self.cache))
         self.job = (key, ident, future, cancel)
 
     def _cancel(self) -> None:

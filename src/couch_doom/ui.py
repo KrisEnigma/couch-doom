@@ -28,7 +28,7 @@ from .launch import LaunchCommand, build_command, load_order, presented_files, s
 from . import log
 from .log import closed_early, last_line, needs_extract_retry, spawn
 from .launchers import Launchers
-from .music import DWELL_SECONDS, MusicPlayer, find_soundfont
+from .music import DWELL_SECONDS, MusicPlayer, find_engine_soundfont, find_soundfont
 from .options import Options, OptionsError, Preset, unpack
 from .endoom import COLS, ROWS, Endoom, find_endoom
 from .readme import Readme, find_readme
@@ -359,7 +359,7 @@ class App:
         pygame.display.set_caption("CouchDoom")
         self.input = Input()
 
-        self.soundfont = find_soundfont(opts, soundfont)
+        self.soundfont = find_soundfont(soundfont)
         self.music: MusicPlayer | None = None
         self.sfx: Sfx | None = None
         self._music_sel: int | None = None
@@ -458,7 +458,7 @@ class App:
         self.opts, self.problem = opts, None
         self.commands = [build_command(opts, p) for p in opts.presets]
         self._audio_down()  # sounds and SoundFont come from the engines and IWADs in the new settings
-        self.soundfont = find_soundfont(opts, self.soundfont_choice)
+        self.soundfont = find_soundfont(self.soundfont_choice)
         self._audio_up()
         self.filter = ""
         self._pick_start()
@@ -675,7 +675,11 @@ class App:
             pass  # playing, loading, or finished; title tracks play once, like on the engine's title screen
         elif now - self._music_since >= DWELL_SECONDS:
             p = self.opts.presets[self.current]
-            self.music.request(self.current, *presented_files(p))
+            engine_font = None
+            overrides = (self.soundfont_choice, os.environ.get("DOOMRUNNER_SOUNDFONT"))
+            if not any(font and Path(font).is_file() for font in overrides):
+                engine_font = find_engine_soundfont(self.opts.engine_for(p))
+            self.music.request(self.current, *presented_files(p), soundfont=engine_font or self.soundfont)
         # While the selection is still moving, the current track plays on: the next preset may share it.
 
     def _toggle_music(self) -> None:
