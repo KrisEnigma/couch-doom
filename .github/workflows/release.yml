@@ -69,6 +69,7 @@ jobs:
           name="CouchDoom-$version-${{ matrix.target }}"
           sudo chown -R "$(id -u):$(id -g)" dist 2>/dev/null || true
           mkdir -p "stage/CouchDoom"
+          python packaging/make_changelog_txt.py CHANGELOG.md stage/CouchDoom/CHANGELOG.txt
           case "${{ matrix.target }}" in
             windows-x64)
               cp -R dist/CouchDoom/. stage/CouchDoom/

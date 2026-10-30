@@ -2,6 +2,15 @@
 
 Each release's notes on GitHub are its own section below, behind the download instructions in `packaging/release-header.md`. Keep the `**New in X.Y.Z**` heading format: the release workflow and the in-app update notice both look for it.
 
+**New in 1.1.0**
+
+- A new in-app help guide explains how to find games, use favorites and controls, and get help or report a problem.
+- Organize large game lists by collapsing groups. Favorites stay near the top, and search still finds games inside collapsed groups.
+- The launcher browser can enter linked folders and hides hidden files unless you choose to show them.
+- DoomRunner `.dmb` bundles and relative configuration paths are handled more reliably.
+- SoundFont discovery and in-app update checks are more reliable, with clearer update-check logs.
+- macOS downloads include a styled drag-to-Applications installer image.
+
 **New in 1.0.0**
 
 - Browse for launchers right inside CouchDoom, using your controller to navigate folders and choose files.
