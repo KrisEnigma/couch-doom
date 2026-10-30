@@ -8,8 +8,8 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "packaging" / "dmg-background.png"
 FONT_DIR = ROOT / "src" / "couch_doom" / "assets" / "fonts"
-SCALE = 1  # Keep this canvas matched to --window-size in the release workflow.
-WIDTH, HEIGHT = 640, 360
+SCALE = 1
+WIDTH, HEIGHT = 640, 300
 
 INK = (19, 19, 21)
 CREAM = (246, 235, 216)
@@ -39,11 +39,9 @@ def main() -> None:
             pixels[x, y] = tuple(round(INK[i] * (1 - glow * 0.55) + (93, 24, 18)[i] * glow * 0.55) for i in range(3))
 
     draw = ImageDraw.Draw(image, "RGBA")
-    # Keep the artwork quiet so Finder's app and Applications icons stay prominent.
-    draw.line((46, 58, 46, 116), fill=RED + (255,), width=4)
-
-    draw.text((76, 54), "COUCHDOOM", font=font("Barlow-Bold.ttf", 29), fill=CREAM + (255,))
-    draw.text((79, 94), "MADE BY KRISENIGMA", font=font("JetBrainsMono-Regular.ttf", 9), fill=MUTED + (255,))
+    # Keep the brand and installer instructions on a simple, consistent grid.
+    draw.text((48, 36), "COUCHDOOM", font=font("Barlow-Bold.ttf", 29), fill=CREAM + (255,))
+    draw.text((50, 76), "MADE BY KRISENIGMA", font=font("JetBrainsMono-Regular.ttf", 9), fill=MUTED + (255,))
 
     # The arrow stays in the empty channel between the app and Applications icons.
     center_text(draw, "DRAG TO INSTALL", (320, 164), font("Barlow-Bold.ttf", 14), CREAM + (255,))
@@ -52,9 +50,10 @@ def main() -> None:
     draw.polygon(((411, ay), (397, ay - 7), (397, ay + 7)), fill=RED + (255,))
 
     # Finder draws icon names in dark text; these warm label beds keep them readable on the charcoal artwork.
-    label_y = 274
+    # Finder's label baseline sits above the icon center; align the plates to the name text.
+    label_y = 266
     label_width, label_height = 112, 20
-    for center_x in (156, 484):
+    for center_x in (160, 480):
         left = center_x - label_width // 2
         top = label_y - label_height // 2
         draw.rounded_rectangle((left, top, left + label_width, top + label_height), radius=10,
