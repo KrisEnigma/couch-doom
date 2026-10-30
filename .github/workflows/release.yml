@@ -90,9 +90,9 @@ jobs:
                 --window-size 640 360 \
                 --icon-size 72 \
                 --text-size 11 \
-                --icon "CouchDoom.app" 160 216 \
+                --icon "CouchDoom.app" 160 204 \
                 --hide-extension "CouchDoom.app" \
-                --app-drop-link 480 216 \
+                --app-drop-link 480 204 \
                 --no-internet-enable \
                 "$name.dmg" stage-dmg
               ;;

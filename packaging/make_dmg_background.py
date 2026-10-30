@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "packaging" / "dmg-background.png"
 FONT_DIR = ROOT / "src" / "couch_doom" / "assets" / "fonts"
 SCALE = 1
-WIDTH, HEIGHT = 640, 300
+WIDTH, HEIGHT = 640, 304
 
 INK = (19, 19, 21)
 CREAM = (246, 235, 216)
@@ -44,14 +44,14 @@ def main() -> None:
     draw.text((50, 76), "MADE BY KRISENIGMA", font=font("JetBrainsMono-Regular.ttf", 9), fill=MUTED + (255,))
 
     # The arrow stays in the empty channel between the app and Applications icons.
-    center_text(draw, "DRAG TO INSTALL", (320, 164), font("Barlow-Bold.ttf", 14), CREAM + (255,))
-    ay = 201
+    center_text(draw, "DRAG TO INSTALL", (320, 152), font("Barlow-Bold.ttf", 14), CREAM + (255,))
+    ay = 189
     draw.line((229, ay, 411, ay), fill=(224, 51, 39, 230), width=3)
     draw.polygon(((411, ay), (397, ay - 7), (397, ay + 7)), fill=RED + (255,))
 
     # Finder draws icon names in dark text; these warm label beds keep them readable on the charcoal artwork.
     # Finder's label baseline sits above the icon center; align the plates to the name text.
-    label_y = 266
+    label_y = 254
     label_width, label_height = 112, 20
     for center_x in (160, 480):
         left = center_x - label_width // 2
