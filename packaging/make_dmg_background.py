@@ -10,7 +10,9 @@ OUTPUT = ROOT / "packaging" / "dmg-background.png"
 FONT_DIR = ROOT / "src" / "couch_doom" / "assets" / "fonts"
 SCALE = 1
 ART_WIDTH, ART_HEIGHT = 640, 304
-WIDTH, HEIGHT = 1200, 800
+# Extra canvas lets the background color extend farther when Finder's window is
+# enlarged. Keep the installer artwork on the same compact coordinate grid.
+WIDTH, HEIGHT = 2400, 1600
 
 INK = (19, 19, 21)
 CREAM = (246, 235, 216)
