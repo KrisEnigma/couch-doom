@@ -10,7 +10,7 @@ OUTPUT = ROOT / "packaging" / "dmg-background.png"
 FONT_DIR = ROOT / "src" / "couch_doom" / "assets" / "fonts"
 SCALE = 1
 ART_WIDTH, ART_HEIGHT = 640, 304
-WIDTH, HEIGHT = 840, 480
+WIDTH, HEIGHT = 1200, 800
 
 INK = (19, 19, 21)
 CREAM = (246, 235, 216)
