@@ -40,18 +40,19 @@ def main() -> None:
 
     draw = ImageDraw.Draw(image, "RGBA")
     # Keep the brand and installer instructions on a simple, consistent grid.
+    draw.line((28, 36, 28, 94), fill=RED + (255,), width=4)
     draw.text((48, 36), "COUCHDOOM", font=font("Barlow-Bold.ttf", 29), fill=CREAM + (255,))
     draw.text((50, 76), "MADE BY KRISENIGMA", font=font("JetBrainsMono-Regular.ttf", 9), fill=MUTED + (255,))
 
     # The arrow stays in the empty channel between the app and Applications icons.
-    center_text(draw, "DRAG TO INSTALL", (320, 152), font("Barlow-Bold.ttf", 14), CREAM + (255,))
-    ay = 189
+    center_text(draw, "DRAG TO INSTALL", (320, 146), font("Barlow-Bold.ttf", 14), CREAM + (255,))
+    ay = 183
     draw.line((229, ay, 411, ay), fill=(224, 51, 39, 230), width=3)
     draw.polygon(((411, ay), (397, ay - 7), (397, ay + 7)), fill=RED + (255,))
 
     # Finder draws icon names in dark text; these warm label beds keep them readable on the charcoal artwork.
     # Finder's label baseline sits above the icon center; align the plates to the name text.
-    label_y = 254
+    label_y = 248
     label_width, label_height = 112, 20
     for center_x in (160, 480):
         left = center_x - label_width // 2
