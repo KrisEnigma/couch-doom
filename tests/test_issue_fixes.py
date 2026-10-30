@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from couch_doom.launch import build_command, presented_files
+import couch_doom.launch as launch
 from couch_doom.options import Engine, Options, Preset
 from couch_doom.sources import doomrunner
 from couch_doom.music import _configured_soundfont
@@ -42,6 +43,26 @@ def test_presented_files_expand_doomrunner_bundle(tmp_path):
     bundle = tmp_path / "mods.dmb"
     bundle.write_text("title.pk3\n", encoding="utf-8")
     preset = Preset("bundle", "s", "e", None, [bundle], mod_entries=[bundle])
+    assert presented_files(preset) == (None, [mod])
+
+
+def test_unreadable_doomrunner_bundle_is_logged_and_skipped(monkeypatch, tmp_path):
+    bundle = tmp_path / "broken.dmb"
+    bundle.mkdir()
+    logged = []
+    monkeypatch.setattr(launch.log, "write", lambda *args: logged.append(args))
+    preset = Preset("broken", "s", "e", None, [bundle], mod_entries=[bundle])
+
+    assert launch.load_order(preset) == []
+    assert logged and "Couldn't read mod bundle" in logged[0][0]
+
+
+def test_presented_files_expand_doomrunner_bundle_inside_mappack(tmp_path):
+    mod = tmp_path / "map.pk3"
+    mod.touch()
+    bundle = tmp_path / "maps.dmb"
+    bundle.write_text("map.pk3\n", encoding="utf-8")
+    preset = Preset("bundle", "s", "e", None, [], mappacks=[bundle])
     assert presented_files(preset) == (None, [mod])
 
 

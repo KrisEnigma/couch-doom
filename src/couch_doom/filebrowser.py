@@ -92,9 +92,16 @@ class Browser:
     def __init__(self, home: Path | None = None, *, candidates: Collection[Path] | None = None,
                  names: Collection[str] = (), suffixes: Collection[str] = (".zdl",),
                  app_bundles: bool = sys.platform == "darwin",
-                 include: Callable[[os.DirEntry], bool] | None = None):
+                 include: Callable[[os.DirEntry], bool] | None = None,
+                 start: Path | None = None):
         self.roots = roots(home, candidates=candidates)
-        self.directory = self.roots[0]
+        if start is not None and Path(start).is_dir():
+            start = Path(start)
+            if start not in self.roots:
+                self.roots.insert(0, start)  # LB/RB can still jump back to CouchDoom's folder
+            self.directory = start
+        else:
+            self.directory = self.roots[0]
         self.names, self.suffixes = tuple(names), tuple(suffixes)
         self.app_bundles = app_bundles
         self.include = include
@@ -108,9 +115,10 @@ class Browser:
                                     app_bundles=self.app_bundles, include=self.include)
         self.selected = max(0, min(self.selected, len(self.entries) - 1))
 
-    def move(self, amount: int) -> None:
+    def move(self, amount: int, *, wrap: bool = True) -> None:
         if self.entries:
-            self.selected = max(0, min(len(self.entries) - 1, self.selected + amount))
+            target = self.selected + amount
+            self.selected = target % len(self.entries) if wrap else max(0, min(len(self.entries) - 1, target))
 
     def toggle_all(self) -> None:
         self.show_all = not self.show_all

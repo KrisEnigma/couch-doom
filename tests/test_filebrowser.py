@@ -51,6 +51,25 @@ def test_dot_entries_are_hidden_until_all_files_is_enabled(tmp_path):
     assert ".hidden" in [e.path.name for e in list_entries(tmp_path, show_all=True)]
 
 
+def test_selection_wraps_at_both_ends(tmp_path):
+    for name in ("a", "b", "c"):
+        (tmp_path / name).mkdir()
+    browser = Browser(tmp_path, candidates=[tmp_path])
+
+    browser.move(-1)
+    assert browser.selected == 2
+    browser.move(1)
+    assert browser.selected == 0
+    browser.move(5)
+    assert browser.selected == 2
+    browser.selected = 0
+    browser.move(-1, wrap=False)
+    assert browser.selected == 0
+    browser.selected = 2
+    browser.move(1, wrap=False)
+    assert browser.selected == 2
+
+
 def test_macos_app_bundle_is_selectable_as_a_file(tmp_path):
     bundle = tmp_path / "GZDoom.app"
     executable = bundle / "Contents" / "MacOS" / "gzdoom"
@@ -91,6 +110,30 @@ def test_parent_stays_at_posix_root_and_can_leave_a_child(tmp_path):
 
 def test_roots_put_home_first_and_deduplicate(tmp_path):
     assert roots(tmp_path, candidates=[tmp_path, Path("/")]) == [tmp_path, Path("/")]
+
+
+def test_browser_can_start_in_a_separate_folder_without_losing_home(tmp_path):
+    home = tmp_path / "home"
+    start = tmp_path / "install"
+    home.mkdir()
+    start.mkdir()
+    browser = Browser(home, candidates=[Path("/")], start=start)
+
+    assert browser.directory == start
+    assert browser.roots[0] == start
+    assert home in browser.roots
+
+
+def test_browser_start_falls_back_to_home_when_missing_or_duplicate(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    browser = Browser(home, candidates=[Path("/")], start=home)
+    assert browser.directory == home
+    assert browser.roots.count(home) == 1
+
+    browser = Browser(home, candidates=[Path("/")], start=tmp_path / "gone")
+    assert browser.directory == home
+    assert browser.roots == [home, Path("/")]
 
 
 def test_windows_drive_mask_lists_only_mounted_letters():

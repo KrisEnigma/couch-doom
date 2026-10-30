@@ -105,9 +105,11 @@ def presented_files(preset: Preset) -> tuple[Path | None, list[Path]]:
 def load_order(preset: Preset) -> list[Path]:
     """Files after the IWAD, in the order the engine loads them, with DoomRunner bundles expanded.
 
-    Expansion lives here so launch arguments, title art, logos and music all see the same file list.
+    This is the shared list for title art, logos, music and the generic launch path; DoomRunner's own
+    argument builder keeps its special dehacked/custom-argument ordering.
     """
-    maps = [f for mp in preset.mappacks if mp.exists() for f in _expand_mappack(mp)]
+    maps = [entry for mp in preset.mappacks if mp.exists()
+            for f in _expand_mappack(mp) for entry in _expand_dmb(f)]
     mods = [entry for mod in preset.mods for entry in _expand_dmb(mod)]
     return [*mods, *maps] if preset.load_maps_after_mods else [*maps, *mods]
 

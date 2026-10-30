@@ -21,6 +21,7 @@ import pygame
 from . import __version__, draw, easter_eggs
 from . import update as updates
 from . import self_update
+from . import config
 from .config import ASSET_DIR
 from . import handover, asset_cache
 from .filebrowser import Browser as FileBrowser
@@ -532,9 +533,8 @@ class App:
     def _open_picker(self) -> None:
         if not self.launchers:
             return
-        choices = self.launchers.refresh()
-        for c in choices:
-            self.launchers.preview(c)  # the counts shown; loading here keeps the stall on the button press
+        # Startup already discovered these choices. Re-scanning and loading every settings file here made F4 stall.
+        choices = self.launchers.choices
         self.picker = [*choices, None]
         current = self.launchers.current
         self.picker_sel = next((i for i, c in enumerate(choices) if current and c.id == current.id), 0)
@@ -542,10 +542,11 @@ class App:
         self.mode = "launcher"
         self._sound("open")
 
-    def _on_picker_action(self, action: Action) -> None:
+    def _on_picker_action(self, action: Action, *, repeat: bool = False) -> None:
         if action in (Action.UP, Action.DOWN):
             step = -1 if action == Action.UP else 1
-            sel = max(0, min(len(self.picker) - 1, self.picker_sel + step))
+            target = self.picker_sel + step
+            sel = max(0, min(len(self.picker) - 1, target)) if repeat else target % len(self.picker)
             if sel != self.picker_sel:
                 self.picker_sel = sel
                 self._sound("move")
@@ -704,25 +705,29 @@ class App:
 
     def _open_browser(self, directory: Path | None = None) -> None:
         names = {name for source in SOURCES for name in (*source.module.EXES, *source.module.SETTINGS_NAMES)}
-        self.file_browser = FileBrowser(home=directory, names=names, include=easter_eggs.is_self_entry)
+        names.update(easter_eggs.SELF_EXECUTABLE_NAMES)
+        if config.FROZEN:
+            names.update(path.name for path in easter_eggs.self_paths())
+        start = directory or config.self_location() or (config.PROJECT_ROOT if config.SOURCE_TREE else None)
+        self.file_browser = FileBrowser(start=start, names=names, include=easter_eggs.self_matcher())
         self.browser_scroll = 0
         self.mode = "browse"
         self._sound("open")
 
-    def _browser_action(self, action: Action) -> None:
+    def _browser_action(self, action: Action, *, wrap: bool = True) -> None:
         browser = self.file_browser
         if browser is None:
             self.mode = "launcher"
             return
         before = browser.directory, browser.selected, browser.show_all
         if action == Action.UP:
-            browser.move(-1)
+            browser.move(-1, wrap=wrap)
         elif action == Action.DOWN:
-            browser.move(1)
+            browser.move(1, wrap=wrap)
         elif action == Action.PAGE_UP:
-            browser.move(-8)
+            browser.move(-8, wrap=wrap)
         elif action == Action.PAGE_DOWN:
-            browser.move(8)
+            browser.move(8, wrap=wrap)
         elif action in (Action.LEFT, Action.PREV_SECTION):
             browser.change_root(-1)
         elif action in (Action.RIGHT, Action.NEXT_SECTION):
@@ -765,9 +770,14 @@ class App:
             self._show_reaction(reaction)
             return
         if not self.launchers:
+            if path.is_dir() and (reaction := easter_eggs.react_to_folder(path)):
+                self._show_reaction(reaction)
             return
         choice = self.launchers.add(path)
         if choice is None:
+            if path.is_dir() and (reaction := easter_eggs.react_to_folder(path)):
+                self._show_reaction(reaction)
+                return
             exe = next((s for s in SOURCES if path.name.lower() in s.module.EXES), None)
             if exe:
                 self._notify(f"{exe.name} hasn't saved any settings yet. Set up a game in it first.", ERROR)
@@ -781,10 +791,7 @@ class App:
         """The only place an easter egg is presented, so handlers stay free of message and sound details."""
         self._notify(reaction.message, self.theme.label)
         if reaction.sound and self.sfx:
-            if reaction.sound == "secret":
-                self.sfx.play_secret()
-            else:
-                self.sfx.play(reaction.sound)
+            self.sfx.play(reaction.sound)
 
     # ---------- audio ----------
 
@@ -1127,12 +1134,15 @@ class App:
             self.detail_changed = time.monotonic()
             self._sound("move")
 
-    def _move(self, delta: int) -> None:
+    def _move(self, delta: int, *, wrap: bool = True) -> None:
         if not self.rows:
             return
         self.free_scroll = None
         sel = self._sel_row()
-        self._select_row(max(0, min(len(self.rows) - 1, sel + delta)))
+        target = sel + delta
+        selected = target % len(self.rows) if wrap else max(0, min(len(self.rows) - 1, target))
+        if selected != sel:
+            self._select_row(selected)
 
     def _jump_section(self, direction: int) -> None:
         headers = [i for i, r in enumerate(self.rows) if r.kind == "header"]
@@ -1417,12 +1427,12 @@ class App:
     def _notify(self, text: str, color=TEXT) -> None:
         self.toast = Toast(text, color, time.monotonic())
 
-    def _on_action(self, action: Action, now: float) -> None:
+    def _on_action(self, action: Action, now: float, *, repeat: bool = False) -> None:
         if self.mode == "browse":
-            self._browser_action(action)
+            self._browser_action(action, wrap=not repeat)
             return
         if self.mode == "launcher":
-            self._on_picker_action(action)
+            self._on_picker_action(action, repeat=repeat)
             return
         if self.mode == "update":
             self._on_update_action(action)
@@ -1463,13 +1473,13 @@ class App:
             self._on_info_action(action, now)
             return
         if action == Action.UP:
-            self._move(-1)
+            self._move(-1, wrap=not repeat)
         elif action == Action.DOWN:
-            self._move(1)
+            self._move(1, wrap=not repeat)
         elif action == Action.PAGE_UP:
-            self._move(-8)
+            self._move(-8, wrap=not repeat)
         elif action == Action.PAGE_DOWN:
-            self._move(8)
+            self._move(8, wrap=not repeat)
         elif action == Action.LEFT:
             selected = self._sel_row()
             if self.rows and self.rows[selected].kind != "header":
@@ -2471,9 +2481,11 @@ class App:
             if choice is None:
                 name, sub, side, side_color = "Find it myself…", f"Pick a launcher's {PROGRAM} or its settings file", "", MUTED
             else:
-                result = self.launchers.preview(choice)
+                result = self.launchers.cached_preview(choice)
                 name, sub = choice.name, str(choice.path)
-                if isinstance(result, OptionsError):
+                if result is None:
+                    side, side_color = "Select to load", DIM
+                elif isinstance(result, OptionsError):
                     side, side_color = "Can't read", ERROR
                 else:
                     n = len(result.presets)
@@ -2979,7 +2991,7 @@ class App:
                     for action in self.input.update(now):
                         if self.mouse_on:
                             self._mouse_off()
-                        self._on_action(action, now)
+                        self._on_action(action, now, repeat=True)
 
                 self.tick(now, dt)
                 self._draw(now)

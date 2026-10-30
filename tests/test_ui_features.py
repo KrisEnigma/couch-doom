@@ -291,6 +291,67 @@ def test_up_down_navigation_can_select_category_without_changing_the_game():
     assert app.rows[app.cur_row].text == "Alpha"
 
 
+def test_main_list_wraps_on_press_but_not_while_held():
+    app = make_app()
+    app._rebuild_rows()
+    app._select_row(0)
+
+    app._on_action(Action.UP, 1.0, repeat=True)
+    assert app.cur_row == 0
+
+    app._on_action(Action.UP, 2.0)
+    assert app.cur_row == len(app.rows) - 1
+
+
+def test_main_list_held_repeat_at_limit_does_not_reselect_row():
+    app = make_app()
+    app._rebuild_rows()
+    app._select_row(0)
+    selected = []
+    app._select_row = selected.append
+
+    app._on_action(Action.UP, 1.0, repeat=True)
+
+    assert selected == []
+
+
+def test_launcher_selector_wraps_on_press_but_not_while_held():
+    first, second = SimpleNamespace(id="first"), SimpleNamespace(id="second")
+    app = ui.App.__new__(ui.App)
+    app.launchers = SimpleNamespace(choices=[first, second], current=first)
+    app.picker = [first, second, None]
+    app.picker_sel = 0
+    sounds = []
+    app._sound = sounds.append
+
+    app._on_picker_action(Action.UP, repeat=True)
+    assert app.picker_sel == 0
+    assert sounds == []
+
+    app._on_picker_action(Action.UP)
+    assert app.picker_sel == 2
+    assert sounds == ["move"]
+
+
+def test_folder_browser_wraps_on_press_but_not_while_held(tmp_path):
+    from couch_doom.filebrowser import Browser
+
+    for name in ("a", "b", "c"):
+        (tmp_path / name).mkdir()
+    app = ui.App.__new__(ui.App)
+    app.file_browser = Browser(tmp_path, candidates=[tmp_path])
+    app.browser_scroll = 0
+    app.mode = "browse"
+    app.h, app.s = 810, 1
+    app._sound = lambda _name: None
+
+    app._on_action(Action.UP, 1.0, repeat=True)
+    assert app.file_browser.selected == 0
+
+    app._on_action(Action.UP, 2.0)
+    assert app.file_browser.selected == 2
+
+
 def test_section_jump_lands_on_the_category_card():
     app = make_app()
     app._rebuild_rows()
@@ -328,3 +389,19 @@ def test_section_jump_selects_folded_category_then_confirm_reopens_it():
     app._on_action(Action.CONFIRM, 1.0)
     assert app.collapsed_sections == set()
     assert app.rows[app._sel_row()].kind == "header"
+
+
+def test_launcher_picker_opens_from_cached_choices_without_refreshing_or_loading():
+    choice = SimpleNamespace(id="doomrunner")
+    app = ui.App.__new__(ui.App)
+    app.launchers = SimpleNamespace(
+        choices=[choice], current=choice,
+        refresh=lambda: (_ for _ in ()).throw(AssertionError("picker refresh must not block")),
+        preview=lambda _choice: (_ for _ in ()).throw(AssertionError("picker preview must not block")),
+    )
+    app._sound = lambda _name: None
+
+    app._open_picker()
+
+    assert app.mode == "launcher"
+    assert app.picker == [choice, None]

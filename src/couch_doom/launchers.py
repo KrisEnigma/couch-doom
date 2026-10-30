@@ -49,6 +49,10 @@ class Launchers:
                 self._loaded[choice.id] = exc
         return self._loaded[choice.id]
 
+    def cached_preview(self, choice: Choice) -> Options | OptionsError | None:
+        """Return an already-loaded preview without doing filesystem work."""
+        return self._loaded.get(choice.id)
+
     @property
     def must_pick(self) -> bool:
         return self.current is None and len(self.choices) > 1

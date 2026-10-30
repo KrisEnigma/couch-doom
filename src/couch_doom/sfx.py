@@ -105,8 +105,3 @@ class Sfx:
             self.channel.play(snd)
         else:
             snd.play()
-
-    def play_secret(self) -> None:
-        sound = self.sounds.get("secret")
-        if sound is not None:
-            sound.play()

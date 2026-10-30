@@ -30,7 +30,8 @@ Press L3 (click the left stick) or F4 any time to switch.
 If it finds none, press L3 / F4 and choose "Find it myself..." to browse to the
 launcher's or port's program, or drag the program (or its folder) onto the CouchDoom window.
 In the browser use the D-pad/stick to move, A to open or choose, B to go up, X to show
-all files, LB/RB to switch roots, and LT/RT to page.
+all files, LB/RB to switch roots, and LT/RT to page. An installed copy starts in
+CouchDoom's own folder; LB/RB still switch roots.
 
 CONTROLS
 Xbox button names are used below. PlayStation and Switch controllers work too.

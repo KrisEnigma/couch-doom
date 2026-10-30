@@ -9,10 +9,14 @@ import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
+from .config import FROZEN, PROJECT_ROOT, SOURCE_TREE
 from .self_select import same_path
 
 DOOMCEPTION_MESSAGE = "Doomception! I’m already running."
+SELF_EXECUTABLE_NAMES = {"couchdoom", "couchdoom.exe"}
+_SELF_NAMES = {"couch-doom", "couch-doom.exe", "couch_doom_entry.py"}
 
 
 @dataclass(frozen=True)
@@ -29,18 +33,37 @@ def self_paths() -> set[Path]:
     candidates: set[Path] = set()
     if override := os.environ.get("COUCHDOOM_SELF"):
         candidates.add(Path(override))
-    if getattr(sys, "frozen", False):
-        candidates.add(Path(sys.executable))
+    if FROZEN:
+        executable = Path(sys.executable)
+        if sys.platform == "darwin":
+            bundled = next((parent for parent in executable.parents if parent.suffix.casefold() == ".app"), None)
+            if bundled is not None:
+                candidates.add(executable)
+        elif same_path(executable.parent, PROJECT_ROOT):
+            candidates.add(executable)
+        if sys.platform == "darwin":
+            packaged = PROJECT_ROOT / "CouchDoom.app" / "Contents" / "MacOS" / "CouchDoom"
+        else:
+            packaged = PROJECT_ROOT / ("CouchDoom.exe" if os.name == "nt" else "CouchDoom")
+        if packaged.is_file():
+            candidates.add(packaged)
     else:
         if console := shutil.which("couch-doom"):
             candidates.add(Path(console))
-        if sys.argv and Path(sys.argv[0]).name.casefold().startswith("couch"):
+        if sys.argv and Path(sys.argv[0]).name.casefold() in _SELF_NAMES:
             candidates.add(Path(sys.argv[0]))
         root = Path(__file__).resolve().parents[2]
         for relative in ("run.bat", "packaging/couch_doom_entry.py"):
             if (candidate := root / relative).is_file():
                 candidates.add(candidate)
     return {path.resolve(strict=False) for path in candidates}
+
+
+def self_folders() -> set[Path]:
+    """Folders that are the app itself: the install root or source tree, never a shared bin directory."""
+    if getattr(sys, "frozen", False) or SOURCE_TREE:
+        return {PROJECT_ROOT.resolve(strict=False)}
+    return set()
 
 
 def _app_bundle(path: Path) -> Path | None:
@@ -55,17 +78,46 @@ def _is_self(path: Path) -> bool:
         bundle = _app_bundle(candidate)
         if bundle is not None and same_path(selected, bundle):
             return True
-        # Dropping the folder that holds the executable is a natural way to pick the app itself.
-        if same_path(selected, candidate.parent):
-            return True
     return False
 
 
 def react_to_pick(path: Path) -> Reaction | None:
-    """The reaction for picking one of our own paths, or None for an ordinary file."""
-    return Reaction(DOOMCEPTION_MESSAGE) if _is_self(Path(path)) else None
+    """React to a packaged CouchDoom executable by name, or to the exact source-run identity."""
+    selected = Path(path)
+    if selected.is_dir() and selected.suffix.casefold() != ".app":
+        return None
+    if selected.name.casefold() in SELF_EXECUTABLE_NAMES:
+        return Reaction(DOOMCEPTION_MESSAGE)
+    if FROZEN:
+        paths = self_paths()
+        own_names = {candidate.name.casefold() for candidate in paths}
+        own_names.update(bundle.name.casefold() for candidate in paths if (bundle := _app_bundle(candidate)))
+        if selected.name.casefold() in own_names:
+            return Reaction(DOOMCEPTION_MESSAGE)
+    return Reaction(DOOMCEPTION_MESSAGE) if _is_self(selected) else None
 
 
-def is_self_entry(entry: os.DirEntry) -> bool:
-    """Browser predicate: compare resolved paths, not names, so another copy elsewhere stays a launcher."""
-    return _is_self(Path(entry.path))
+def react_to_folder(path: Path) -> Reaction | None:
+    """The reaction for picking the install/source folder itself; used only after launcher detection fails."""
+    selected = Path(path)
+    if not selected.is_dir():
+        return None
+    return Reaction(DOOMCEPTION_MESSAGE) if any(same_path(selected, folder) for folder in self_folders()) else None
+
+
+def self_matcher() -> Callable[[os.DirEntry], bool]:
+    """Browser predicate built once per Browser: cheap name check before resolving paths."""
+    paths = self_paths()
+    bundles = {bundle for path in paths if (bundle := _app_bundle(path))}
+    candidates = tuple(paths | bundles)
+    names = {path.name.casefold() for path in candidates}
+
+    def match(entry: os.DirEntry) -> bool:
+        if entry.name.casefold() not in names:
+            return False
+        if entry.is_dir(follow_symlinks=False) and not entry.name.casefold().endswith(".app"):
+            return False
+        selected = Path(entry.path).resolve(strict=False)
+        return any(same_path(selected, candidate) for candidate in candidates)
+
+    return match

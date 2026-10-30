@@ -37,7 +37,7 @@ If you use a launcher, CouchDoom uses its engine choices and settings. Without o
 
 CouchDoom checks common install locations and follows Windows shortcuts, including portable installs. If it finds one setup, it opens it. If it finds several, choose one; CouchDoom remembers your choice. Switch later with **L3** (click the left stick) or **F4**.
 
-If nothing is found, choose **Find it myself…** and browse with a controller: D-pad or stick to move, **A** to open or choose, **B** to go up, **X** to show all files, **LB/RB** to switch drives or roots, and **LT/RT** to page through the list. You can also drag a file onto the window.
+If nothing is found, choose **Find it myself…** and browse with a controller: D-pad or stick to move, **A** to open or choose, **B** to go up, **X** to show all files, **LB/RB** to switch drives or roots, and **LT/RT** to page through the list. In an installed copy the browser starts in CouchDoom's own folder, so a launcher kept beside it is right there. You can also drag a file onto the window.
 
 ![The launcher picker showing DoomRunner, ZDL, Doom Launcher and UZDoom](docs/screenshots/launcher-picker.jpg)
 

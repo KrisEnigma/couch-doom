@@ -20,6 +20,19 @@ def home() -> Path:
     return Path(os.environ.get("HOME") or Path.home())
 
 
+def self_location() -> Path | None:
+    """Where the user keeps CouchDoom: a sensible place to start looking for a launcher beside it.
+
+    None for source/pip/AUR runs, translocated macOS apps, or a folder that is missing or unreadable.
+    """
+    if not FROZEN:
+        return None
+    path = PROJECT_ROOT
+    if "AppTranslocation" in path.parts:  # Gatekeeper's randomized, read-only copy of a quarantined app
+        return None
+    return path if path.is_dir() and os.access(path, os.R_OK | os.X_OK) else None
+
+
 def xdg(var: str, default: str) -> Path:
     value = os.environ.get(var)
     return Path(value) if value and Path(value).is_absolute() else home() / default
