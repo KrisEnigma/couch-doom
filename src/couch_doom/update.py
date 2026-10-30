@@ -92,7 +92,7 @@ def whats_new(body: str, version: str) -> list[str]:
             inside = parse_version(line) == parse_version(version)
         elif inside and line.startswith(("- ", "* ")):
             out.append(_plain(line[2:]))
-    return out[:MAX_NOTES]
+    return out
 
 
 def disabled() -> bool:
@@ -100,7 +100,7 @@ def disabled() -> bool:
 
 
 def check(current: str, skipped: str | None = None, *, platform: str | None = None) -> dict | None:
-    """{"version", "current", "notes", "url"} when a newer, not-skipped release exists, else None."""
+    """Release metadata, including whether the four displayed notes omit extra entries."""
     if disabled():
         return None
     try:
@@ -121,5 +121,7 @@ def check(current: str, skipped: str | None = None, *, platform: str | None = No
     if not url.startswith("https://github.com/"):
         return None
     target = platform or asset_for_platform(sys.platform, _platform.machine())
-    return {"version": version, "current": current, "notes": whats_new(body, version), "url": url,
+    notes = whats_new(body, version)
+    return {"version": version, "current": current, "notes": notes[:MAX_NOTES],
+            "more_notes": len(notes) > MAX_NOTES, "url": url,
             "asset": _release_asset(data, tag, target)}

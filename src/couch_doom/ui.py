@@ -2585,6 +2585,8 @@ class App:
             wrapped = self._wrap(item, notes_font, inner - int(26 * s), 2)
             notes += [(("•  " if i == 0 else "    ") + line) for i, line in enumerate(wrapped)]
         notes_h = (int(34 * s) + len(notes) * int(32 * s)) if notes else 0
+        if info.get("more_notes"):
+            notes_h += int(28 * s)
         downloading = self.update_install_job is not None
         status_h = int(28 * s) if self.update_error or downloading else 0
         box = pygame.Rect(0, 0, width, 2 * pad + head_h + notes_h + status_h + len(choices) * row_h)
@@ -2610,6 +2612,10 @@ class App:
             for line in notes:
                 self.screen.blit(self._text(line, notes_font, MUTED), (x, y))
                 y += int(32 * s)
+            if info.get("more_notes"):
+                more_font = self._font(18)
+                self.screen.blit(self._text("More changes on the release page.", more_font, self.theme.label), (x, y))
+                y += int(28 * s)
 
         name_font, sel_font, sub_font = self._font(31), self._font(31, bold=True), self._font(21)
         if self.update_error:

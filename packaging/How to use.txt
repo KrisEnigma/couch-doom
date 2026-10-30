@@ -1,81 +1,119 @@
 CouchDoom
+=========
+
 Play your Doom launcher setups with a gamepad, on the TV or a Steam Deck.
 Made by KrisEnigma: https://github.com/KrisEnigma/couch-doom
 
 GETTING STARTED
+---------------
 
 1. Set up games in DoomRunner, ZDL or Doom Launcher. You can also use GZDoom,
    UZDoom or VKDoom by itself; CouchDoom lists the IWADs it finds.
 2. Start CouchDoom:
    Windows: Run CouchDoom.exe.
-   macOS: Open the DMG and drag CouchDoom.app to Applications, then open it there.
+   macOS: Open the DMG, drag CouchDoom.app to Applications, then open it there.
    Linux: Run ./CouchDoom.
 
 STEAM DECK
+----------
 
 Use the Linux x64 download. In Desktop Mode, extract it, then in Steam choose
-"Add a Non-Steam Game" and browse to CouchDoom. It then starts from Game Mode like
-any other game. GZDoom and DoomRunner from Discover are detected automatically.
-Library art: https://github.com/KrisEnigma/couch-doom/tree/main/packaging/steam
+"Add a Non-Steam Game" and browse to CouchDoom. It then starts from Game Mode
+like any other game. GZDoom and DoomRunner from Discover are detected
+automatically.
+
+Library art:
+https://github.com/KrisEnigma/couch-doom/tree/main/packaging/steam
 
 FINDING YOUR GAMES
+------------------
 
-CouchDoom finds launcher settings automatically, including portable installs with
-a Start Menu, Desktop or taskbar shortcut. You can also put the CouchDoom folder
-inside a portable launcher's folder.
+CouchDoom finds launcher settings automatically, including portable installs
+with a Start Menu, Desktop or taskbar shortcut. You can also put the CouchDoom
+folder inside a portable launcher's folder.
 
-If it finds more than one launcher, it asks which one to use and remembers the answer.
-Press L3 (click the left stick) or F4 any time to switch.
+If it finds more than one launcher, it asks which one to use and remembers your
+answer. Press L3 (click the left stick) or F4 any time to switch.
 
-If it finds none, press L3 / F4 and choose "Find it myself..." to browse to the
-launcher's or port's program, or drag the program (or its folder) onto the CouchDoom window.
-In the browser use the D-pad/stick to move, A to open or choose, B to go up, X to show
-all files, LB/RB to switch roots, and LT/RT to page. An installed copy starts in
-CouchDoom's own folder; LB/RB still switch roots.
+If it finds none, press L3 or F4 and choose "Find it myself..." to browse to the
+launcher's or port's program. You can also drag the program or its folder onto
+the CouchDoom window.
+
+In the browser, use the D-pad or stick to move, the confirm button to open or
+choose, and the back button to go up. Use the show-all-files control to reveal
+hidden items, LB/RB (L1/R1 on PlayStation, L/R on Switch) to switch roots, and
+the triggers to page. An installed copy starts in CouchDoom's own folder; the
+root-switch controls still let you reach other locations.
 
 CONTROLS
-Xbox button names are used below. PlayStation and Switch controllers work too.
+--------
 
-  A           Play          B   Quit (press twice) or close
-  X           Info sheet    Y   Search
-  LB / RB     Jump section  R3  Add to favorites
-  L3          Switch launcher
-  Start       Music on or off
-  View/Back   Quick help
-  LT / RT     Page up / down; in the info sheet the right stick scrolls too
-  Keyboard: arrows, Enter to play, Esc to quit, Tab for info, F1 help,
-  F2 music, F3 favorite, F4 switch launcher, Page Up / Down, or just type to search.
-  Mouse: click a preset to select it, click again to play. Wheel scrolls,
-  right-click goes back, and the button hints at the bottom are clickable.
+The app shows button prompts for your controller. These are the names used on
+Xbox, PlayStation and Switch controllers.
+
+Play or choose: A (Xbox/Switch); Cross (PlayStation)
+Quit or close: B (Xbox/Switch); Circle (PlayStation)
+Info sheet: X (Xbox/Switch); Square (PlayStation)
+Search: Y (Xbox/Switch); Triangle (PlayStation)
+Previous / next section: LB/RB (Xbox), L1/R1 (PlayStation), L/R (Switch)
+Add or remove favorite: R3 (press the right stick)
+Switch launcher: L3 (press the left stick)
+Toggle title music: Menu (Xbox), Options (PlayStation), + (Switch)
+Quick help: View (Xbox), Create (PlayStation), - (Switch)
+Page up / down: LT/RT (Xbox), L2/R2 (PlayStation), ZL/ZR (Switch)
+
+Keyboard: arrows to move, Enter to play, Esc to quit or close, Tab for info,
+F1 for help, F2 for music, F3 for favorite, F4 to switch launcher, Page Up and
+Page Down to page, or type to search.
+
+Mouse: click once to select a preset and again to play. The wheel scrolls,
+right-click goes back, and the button hints at the bottom are clickable.
 
 FIRST LAUNCH
+------------
 
-CouchDoom isn't code-signed, so your system may ask you to approve the first launch.
-Windows: On the "unknown publisher" warning, click "More info" then "Run anyway".
-macOS: If the app can't be opened or verified, open System Settings > Privacy &
-  Security, scroll down, and click "Open Anyway" next to CouchDoom.
+CouchDoom isn't code-signed, so your system may ask you to approve the first
+launch.
+
+Windows: On the "unknown publisher" warning, click "More info" then
+"Run anyway".
+
+macOS: If the app can't be opened or verified, open System Settings, then
+Privacy & Security. Scroll down and click "Open Anyway" next to CouchDoom.
 
 MIDI MUSIC
+----------
 
-MIDI title music uses the selected source port's configured or included SoundFont
-when available. Chocolate Doom and its forks can use the FluidSynth SoundFont from
-their settings. CouchDoom includes a default SoundFont for ports without one.
-Use --soundfont <file> to choose another. A SoundFont in a "soundfonts" folder beside
-CouchDoom.exe, CouchDoom.app or CouchDoom is used when the port has no own bank.
+MIDI title music uses the selected source port's configured or included
+SoundFont when available. Chocolate Doom and its forks can use the FluidSynth
+SoundFont from their settings. CouchDoom includes a default SoundFont for ports
+without one.
+
+Use --soundfont <file> to choose another. A SoundFont in a "soundfonts" folder
+beside CouchDoom.exe, CouchDoom.app or CouchDoom is used when the port has no
+own bank.
 
 MUSIC CACHE
+-----------
 
-Non-MIDI title music is cached so it can stream without keeping the whole track in
-memory. The cache is separate from title images and other menu assets:
-  macOS: ~/Library/Caches/CouchDoom/music
-  Windows: %LOCALAPPDATA%\CouchDoom\cache\music
-  Linux: $XDG_CACHE_HOME/couch-doom/music (or ~/.cache/couch-doom/music)
-Close CouchDoom before clearing this folder; the cache is recreated as tracks are played.
+Non-MIDI title music is cached so it can stream without keeping the whole track
+in memory. The cache is separate from title images and other menu assets:
+
+macOS:  ~/Library/Caches/CouchDoom/music
+Windows: %LOCALAPPDATA%\CouchDoom\cache\music
+Linux:  $XDG_CACHE_HOME/couch-doom/music (or ~/.cache/couch-doom/music)
+
+Close CouchDoom before clearing this folder; the cache is recreated as tracks
+are played.
 
 TROUBLESHOOTING AND LOGS
+------------------------
 
 CouchDoom logs game launches, SoundFont searches and MIDI music status to:
-  macOS: ~/Library/Application Support/CouchDoom/state/couch-doom.log
-  Windows: %LOCALAPPDATA%\CouchDoom\state\couch-doom.log
-  Linux: ~/.local/share/couch-doom/state/couch-doom.log
-You can also launch CouchDoom from a terminal to see music and engine logs in real time.
+
+macOS:  ~/Library/Application Support/CouchDoom/state/couch-doom.log
+Windows: %LOCALAPPDATA%\CouchDoom\state\couch-doom.log
+Linux:  ~/.local/share/couch-doom/state/couch-doom.log
+
+You can also launch CouchDoom from a terminal to see music and engine logs in
+real time.
