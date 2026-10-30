@@ -118,6 +118,11 @@ def load(path: Path) -> Options:
             elif p := _path(base, m.get("path")):
                 entries.append(p)
 
+        alternative_paths = dict(raw.get("alternative_paths") or {})
+        for key in ("config_dir", "save_dir", "demo_dir", "screenshot_dir"):
+            if value := alternative_paths.get(key):
+                alternative_paths[key] = str(_path(base, value))
+
         presets.append(
             Preset(
                 name=raw.get("name", "Unnamed"),
@@ -132,7 +137,7 @@ def load(path: Path) -> Options:
                 load_maps_after_mods=bool(raw.get("load_maps_after_mods")),
                 additional_args=raw.get("additional_args") or "",
                 selected_config=raw.get("selected_config") or "",
-                alternative_paths=raw.get("alternative_paths") or {},
+                alternative_paths=alternative_paths,
                 env_vars=raw.get("env_vars") or {},
                 groups=groups,
             )

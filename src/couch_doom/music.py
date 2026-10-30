@@ -337,6 +337,8 @@ def _configured_soundfont(engine: Engine) -> Path | None:
                 match = re.match(r'^\s*fsynth_sf_path\s+(?:"([^"]*)"|(\S+))', line)
                 if match:
                     value = match.group(1) or match.group(2)
+                    if not value:
+                        continue
                     candidate = Path(value).expanduser()
                     if not candidate.is_absolute():
                         candidate = path.parent / candidate

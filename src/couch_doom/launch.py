@@ -61,6 +61,32 @@ def _expand_mappack(path: Path) -> list[Path]:
     return [path]
 
 
+def _expand_dmb(path: Path, seen: frozenset[Path] = frozenset()) -> list[Path]:
+    """Expand a DoomRunner mod bundle into its listed files."""
+    if path.suffix.lower() != ".dmb":
+        return [path]
+
+    bundle = path.resolve()
+    if bundle in seen:
+        return []
+    try:
+        lines = bundle.read_text(encoding="utf-8-sig").splitlines()
+    except (OSError, UnicodeError):
+        return [path]
+
+    nested = seen | {bundle}
+    entries: list[Path] = []
+    for line in lines:
+        item = line.strip()
+        if not item or item.startswith("#"):
+            continue
+        entry = Path(item)
+        if not entry.is_absolute():
+            entry = bundle.parent / entry
+        entries.extend(_expand_dmb(entry, nested))
+    return entries
+
+
 def presented_files(preset: Preset) -> tuple[Path | None, list[Path]]:
     """The IWAD and files to take title art, logo and music from: an add-on IWAD stands on its base game."""
     files = load_order(preset)
@@ -99,15 +125,16 @@ def _doomrunner_file_args(preset: Preset, traits: Traits) -> list[str]:
     mods: list[str] = []
 
     def add(group: list[str], f: Path) -> None:
-        ext = f.suffix.lower()
-        if ext in (".deh", ".hhe"):
-            args.extend(["-deh", str(f)])
-        elif ext == ".bex":
-            args.extend(["-bex", str(f)])
-        else:
-            if not maps and not mods:
-                args.extend([traits.spec.load_param, _FILES])
-            group.append(str(f))
+        for entry in _expand_dmb(f):
+            ext = entry.suffix.lower()
+            if ext in (".deh", ".hhe"):
+                args.extend(["-deh", str(entry)])
+            elif ext == ".bex":
+                args.extend(["-bex", str(entry)])
+            else:
+                if not maps and not mods:
+                    args.extend([traits.spec.load_param, _FILES])
+                group.append(str(entry))
 
     for mp in preset.mappacks:
         if mp.exists():
