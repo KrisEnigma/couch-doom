@@ -9,7 +9,8 @@ ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "packaging" / "dmg-background.png"
 FONT_DIR = ROOT / "src" / "couch_doom" / "assets" / "fonts"
 SCALE = 1
-WIDTH, HEIGHT = 640, 304
+ART_WIDTH, ART_HEIGHT = 640, 304
+WIDTH, HEIGHT = 840, 480
 
 INK = (19, 19, 21)
 CREAM = (246, 235, 216)
@@ -27,14 +28,14 @@ def center_text(draw: ImageDraw.ImageDraw, text: str, center: tuple[int, int], f
 
 
 def main() -> None:
-    # A restrained charcoal-to-hellfire wash sized to the Finder window.
+    # Extend the dark field beyond the fixed artwork so larger Finder windows don't expose white.
     image = Image.new("RGB", (WIDTH, HEIGHT))
     pixels = image.load()
     for y in range(HEIGHT):
-        t = y / (HEIGHT - 1)
+        t = min(y / (ART_HEIGHT - 1), 1.0)
         ember = max(0.0, (t - 0.46) / 0.54) ** 1.7
         for x in range(WIDTH):
-            side_fade = max(0.0, 1.0 - abs(x / (WIDTH - 1) - 0.5) * 1.8)
+            side_fade = max(0.0, 1.0 - abs(x / (ART_WIDTH - 1) - 0.5) * 1.8)
             glow = ember * side_fade
             pixels[x, y] = tuple(round(INK[i] * (1 - glow * 0.55) + (93, 24, 18)[i] * glow * 0.55) for i in range(3))
 
