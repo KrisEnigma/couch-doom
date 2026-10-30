@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import log
 from .engine_traits import FAMILIES, Traits, compat_flag_args
 from .known import ADDON_IWADS
 from .options import Options, Preset
@@ -71,8 +72,10 @@ def _expand_dmb(path: Path, seen: frozenset[Path] = frozenset()) -> list[Path]:
         return []
     try:
         lines = bundle.read_text(encoding="utf-8-sig").splitlines()
-    except (OSError, UnicodeError):
-        return [path]
+    except (OSError, UnicodeError) as exc:
+        # The engine cannot use a raw .dmb, so pass nothing and leave a note instead of a confusing launch error.
+        log.write(f"Couldn't read mod bundle {path.name}", str(exc))
+        return []
 
     nested = seen | {bundle}
     entries: list[Path] = []
@@ -100,9 +103,13 @@ def presented_files(preset: Preset) -> tuple[Path | None, list[Path]]:
 
 
 def load_order(preset: Preset) -> list[Path]:
-    """Files after the IWAD, in the order the engine loads them."""
+    """Files after the IWAD, in the order the engine loads them, with DoomRunner bundles expanded.
+
+    Expansion lives here so launch arguments, title art, logos and music all see the same file list.
+    """
     maps = [f for mp in preset.mappacks if mp.exists() for f in _expand_mappack(mp)]
-    return [*preset.mods, *maps] if preset.load_maps_after_mods else [*maps, *preset.mods]
+    mods = [entry for mod in preset.mods for entry in _expand_dmb(mod)]
+    return [*mods, *maps] if preset.load_maps_after_mods else [*maps, *mods]
 
 
 def _file_args(files: list[Path]) -> list[str]:

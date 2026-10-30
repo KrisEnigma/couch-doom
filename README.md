@@ -73,13 +73,12 @@ MIDI playback support from source also needs tinysoundfont. On macOS, if GZDoom 
 | D-pad / left stick up or down | Up / Down | Move through games |
 | D-pad / stick left or right | Left / Right | Left goes to the current group heading, then the previous group; Right goes to the next group |
 | A | Enter | Play or open / close a section heading |
-| Start | — | Quick help |
-| — | F1 | Quick help |
+| Back / View | F1 | Quick help |
+| Start | F2 | Toggle title music |
 | — | F5 | Help & feedback |
 | X | Tab | Readme and ENDOOM info |
 | Y | / or type | Search |
 | R3 | F3 | Add or remove a favorite |
-| Back / View | F2 | Toggle title music |
 | L3 | F4 | Choose a launcher |
 | LB / RB | — | Jump between sections |
 | LT / RT | PgUp / PgDn | Jump through the list |

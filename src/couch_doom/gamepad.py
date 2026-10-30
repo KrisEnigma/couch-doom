@@ -16,14 +16,13 @@ class Action(Enum):
     BACK = auto()
     SEARCH = auto()
     ALT = auto()  # X: info sheet / backspace in search
-    HELP = auto()
+    HELP = auto()  # Back/View: quick help
     ISSUES = auto()
     PREV_SECTION = auto()
     NEXT_SECTION = auto()
     PAGE_UP = auto()
     PAGE_DOWN = auto()
-    MENU = auto()  # Start: alias for Play
-    MUSIC = auto()  # Back/View: title music on/off
+    MUSIC = auto()  # Start: title music on/off
     FAVORITE = auto()  # R3: add/remove from Favorites
     LAUNCHER = auto()  # L3: pick which launcher's presets to show
 
@@ -42,8 +41,8 @@ _CONTROLLER_BUTTONS = {
     pygame.CONTROLLER_BUTTON_B: Action.BACK,
     pygame.CONTROLLER_BUTTON_X: Action.ALT,
     pygame.CONTROLLER_BUTTON_Y: Action.SEARCH,
-    pygame.CONTROLLER_BUTTON_BACK: Action.MUSIC,
-    pygame.CONTROLLER_BUTTON_START: Action.MENU,
+    pygame.CONTROLLER_BUTTON_BACK: Action.HELP,
+    pygame.CONTROLLER_BUTTON_START: Action.MUSIC,
     pygame.CONTROLLER_BUTTON_RIGHTSTICK: Action.FAVORITE,
     pygame.CONTROLLER_BUTTON_LEFTSTICK: Action.LAUNCHER,
     pygame.CONTROLLER_BUTTON_LEFTSHOULDER: Action.PREV_SECTION,
@@ -62,8 +61,8 @@ _JOY_BUTTONS = {
     3: Action.SEARCH,
     4: Action.PREV_SECTION,
     5: Action.NEXT_SECTION,
-    6: Action.MUSIC,
-    7: Action.MENU,
+    6: Action.HELP,
+    7: Action.MUSIC,
     8: Action.LAUNCHER,
     9: Action.FAVORITE,
 }

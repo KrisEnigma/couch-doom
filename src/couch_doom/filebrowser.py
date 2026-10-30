@@ -6,7 +6,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Collection
+from typing import Callable, Collection
 
 
 @dataclass(frozen=True)
@@ -54,8 +54,13 @@ def list_entries(
     names: Collection[str] = (),
     suffixes: Collection[str] = (".zdl",),
     app_bundles: bool = sys.platform == "darwin",
+    include: Callable[[os.DirEntry], bool] | None = None,
 ) -> list[Entry]:
-    """List child directories and matching files, without following directory symlinks or recursing."""
+    """List child directories and matching files without recursing.
+
+    Directory symlinks count as directories so linked game folders can be entered; `.app` bundles stay files.
+    Dot entries are hidden unless `show_all`, and `include` adds entries matched by something other than name.
+    """
     wanted_names = {name.casefold() for name in names}
     wanted_suffixes = {suffix.casefold() for suffix in suffixes}
     if app_bundles:
@@ -64,12 +69,15 @@ def list_entries(
     try:
         with os.scandir(directory) as scan:
             for item in scan:
+                if item.name.startswith(".") and not show_all:
+                    continue
                 try:
                     is_bundle = app_bundles and item.name.casefold().endswith(".app") and item.is_dir(follow_symlinks=False)
-                    is_dir = item.is_dir(follow_symlinks=False) and not is_bundle
+                    is_dir = item.is_dir(follow_symlinks=True) and not is_bundle
                     is_file = is_bundle or item.is_file(follow_symlinks=True)
-                    if is_dir or (is_file and (show_all or item.name.casefold() in wanted_names
-                                               or Path(item.name).suffix.casefold() in wanted_suffixes)):
+                    extra = bool(include and include(item))
+                    if is_dir or extra or (is_file and (show_all or item.name.casefold() in wanted_names
+                                                        or Path(item.name).suffix.casefold() in wanted_suffixes)):
                         entries.append(Entry(Path(item.path), is_dir))
                 except OSError:
                     continue
@@ -83,11 +91,13 @@ class Browser:
 
     def __init__(self, home: Path | None = None, *, candidates: Collection[Path] | None = None,
                  names: Collection[str] = (), suffixes: Collection[str] = (".zdl",),
-                 app_bundles: bool = sys.platform == "darwin"):
+                 app_bundles: bool = sys.platform == "darwin",
+                 include: Callable[[os.DirEntry], bool] | None = None):
         self.roots = roots(home, candidates=candidates)
         self.directory = self.roots[0]
         self.names, self.suffixes = tuple(names), tuple(suffixes)
         self.app_bundles = app_bundles
+        self.include = include
         self.show_all = False
         self.selected = 0
         self.entries: list[Entry] = []
@@ -95,7 +105,7 @@ class Browser:
 
     def refresh(self) -> None:
         self.entries = list_entries(self.directory, show_all=self.show_all, names=self.names, suffixes=self.suffixes,
-                                    app_bundles=self.app_bundles)
+                                    app_bundles=self.app_bundles, include=self.include)
         self.selected = max(0, min(self.selected, len(self.entries) - 1))
 
     def move(self, amount: int) -> None:

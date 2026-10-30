@@ -94,13 +94,31 @@ def test_f1_opens_separate_help_and_info_button_keeps_readme_default():
     assert ui.INFO_TABS[app.info_tab] == "Readme"
 
 
-def test_start_button_opens_the_same_help_modal_for_controller_users():
+def test_back_button_opens_help_and_start_toggles_music():
+    inp = gamepad.Input.__new__(gamepad.Input)
+    inp._pad_last = False
+    inp._held = {}
+
+    back = inp.handle(pygame.event.Event(pygame.CONTROLLERBUTTONDOWN, instance_id=0, button=pygame.CONTROLLER_BUTTON_BACK), 1.0)
+    start = inp.handle(pygame.event.Event(pygame.CONTROLLERBUTTONDOWN, instance_id=0, button=pygame.CONTROLLER_BUTTON_START), 2.0)
+
+    assert back == [Action.HELP]
+    assert start == [Action.MUSIC]
+
+    app = make_app()
+    app.input.pad_mode = True
+    app._on_action(back[0], 1.0)
+    assert app.mode == "help"
+
+
+def test_pad_footer_puts_help_on_back_and_music_on_start():
     app = make_app()
     app.input.pad_mode = True
 
-    app._on_action(Action.MENU, 1.0)
+    hints = app._footer_hints()
 
-    assert app.mode == "help"
+    assert any(glyphs == ("BACK",) and label == "Help" for glyphs, label, _ in hints)
+    assert any(glyphs == ("START",) and label in {"Music", "Mute"} for glyphs, label, _ in hints)
 
 
 def test_help_covers_the_usage_guide_without_hard_coded_buttons():

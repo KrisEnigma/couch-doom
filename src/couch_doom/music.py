@@ -29,6 +29,7 @@ from .config import DATA_DIR, PROJECT_ROOT, home, xdg
 from .options import Engine
 
 # MAPINFO accepts music names with or without quotes (Brutal Wolfenstein: `music = WONDER`).
+# The value may be empty on purpose; callers treat "" as falsy and fall through to the next source.
 TITLEMUSIC_RE = re.compile(rb'titlemusic\s*=\s*"?([^"\s;}]*)', re.IGNORECASE)
 # Without titlemusic, a mod with a TITLEMAP plays that map's music on the title screen (Elementalism).
 ACS_MUSIC_RE = re.compile(rb'music/[\w\-. ]+\.(?:mp3|ogg|flac|opus|wav|mid|mus|it|xm|s3m|mod)', re.IGNORECASE)

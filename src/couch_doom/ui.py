@@ -18,10 +18,10 @@ from typing import Callable
 
 import pygame
 
-from . import __version__, draw
+from . import __version__, draw, easter_eggs
 from . import update as updates
 from . import self_update
-from .config import ASSET_DIR, FROZEN
+from .config import ASSET_DIR
 from . import handover, asset_cache
 from .filebrowser import Browser as FileBrowser
 from .gamepad import Action, Input
@@ -35,7 +35,6 @@ from .options import Options, OptionsError, Preset, unpack
 from .endoom import COLS, ROWS, Endoom, find_endoom
 from .readme import Readme, find_readme
 from .sfx import Sfx
-from .self_select import is_self_selection
 from .sources import SOURCES, Choice
 from .state import State
 from .theme import HOUSE, Theme, from_art
@@ -550,7 +549,7 @@ class App:
             if sel != self.picker_sel:
                 self.picker_sel = sel
                 self._sound("move")
-        elif action in (Action.CONFIRM, Action.MENU):
+        elif action == Action.CONFIRM:
             self._picker_pick(self.picker_sel)
         elif action in (Action.BACK, Action.LAUNCHER):
             self._close_overlay()
@@ -595,7 +594,7 @@ class App:
             if sel != self.update_sel:
                 self.update_sel = sel
                 self._sound("move")
-        elif action in (Action.CONFIRM, Action.MENU):
+        elif action == Action.CONFIRM:
             self._update_pick(self.update_sel)
         elif action == Action.BACK:
             self._update_pick(next(i for i, item in enumerate(choices) if item[0] == "later"))
@@ -705,9 +704,7 @@ class App:
 
     def _open_browser(self, directory: Path | None = None) -> None:
         names = {name for source in SOURCES for name in (*source.module.EXES, *source.module.SETTINGS_NAMES)}
-        if FROZEN:
-            names.add(Path(sys.executable).name)
-        self.file_browser = FileBrowser(home=directory, names=names)
+        self.file_browser = FileBrowser(home=directory, names=names, include=easter_eggs.is_self_entry)
         self.browser_scroll = 0
         self.mode = "browse"
         self._sound("open")
@@ -733,7 +730,11 @@ class App:
         elif action == Action.ALT:
             browser.toggle_all()
             self.browser_scroll = 0
-        elif action in (Action.CONFIRM, Action.MENU):
+        elif action == Action.CONFIRM:
+            entry = browser.entries[browser.selected] if browser.entries else None
+            if entry is not None and not entry.is_dir and (reaction := easter_eggs.react_to_pick(entry.path)):
+                self._show_reaction(reaction)
+                return
             path = browser.open_selected()
             if path is not None:
                 self.file_browser = None
@@ -760,10 +761,8 @@ class App:
 
     def _on_drop(self, path: Path) -> None:
         """A file or folder dropped on the window, or picked in the browser: use the launcher it belongs to."""
-        if is_self_selection(path):
-            self._notify("Doomception! I’m already running.", self.theme.label)
-            if self.sfx:
-                self.sfx.play_secret()
+        if reaction := easter_eggs.react_to_pick(path):
+            self._show_reaction(reaction)
             return
         if not self.launchers:
             return
@@ -777,6 +776,15 @@ class App:
             self._sound("error")
             return
         self._choose(choice, added=True)
+
+    def _show_reaction(self, reaction: easter_eggs.Reaction) -> None:
+        """The only place an easter egg is presented, so handlers stay free of message and sound details."""
+        self._notify(reaction.message, self.theme.label)
+        if reaction.sound and self.sfx:
+            if reaction.sound == "secret":
+                self.sfx.play_secret()
+            else:
+                self.sfx.play(reaction.sound)
 
     # ---------- audio ----------
 
@@ -1433,7 +1441,7 @@ class App:
             self._sound("open")
             return
         if self.blocked:
-            if action in (Action.CONFIRM, Action.MENU):
+            if action == Action.CONFIRM:
                 if self.launchers and self.launchers.must_pick:
                     self._open_picker()  # several launchers found and none picked yet: reloading can't help
                 else:
@@ -1476,11 +1484,6 @@ class App:
             self._jump_section(-1)
         elif action in (Action.RIGHT, Action.NEXT_SECTION):
             self._jump_section(1)
-        elif action == Action.MENU:
-            self.mode = "help"
-            self.help_scroll = self.help_view = 0.0
-            self.info_opened = now
-            self._sound("open")
         elif action == Action.CONFIRM:
             row = self._sel_row()
             if self.rows and self.rows[row].kind == "header":
@@ -1554,7 +1557,7 @@ class App:
             step = -1 if action in (Action.LEFT, Action.PREV_SECTION) else 1
             tabs = self._info_tabs()
             self._set_info_tab(tabs[(tabs.index(self.info_tab) + step) % len(tabs)])
-        elif action in (Action.CONFIRM, Action.MENU):
+        elif action == Action.CONFIRM:
             self.mode = "list"
             self._launch_selected()
         elif action in (Action.BACK, Action.ALT):
@@ -1712,9 +1715,6 @@ class App:
             self._set_filter(self.filter + " ")
         elif action == Action.SEARCH:
             self._close_overlay()
-        elif action == Action.MENU:
-            self.mode = "list"
-            self._launch_selected()
         elif action == Action.BACK:
             self._set_filter("")
             self._close_overlay()
@@ -2330,7 +2330,6 @@ class App:
         if more:
             blocks.append((self._text(f"and {more} more", self._font(20), DIM), int(8 * s)))
         blocks.append((state, 0))
-        total = sum(block.get_height() + gap for block, gap in blocks)
         panel = pygame.Surface(dr.size, pygame.SRCALPHA)
         y = top
         for surf, gap in blocks:
@@ -2387,9 +2386,9 @@ class App:
         primary = "Open / Close" if category_selected else "Play"
         favorite_hint = [] if category_selected else [(('R3',) if pad else ('KEY:F3',), fav, (A.FAVORITE,))]
         if pad:
-            return [(("A",), primary, (A.CONFIRM,)), (("START",), "Help", (A.MENU,)), (("X",), "Info", (A.ALT,)), (("Y",), "Search", (A.SEARCH,)),
+            return [(("A",), primary, (A.CONFIRM,)), (("BACK",), "Help", (A.HELP,)), (("X",), "Info", (A.ALT,)), (("Y",), "Search", (A.SEARCH,)),
                     (("LB", "RB"), "Section", section),
-                    *favorite_hint, (("BACK",), music, (A.MUSIC,)),
+                    *favorite_hint, (("START",), music, (A.MUSIC,)),
                     *launcher, (("B",), *back)]
         return [(("KEY:ENTER",), primary, (A.CONFIRM,)), (("KEY:F1",), "Help", (A.HELP,)), (("KEY:TAB",), "Info", (A.ALT,)),
                 (("KEY:/",), "Search", (A.SEARCH,)), (("KEY:LEFT", "KEY:RIGHT"), "Section", section),
@@ -2555,7 +2554,8 @@ class App:
                              (x, self._text_top(font, rect.centery)))
             y += row_h
 
-        note = "All files shown" if browser.show_all else "Doom launchers and settings files"
+        note = ("All files shown, including hidden items" if browser.show_all
+                else "Doom launchers and settings files; hidden items are skipped")
         note_font = self._font(18)
         self.screen.blit(self._text(self._fit(note, note_font, inner), note_font, DIM), (x, box.bottom - pad - int(20 * s)))
 
@@ -2624,7 +2624,6 @@ class App:
             y += row_h
 
     def _help_rows(self, width: int) -> list[tuple[str, bool]]:
-        heading_font = self._font(16, bold=True)
         body_font = self._font(21)
         rows: list[tuple[str, bool]] = []
         for heading, paragraph in HELP_SECTIONS:

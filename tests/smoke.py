@@ -241,9 +241,11 @@ manual_settings = manual_dir / "options.json"
 manual_settings.write_text(dr.path.read_text(encoding="utf-8"), encoding="utf-8")
 app.launchers = Launchers(state)
 before_self_pick = state.launcher
-with patch("couch_doom.ui.is_self_selection", return_value=True):
+from couch_doom import easter_eggs  # noqa: E402
+with patch.object(easter_eggs, "react_to_pick",
+                  return_value=easter_eggs.Reaction(easter_eggs.DOOMCEPTION_MESSAGE)):
     app._on_drop(root / "CouchDoom")
-assert app.toast.text == "Doomception! I’m already running."
+assert app.toast.text == easter_eggs.DOOMCEPTION_MESSAGE
 assert state.launcher == before_self_pick
 app._open_browser(root)
 assert app.mode == "browse" and any(entry.path == manual_dir and entry.is_dir for entry in app.file_browser.entries)

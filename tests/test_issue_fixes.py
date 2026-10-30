@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from couch_doom.launch import build_command
+from couch_doom.launch import build_command, presented_files
 from couch_doom.options import Engine, Options, Preset
 from couch_doom.sources import doomrunner
 from couch_doom.music import _configured_soundfont
@@ -34,6 +34,15 @@ def test_doomrunner_bundle_expands_relative_entries_before_launch(tmp_path):
     assert "-merge" in argv
     assert str(mod) in argv
     assert str(bundle) not in argv
+
+
+def test_presented_files_expand_doomrunner_bundle(tmp_path):
+    mod = tmp_path / "title.pk3"
+    mod.touch()
+    bundle = tmp_path / "mods.dmb"
+    bundle.write_text("title.pk3\n", encoding="utf-8")
+    preset = Preset("bundle", "s", "e", None, [bundle], mod_entries=[bundle])
+    assert presented_files(preset) == (None, [mod])
 
 
 def test_doomrunner_relative_alternative_paths_resolve_from_options_folder(tmp_path):

@@ -35,14 +35,15 @@ all files, LB/RB to switch roots, and LT/RT to page.
 CONTROLS
 Xbox button names are used below. PlayStation and Switch controllers work too.
 
-  A / Start   Play          B   Quit (press twice) or close
+  A           Play          B   Quit (press twice) or close
   X           Info sheet    Y   Search
   LB / RB     Jump section  R3  Add to favorites
   L3          Switch launcher
-  View/Back   Music on or off
+  Start       Music on or off
+  View/Back   Quick help
   LT / RT     Page up / down; in the info sheet the right stick scrolls too
-  Keyboard: arrows, Enter to play, Esc to quit, Tab for info, F2 music,
-  F3 favorite, F4 switch launcher, Page Up / Down, or just type to search.
+  Keyboard: arrows, Enter to play, Esc to quit, Tab for info, F1 help,
+  F2 music, F3 favorite, F4 switch launcher, Page Up / Down, or just type to search.
   Mouse: click a preset to select it, click again to play. Wheel scrolls,
   right-click goes back, and the button hints at the bottom are clickable.
 

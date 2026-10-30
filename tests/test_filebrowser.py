@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 import couch_doom.filebrowser as filebrowser
 from couch_doom.filebrowser import Browser, _drive_roots, list_entries, parent, roots
 
@@ -23,6 +25,30 @@ def test_all_files_mode_includes_unmatched_files_without_recursing(tmp_path):
 
     assert [e.path.name for e in list_entries(tmp_path, names={"launcher.exe"})] == ["folder"]
     assert [e.path.name for e in list_entries(tmp_path, show_all=True, names={"launcher.exe"})] == ["folder", "readme.txt"]
+
+
+def test_symlinked_directory_is_navigable(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "launcher.exe").touch()
+    link = tmp_path / "linkdir"
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("directory symlinks are unavailable")
+
+    browser = Browser(tmp_path, candidates=[tmp_path], names={"launcher.exe"})
+    entry = next(e for e in browser.entries if e.path == link)
+    browser.selected = browser.entries.index(entry)
+    assert entry.is_dir
+    assert browser.open_selected() is None
+    assert browser.directory == link
+
+
+def test_dot_entries_are_hidden_until_all_files_is_enabled(tmp_path):
+    (tmp_path / ".hidden").mkdir()
+    assert ".hidden" not in [e.path.name for e in list_entries(tmp_path)]
+    assert ".hidden" in [e.path.name for e in list_entries(tmp_path, show_all=True)]
 
 
 def test_macos_app_bundle_is_selectable_as_a_file(tmp_path):
