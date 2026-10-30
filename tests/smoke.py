@@ -214,6 +214,17 @@ app._open_update({"version": "9.9.9", "current": "0.6.0", "url": "", "notes": []
 app._on_action(Action.DOWN, now)
 app._on_action(Action.CONFIRM, now)
 assert app.mode == "list" and state.update_skip == "9.9.9" and State(root / "state.json").update_skip == "9.9.9"
+category_row = next(i for i, row in enumerate(app.rows) if row.kind == "header")
+app._select_row(category_row)
+was_collapsed = app.rows[category_row].collapsed
+app._draw(now)  # category focus shows a category card in the right pane
+app._on_action(Action.CONFIRM, now)
+assert app.rows[app._sel_row()].kind == "header"
+assert app.rows[app._sel_row()].collapsed is not was_collapsed
+app._draw(now)
+app._on_action(Action.CONFIRM, now)
+assert app.rows[app._sel_row()].kind == "header"
+assert app.rows[app._sel_row()].collapsed is was_collapsed
 app.problem = OptionsError("No IWADs found", "Set up a game first.", [])
 pending = Future()
 pending.set_result({"version": "9.9.9", "current": "0.6.0", "url": "https://github.com/KrisEnigma/couch-doom/releases", "notes": []})

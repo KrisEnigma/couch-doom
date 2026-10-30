@@ -68,6 +68,19 @@ ART_MIN_FILL = 0.62  # of the art panel's height
 ART_MAX_ZOOM = 1.25
 FAVORITES = "Favorites"
 INFO_TABS = ("Readme", "ENDOOM")
+ENDOOM_TAB = 1
+ISSUE_URL = "https://github.com/KrisEnigma/couch-doom/issues"
+HELP_SECTIONS = (
+    ("START PLAYING", "CouchDoom reads the games you already have in DoomRunner, ZDL, or Doom Launcher, and leaves those setups as you made them. It can also show games found by GZDoom, UZDoom, or VKDoom. Pick a game and play."),
+    ("CAN'T FIND YOUR GAMES?", "CouchDoom usually finds your launcher automatically. If it finds more than one, choose the one you want. If your games still aren't listed, open the launcher picker and choose “Find it myself…” to browse for your launcher or game port. You can also drop its folder onto the CouchDoom window."),
+    ("BROWSE THE LIST", "The selected game stays highlighted while its artwork and details appear beside the list. Select a group heading to see its games and open or collapse it. You can also click the small marker beside a heading. Jumping to a folded group lets you open it again."),
+    ("SEARCH AND FAVORITES", "Search by game or group name. Matching games stay visible even when their group is folded. Mark games as favorites to keep them together near the top of the list. The hints along the bottom show the controls for your keyboard or controller."),
+    ("GAME DETAILS", "A game may show its title art, music, description, or a readme. Some games include a colorful end screen called ENDOOM. Open the info sheet to see these extras when they're available."),
+    ("MUSIC", "CouchDoom plays menu music when the selected game provides it. If you don't hear any, that game may not include menu music."),
+    ("IF SOMETHING DOESN'T WORK", "Check that your launcher still opens the game on its own. If CouchDoom can't find a launcher, use “Find it myself…” in the launcher picker. If your system asks before opening CouchDoom for the first time, allow it only if you downloaded it from the official release."),
+    ("REPORT A BUG", "Choose Help & Feedback above to browse questions and bug reports or share a new one. Before posting, include what you were doing, what you expected, and what happened. Mention the CouchDoom version and game or launcher involved. A screenshot or short log excerpt can help; remove personal file paths before sharing."),
+    ("ABOUT", "CouchDoom is made by KrisEnigma. Thanks for using it!"),
+)
 UPDATE_DELAY_SECONDS = 1.0  # let the list settle briefly before a notice appears over it
 # (key, label, caption) for the update notice; "later" is index 1 because B and a click outside both mean it.
 UPDATE_CHOICES = (
@@ -82,7 +95,6 @@ def update_choices(info: dict | None, packaged: bool) -> tuple[tuple[str, str, s
     if info and info.get("asset") and packaged:
         choices.insert(0, ("install", "Update and restart", "Download, install and restart CouchDoom"))
     return tuple(choices)
-ENDOOM_TAB = 1
 LOGO_MAX_H = 168  # design px; menu logos are compact, so they need more height than a text title to read as big
 INFO_SLIDE_SECONDS = 0.22
 INFO_STICK_LINES_PER_SEC = 48
@@ -99,6 +111,7 @@ class Row:
     preset: int = -1
     count: int = 0
     fav: bool = False  # the copy shown in the Favorites section
+    collapsed: bool = False
 
 
 @dataclass
@@ -406,7 +419,9 @@ class App:
 
         self.commands: list[LaunchCommand] = [build_command(opts, p) for p in opts.presets]
         self.filter = ""
-        self.mode = "list"  # "list" | "search" | "info" | "launcher" | "browse" | "update"
+        self.mode = "list"  # "list" | "search" | "info" | "help" | "launcher" | "browse" | "update"
+        self.help_scroll = 0.0
+        self.help_view = 0.0
         self.info_tab = 0
         self.info_scrolls = [0.0] * len(INFO_TABS)  # per-tab position, kept while the sheet is open
         self.info_scroll = 0.0
@@ -446,6 +461,7 @@ class App:
         self._theme_layers: dict[int, dict] = {}
 
         self.rows: list[Row] = []
+        self.collapsed_sections: set[str] = set()
         self.current = 0
         self.cur_row = -1  # a preset can appear twice (Favorites + its section); this says which copy
         self._pick_start()
@@ -793,7 +809,7 @@ class App:
         self.music.update()
         if self.current != self._music_sel:
             self._music_sel, self._music_since = self.current, now
-        if not self.state.music or not self.rows:
+        if not self.state.music or not self.rows or self._category_selected():
             self.music.request(None)
         elif self.music.want == self.current:
             pass  # playing, loading, or finished; title tracks play once, like on the engine's title screen
@@ -1049,13 +1065,17 @@ class App:
         names = {p.name: i for i, p in enumerate(self.opts.presets)}
         favs = [names[f] for f in self.state.favorites if f in names and self._matches(names[f], terms)]
         if favs:
-            rows.append(Row("header", FAVORITES, count=len(favs)))
-            rows += [Row("preset", self.opts.presets[i].name, i, fav=True) for i in favs]
+            collapsed = not terms and FAVORITES in self.collapsed_sections
+            rows.append(Row("header", FAVORITES, count=len(favs), collapsed=collapsed))
+            if not collapsed:
+                rows += [Row("preset", self.opts.presets[i].name, i, fav=True) for i in favs]
         for section in self.opts.sections:
             hits = [i for i, p in enumerate(self.opts.presets) if p.section == section and self._matches(i, terms)]
             if hits:
-                rows.append(Row("header", section, count=len(hits)))
-                rows += [Row("preset", self.opts.presets[i].name, i) for i in hits]
+                collapsed = not terms and section in self.collapsed_sections
+                rows.append(Row("header", section, count=len(hits), collapsed=collapsed))
+                if not collapsed:
+                    rows += [Row("preset", self.opts.presets[i].name, i) for i in hits]
         self.rows = rows
         self.cur_row = -1
         self.free_scroll = None
@@ -1078,7 +1098,12 @@ class App:
     def _preset_rows(self) -> list[int]:
         return [i for i, r in enumerate(self.rows) if r.kind == "preset"]
 
+    def _category_selected(self) -> bool:
+        return bool(self.rows and self.rows[self._sel_row()].kind == "header")
+
     def _sel_row(self) -> int:
+        if 0 <= self.cur_row < len(self.rows) and self.rows[self.cur_row].kind == "header":
+            return self.cur_row
         if 0 <= self.cur_row < len(self.rows) and self.rows[self.cur_row].preset == self.current:
             return self.cur_row
         for i, r in enumerate(self.rows):
@@ -1087,21 +1112,19 @@ class App:
         return 0
 
     def _select_row(self, row: int) -> None:
-        if 0 <= row < len(self.rows) and self.rows[row].kind == "preset":
+        if 0 <= row < len(self.rows):
             self.cur_row = row
-            if self.rows[row].preset != self.current:
+            if self.rows[row].kind == "preset" and self.rows[row].preset != self.current:
                 self.current = self.rows[row].preset
-                self.detail_changed = time.monotonic()
-                self._sound("move")
+            self.detail_changed = time.monotonic()
+            self._sound("move")
 
     def _move(self, delta: int) -> None:
-        rows = self._preset_rows()
-        if not rows:
+        if not self.rows:
             return
         self.free_scroll = None
         sel = self._sel_row()
-        pos = rows.index(sel) if sel in rows else 0
-        self._select_row(rows[max(0, min(len(rows) - 1, pos + delta))])
+        self._select_row(max(0, min(len(self.rows) - 1, sel + delta)))
 
     def _jump_section(self, direction: int) -> None:
         headers = [i for i, r in enumerate(self.rows) if r.kind == "header"]
@@ -1109,19 +1132,45 @@ class App:
             return
         self.free_scroll = None
         sel = self._sel_row()
-        current_header = max((h for h in headers if h < sel), default=headers[0])
-        if direction < 0:
-            if sel > current_header + 1:
-                self._select_row(current_header + 1)
-                return
-            prev = [h for h in headers if h < current_header]
-            target = prev[-1] if prev else current_header
+        current_header = sel if self.rows[sel].kind == "header" else max((h for h in headers if h < sel), default=headers[0])
+        candidates = [h for h in headers if h < current_header] if direction < 0 else [h for h in headers if h > current_header]
+        target = candidates[-1] if direction < 0 and candidates else candidates[0] if candidates else current_header
+        self._select_row(target)
+
+    def _toggle_section(self, row: int) -> None:
+        if not 0 <= row < len(self.rows) or self.rows[row].kind != "header":
+            return
+        if self.filter:
+            self._notify("Clear search before folding groups", self.theme.label)
+            return
+        name = self.rows[row].text
+        if name in self.collapsed_sections:
+            self.collapsed_sections.remove(name)
         else:
-            nxt = [h for h in headers if h > current_header]
-            if not nxt:
-                return
-            target = nxt[0]
-        self._select_row(target + 1)
+            self.collapsed_sections.add(name)
+        self._rebuild_rows()
+        self.cur_row = next((i for i, row in enumerate(self.rows) if row.kind == "header" and row.text == name), -1)
+        self.detail_changed = time.monotonic()
+        self._sound("move")
+
+    def _category_presets(self, row: int) -> list[int]:
+        if row.kind != "header":
+            return []
+        terms = self.filter.lower().split()
+        if row.text == FAVORITES:
+            names = {preset.name: i for i, preset in enumerate(self.opts.presets)}
+            return [names[name] for name in self.state.favorites if name in names and self._matches(names[name], terms)]
+        return [i for i, preset in enumerate(self.opts.presets) if preset.section == row.text and self._matches(i, terms)]
+
+    def _category_preview_capacity(self, count: int, width: int, height: int, row_h: int) -> tuple[int, int, int]:
+        columns = 2 if width >= int(520 * self.s) else 1
+        row_capacity = max(0, height // max(1, row_h))
+        capacity = columns * row_capacity
+        if count > capacity and row_capacity:
+            visible = columns * (row_capacity - 1)  # save the last row for the remainder note
+        else:
+            visible = min(count, capacity)
+        return columns, visible, count - visible
 
     def _target_scroll(self) -> float:
         if not self.rows:
@@ -1230,6 +1279,11 @@ class App:
         return out
 
     def _update_art(self, now: float) -> None:
+        if self._category_selected():
+            if not self.art_layers or self.art_layers[-1][0] != -1:
+                self.art_layers.append((-1, None, now))
+                self.art_layers = self.art_layers[-2:]
+            return
         near = {self.current, *self._neighbors()}
         for idx, job in list(self.art_jobs.items()):
             if job.done():
@@ -1365,9 +1419,18 @@ class App:
         if self.mode == "update":
             self._on_update_action(action)
             return
+        if self.mode == "help":
+            self._on_help_action(action)
+            return
         if action == Action.LAUNCHER:
             if self.mode == "list":
                 self._open_picker()
+            return
+        if action == Action.HELP:
+            self.mode = "help"
+            self.help_scroll = self.help_view = 0.0
+            self.info_opened = now
+            self._sound("open")
             return
         if self.blocked:
             if action in (Action.CONFIRM, Action.MENU):
@@ -1382,7 +1445,7 @@ class App:
             self._toggle_music()
             return
         if action == Action.FAVORITE:
-            if self.mode == "list":  # not in the info sheet: R3 is a click of the stick that scrolls it
+            if self.mode == "list" and self.rows and self.rows[self._sel_row()].kind == "preset":
                 self._toggle_favorite()
             return
         if self.mode == "search":
@@ -1399,20 +1462,34 @@ class App:
             self._move(-8)
         elif action == Action.PAGE_DOWN:
             self._move(8)
-        elif action in (Action.LEFT, Action.PREV_SECTION):
+        elif action == Action.LEFT:
+            selected = self._sel_row()
+            if self.rows and self.rows[selected].kind != "header":
+                header = max((i for i in range(selected, -1, -1) if self.rows[i].kind == "header"), default=None)
+                if header is not None:
+                    self._select_row(header)
+                else:
+                    self._jump_section(-1)
+            else:
+                self._jump_section(-1)
+        elif action == Action.PREV_SECTION:
             self._jump_section(-1)
         elif action in (Action.RIGHT, Action.NEXT_SECTION):
             self._jump_section(1)
-        elif action in (Action.CONFIRM, Action.MENU):
-            self._launch_selected()
+        elif action == Action.MENU:
+            self.mode = "help"
+            self.help_scroll = self.help_view = 0.0
+            self.info_opened = now
+            self._sound("open")
+        elif action == Action.CONFIRM:
+            row = self._sel_row()
+            if self.rows and self.rows[row].kind == "header":
+                self._toggle_section(row)
+            else:
+                self._launch_selected()
         elif action == Action.ALT:
             if self.rows:
-                self.mode = "info"
-                self.info_scroll = self.info_view = 0.0
-                self.info_scrolls = [0.0] * len(INFO_TABS)
-                self.info_tab = 0
-                self.info_opened = now
-                self._sound("open")
+                self._open_info(now)
         elif action == Action.SEARCH:
             self._open_search(now)
         elif action == Action.BACK:
@@ -1430,6 +1507,29 @@ class App:
         self.osk = [1, 0]
         self.osk_moved = now
         self._sound("open")
+
+    def _open_info(self, now: float) -> None:
+        self.mode = "info"
+        self.info_scroll = self.info_view = 0.0
+        self.info_scrolls = [0.0] * len(INFO_TABS)
+        self.info_tab = 0
+        self.info_opened = now
+        self._sound("open")
+
+    def _on_help_action(self, action: Action) -> None:
+        if action in (Action.UP, Action.DOWN) and self.input.left_y:
+            return  # analog scrolling is handled smoothly in tick()
+        if action in (Action.UP, Action.DOWN):
+            step = self._help_line_h() * (-3 if action == Action.UP else 3)
+            self.help_scroll = max(0, min(self._help_max_scroll(), self.help_scroll + step))
+        elif action in (Action.PAGE_UP, Action.PAGE_DOWN):
+            _, body, _, _, _ = self._help_metrics()
+            page = max(self._help_line_h(), body.height - 2 * self._help_line_h())
+            self.help_scroll = max(0, min(self._help_max_scroll(), self.help_scroll + (-page if action == Action.PAGE_UP else page)))
+        elif action in (Action.SEARCH, Action.ISSUES):
+            webbrowser.open(ISSUE_URL)
+        elif action in (Action.BACK, Action.ALT, Action.HELP):
+            self._close_overlay()
 
     def _close_overlay(self) -> None:
         self.mode = "list"
@@ -1522,6 +1622,8 @@ class App:
                 self.free_scroll = self._target_scroll()  # clamped, so scrolling back from an end responds at once
             elif self.mode == "info":
                 self.info_scroll = max(0.0, min(self._info_max_scroll(), self.info_scroll + 3 * notches))
+            elif self.mode == "help":
+                self.help_scroll = max(0, min(self._help_max_scroll(), self.help_scroll + 3 * self._help_line_h() * notches))
             elif self.mode == "browse" and self.file_browser:
                 self._browser_action(Action.UP if notches < 0 else Action.DOWN)
         elif t == pygame.MOUSEBUTTONDOWN:
@@ -1541,7 +1643,7 @@ class App:
         self.hits.append(Hit(area, lambda: self._start_drag(kind)))
 
     def _scroll_value(self, kind: str) -> float:
-        return self.scroll if kind == "list" else self.info_view
+        return self.scroll if kind == "list" else self.help_view if kind == "help" else self.info_view
 
     def _start_drag(self, kind: str) -> None:
         track, thumb_h, max_scroll = self.scrollbars[kind]
@@ -1562,11 +1664,19 @@ class App:
         value = max(0.0, min(1.0, frac)) * max_scroll
         if kind == "list":
             self.free_scroll = self.scroll = value
+        elif kind == "help":
+            self.help_scroll = self.help_view = value
         else:
             self.info_scroll = self.info_view = value
 
     def _click_row(self, row: int) -> None:
         """First click selects (title art and music follow), a click on the selected preset plays it."""
+        if self.rows[row].kind == "header":
+            if row == self._sel_row():
+                self._toggle_section(row)
+            else:
+                self._select_row(row)
+            return
         if row == self._sel_row():
             self._launch_selected()
         else:
@@ -1625,7 +1735,7 @@ class App:
 
     def _on_key(self, event: pygame.event.Event) -> bool:
         """Keyboard-only behaviour that does not map onto pad actions. Returns True if consumed."""
-        if self.mode == "info":
+        if self.mode in ("info", "help"):
             return False
         if event.key == pygame.K_BACKSPACE:
             self._set_filter(self.filter[:-1])
@@ -1636,7 +1746,7 @@ class App:
         return False
 
     def _on_text(self, text: str, now: float) -> None:
-        if self.mode == "info":
+        if self.mode in ("info", "help"):
             return
         if text == "/" and self.mode == "list":
             self._open_search(now)
@@ -1915,6 +2025,8 @@ class App:
             self._draw_osk(now)
         elif self.mode == "info":
             self._draw_info(now)
+        elif self.mode == "help":
+            self._draw_help(now)
         elif self.mode == "launcher":
             self._draw_picker(now)
         elif self.mode == "browse":
@@ -2012,7 +2124,8 @@ class App:
         self.screen.blit(self.bar_surface, (bar_x, bar_top))
         pulse = 0.82 + 0.18 * math.sin(now * 3.2)
         stripe = tuple(int(c * pulse) for c in self.theme.accent)
-        pygame.draw.rect(self.screen, stripe, (bar_x, bar_top, int(6 * s), self.preset_h))
+        selected_row_h = self.header_h if self.rows[self._sel_row()].kind == "header" else self.preset_h
+        pygame.draw.rect(self.screen, stripe, (bar_x, bar_top, int(6 * s), selected_row_h))
 
         name_font = self._font(33)
         sel_font = self._font(33, bold=True)
@@ -2027,11 +2140,31 @@ class App:
                 area = pygame.Rect(bar_x, y, self.list_edge - self.scroll_w - bar_x, h).clip(lr.x - int(28 * s), lr.y, self.w, lr.height)
                 self.hits.append(Hit(area, lambda i=i: self._click_row(i)))
             if row.kind == "header":
-                t = self._tracked(row.text, 18, self.theme.label, tracking=0.22)
+                area = pygame.Rect(lr.x - int(28 * s), y, lr.width - self.scroll_w + int(28 * s), h).clip(lr.x - int(28 * s), lr.y, self.w, lr.height)
+                self.hits.append(Hit(area, lambda i=i: self._click_row(i)))
+                selected = i == sel
+                if selected:
+                    self.screen.blit(draw.rounded_rect(area.width, area.height, 8 * s, (255, 255, 255, 14)), area)
+                t = self._tracked(row.text, 18, TEXT if selected else self.theme.label, tracking=0.22)
                 ty = y + h - t.get_height() - int(12 * s)
                 self.screen.blit(t, (lr.x, ty))
-                cnt = self._text(str(row.count), self._font(18, bold=True), DIM)
+                cnt = self._text(str(row.count), self._font(18, bold=True), MUTED if selected else DIM)
                 self.screen.blit(cnt, (lr.x + t.get_width() + int(14 * s), ty + (t.get_height() - cnt.get_height()) // 2))
+                marker_size = max(4, int(4 * s))
+                marker_x = lr.x - int(12 * s)
+                marker_y = ty + t.get_height() // 2
+                marker_rect = pygame.Rect(lr.x - int(20 * s), y, int(20 * s), h)
+                self.hits.append(Hit(marker_rect, lambda i=i: self._toggle_section(i)))
+                marker_color = self.theme.accent if selected else self.theme.label
+                if row.collapsed:
+                    points = [(marker_x - marker_size // 2, marker_y - marker_size),
+                              (marker_x + marker_size // 2, marker_y),
+                              (marker_x - marker_size // 2, marker_y + marker_size)]
+                else:
+                    points = [(marker_x - marker_size, marker_y - marker_size // 2),
+                              (marker_x, marker_y + marker_size // 2),
+                              (marker_x + marker_size, marker_y - marker_size // 2)]
+                pygame.draw.lines(self.screen, marker_color, False, points, max(1, int(1.5 * s)))
                 continue
 
             selected = i == sel
@@ -2079,6 +2212,10 @@ class App:
 
     def _draw_detail(self, now: float) -> None:
         if not self.rows:
+            return
+        selected = self._sel_row()
+        if self.rows[selected].kind == "header":
+            self._draw_category_detail(now, self.rows[selected])
             return
         dr, s = self.detail_rect, self.s
         w = dr.width
@@ -2147,6 +2284,62 @@ class App:
         panel.set_alpha(int(255 * t))
         self.screen.blit(panel, (dr.x + int(32 * s * (1 - t)), dr.y))
 
+    def _draw_category_detail(self, now: float, row: Row) -> None:
+        dr, s = self.detail_rect, self.s
+        w = dr.width
+        presets = self._category_presets(row)
+        header: list[tuple[pygame.Surface, int]] = []
+        kind = "FAVORITES" if row.text == FAVORITES else "CATEGORY"
+        header.append((self._tracked(kind, 16, self.theme.label, tracking=0.28), int(16 * s)))
+        title_font = self._font(60, bold=True)
+        title_lines = self._wrap(row.text, title_font, w, 3)
+        for n, line in enumerate(title_lines):
+            header.append((self._shadowed(line, title_font, TEXT), int(10 * s) if n == len(title_lines) - 1 else int(2 * s)))
+
+        noun = "game" if row.count == 1 else "games"
+        header.append((self._text(f"{row.count} {noun}", self._font(24), MUTED), int(28 * s)))
+        preview_label = self._tracked("IN THIS GROUP", 15, self.theme.label, tracking=0.25)
+        preview_font = self._font(23)
+
+        if self.filter:
+            state_text = "Search keeps matching games visible"
+        else:
+            state = "Collapsed" if row.collapsed else "Open"
+            verb = "open" if row.collapsed else "collapse"
+            state_text = f"{state} · choose this category to {verb} it"
+        state = self._text(state_text, self._font(20), DIM)
+        top = int(54 * s)
+        row_h = preview_font.get_linesize() + int(9 * s)
+        fixed_h = sum(surf.get_height() + gap for surf, gap in header)
+        fixed_h += preview_label.get_height() + int(12 * s) + state.get_height() + int(12 * s)
+        available_h = max(0, dr.height - top - fixed_h)
+        columns, visible, more = self._category_preview_capacity(len(presets), w, available_h, row_h)
+        col_gap = int(28 * s)
+        col_w = max(1, (w - col_gap * (columns - 1)) // columns)
+        preview_rows = math.ceil(visible / columns) if visible else 0
+        preview = pygame.Surface((w, preview_rows * row_h), pygame.SRCALPHA)
+        for n, idx in enumerate(presets[:visible]):
+            col, line = n % columns, n // columns
+            title = self._fit(self.opts.presets[idx].name, preview_font, col_w - int(12 * s))
+            ink = self._text(f"•  {title}", preview_font, (206, 194, 178))
+            preview.blit(ink, (col * (col_w + col_gap), line * row_h))
+
+        blocks = [*header, (preview_label, int(12 * s))]
+        if visible:
+            blocks.append((preview, int(8 * s)))
+        if more:
+            blocks.append((self._text(f"and {more} more", self._font(20), DIM), int(8 * s)))
+        blocks.append((state, 0))
+        total = sum(block.get_height() + gap for block, gap in blocks)
+        panel = pygame.Surface(dr.size, pygame.SRCALPHA)
+        y = top
+        for surf, gap in blocks:
+            panel.blit(surf, (0, y))
+            y += surf.get_height() + gap
+        t = _ease_out((now - self.detail_changed) / 0.3)
+        panel.set_alpha(int(255 * t))
+        self.screen.blit(panel, (dr.x + int(32 * s * (1 - t)), dr.y))
+
     def _footer_hints(self) -> list[tuple[tuple[str, ...], str, tuple[Action, ...]]]:
         """(glyphs, label, actions): one action for the whole hint, or one per glyph (LB = previous, RB = next)."""
         pad = self.input.pad_mode
@@ -2165,6 +2358,10 @@ class App:
             return [(("A",) if pad else ("KEY:ENTER",), "Choose", (A.CONFIRM,)), (("B",) if pad else ("KEY:ESC",), "Close", (A.BACK,))]
         if self.mode == "update":
             return [(("A",) if pad else ("KEY:ENTER",), "Choose", (A.CONFIRM,)), (("B",) if pad else ("KEY:ESC",), "Later", (A.BACK,))]
+        if self.mode == "help":
+            if pad:
+                return [(("RS",), "Scroll", ()), (("Y",), "Help & Feedback", (A.SEARCH,)), (("B",), "Close", (A.BACK,))]
+            return [(("KEY:UP", "KEY:DOWN"), "Scroll", (A.UP, A.DOWN)), (("KEY:F5",), "Help & Feedback", (A.ISSUES,)), (("KEY:ESC",), "Close", (A.BACK,))]
         if self.blocked:
             picking = self.launchers is not None and self.launchers.must_pick
             reload = [(("A",) if pad else ("KEY:ENTER",), "Choose" if picking else "Reload", (A.CONFIRM,))]
@@ -2183,16 +2380,22 @@ class App:
                 return [(("A",), "Play", (A.CONFIRM,)), *scroll, (("B",), "Close", (A.BACK,))]
             scroll = [(("KEY:UP", "KEY:DOWN"), "Scroll", (A.UP, A.DOWN))] if scrolls else []
             return [(("KEY:ENTER",), "Play", (A.CONFIRM,)), *scroll, (("KEY:ESC",), "Close", (A.BACK,))]
+        category_selected = self._category_selected()
         fav = "Unfavorite" if self.rows and self.opts.presets[self.current].name in self.state.favorites else "Favorite"
         back = ("Clear filter" if self.filter else "Quit", (A.BACK,))
         section = (A.PREV_SECTION, A.NEXT_SECTION)
+        primary = "Open / Close" if category_selected else "Play"
+        favorite_hint = [] if category_selected else [(('R3',) if pad else ('KEY:F3',), fav, (A.FAVORITE,))]
         if pad:
-            return [(("A",), "Play", (A.CONFIRM,)), (("X",), "Info", (A.ALT,)), (("Y",), "Search", (A.SEARCH,)),
-                    (("LB", "RB"), "Section", section), (("R3",), fav, (A.FAVORITE,)), (("BACK",), music, (A.MUSIC,)),
+            return [(("A",), primary, (A.CONFIRM,)), (("START",), "Help", (A.MENU,)), (("X",), "Info", (A.ALT,)), (("Y",), "Search", (A.SEARCH,)),
+                    (("LB", "RB"), "Section", section),
+                    *favorite_hint, (("BACK",), music, (A.MUSIC,)),
                     *launcher, (("B",), *back)]
-        return [(("KEY:ENTER",), "Play", (A.CONFIRM,)), (("KEY:TAB",), "Info", (A.ALT,)), (("KEY:/",), "Search", (A.SEARCH,)),
-                (("KEY:LEFT", "KEY:RIGHT"), "Section", section), (("KEY:F3",), fav, (A.FAVORITE,)),
-                (("KEY:F2",), music, (A.MUSIC,)), *launcher, (("KEY:ESC",), *back)]
+        return [(("KEY:ENTER",), primary, (A.CONFIRM,)), (("KEY:F1",), "Help", (A.HELP,)), (("KEY:TAB",), "Info", (A.ALT,)),
+                (("KEY:/",), "Search", (A.SEARCH,)), (("KEY:LEFT", "KEY:RIGHT"), "Section", section),
+                (("KEY:F2",), music, (A.MUSIC,)),
+                *([] if category_selected else [(("KEY:F3",), fav, (A.FAVORITE,))]),
+                *launcher, (("KEY:ESC",), *back)]
 
     def _draw_footer(self) -> None:
         s = self.s
@@ -2203,15 +2406,25 @@ class App:
         self.screen.blit(band, (0, top))
 
         cy = top + self.footer_h // 2
+        hints = self._footer_hints()
+        available = self.w - 2 * self.margin
+        font_size = 23
+        prepared = []
+        while True:
+            font = self._font(font_size)
+            prepared = [(specs, label, actions, self.glyphs.row(specs), self._text(label, font, MUTED))
+                        for specs, label, actions in hints]
+            inner_gap = int(12 * s)
+            widths = [g.get_width() + inner_gap + label_surf.get_width() for _, _, _, g, label_surf in prepared]
+            gap = max(int(8 * s), min(int(26 * s), (available - sum(widths)) // max(1, len(widths) - 1)))
+            if sum(widths) + gap * max(0, len(widths) - 1) <= available or font_size <= 15:
+                break
+            font_size -= 1
         x = self.margin
-        font = self._font(23)
-        gap = int(38 * s)
-        for specs, label, actions in self._footer_hints():
+        for specs, label, actions, g, t in prepared:
             start = x
-            g = self.glyphs.row(specs)
             self.screen.blit(g, (x, cy - g.get_height() // 2))
-            x += g.get_width() + int(12 * s)
-            t = self._text(label, font, MUTED)
+            x += g.get_width() + inner_gap
             self.screen.blit(t, (x, self._text_top(font, cy)))
             x += t.get_width()
             whole = pygame.Rect(start - gap // 2, top, x - start + gap, self.footer_h)
@@ -2409,6 +2622,80 @@ class App:
             sub = sub.replace("{v}", str(info.get("version", "")))
             self.screen.blit(self._text(self._fit(sub, sub_font, inner), sub_font, DIM), (x, rect.y + int(52 * s)))
             y += row_h
+
+    def _help_rows(self, width: int) -> list[tuple[str, bool]]:
+        heading_font = self._font(16, bold=True)
+        body_font = self._font(21)
+        rows: list[tuple[str, bool]] = []
+        for heading, paragraph in HELP_SECTIONS:
+            rows.append((heading, True))
+            rows.extend((line, False) for line in self._wrap(paragraph, body_font, width, 100))
+            rows.append(("", False))
+        return rows
+
+    def _help_metrics(self) -> tuple[pygame.Rect, pygame.Rect, list[tuple[str, bool]], list[int], int]:
+        s = self.s
+        width = min(self.w - 2 * self.margin, int(1040 * s))
+        height = min(self.h - self.footer_h - int(2 * self.margin), int(720 * s))
+        box = pygame.Rect(0, 0, width, height)
+        box.center = (self.w // 2, (self.h - self.footer_h) // 2)
+        pad = int(38 * s)
+        head_h = int(158 * s)
+        body = pygame.Rect(box.x + pad, box.y + head_h, box.width - 2 * pad, box.height - head_h - pad)
+        rows = self._help_rows(body.width)
+        heights = [int((26 if is_head else 28 if text else 24) * s) for text, is_head in rows]
+        return box, body, rows, heights, sum(heights)
+
+    def _help_max_scroll(self) -> int:
+        if not hasattr(self, "s"):
+            return 0
+        _, body, _, _, total = self._help_metrics()
+        return max(0, total - body.height)
+
+    def _help_line_h(self) -> int:
+        return max(1, int(28 * self.s))
+
+    def _draw_help(self, now: float) -> None:
+        s = self.s
+        box, body, rows, heights, total = self._help_metrics()
+        t = _ease_out((now - self.info_opened) / 0.25) if self.info_opened else 1.0
+        shade = pygame.Surface((self.w, self.h - self.footer_h), pygame.SRCALPHA)
+        shade.fill((0, 0, 0, int(155 * t)))
+        self.screen.blit(shade, (0, 0))
+        panel = draw.rounded_rect(box.width, box.height, 18 * s, (*PANEL, 250), (78, 62, 55), 1.5 * s)
+        self.screen.blit(panel, box)
+        self.hits.append(Hit(shade.get_rect(), self._close_overlay))
+        self.hits.append(Hit(box, lambda: None))
+
+        x, y = box.x + int(38 * s), box.y + int(28 * s)
+        self.screen.blit(self._tracked("COUCHDOOM GUIDE", 16, self.theme.label, tracking=0.3), (x, y))
+        self.screen.blit(self._text("How to use CouchDoom", self._font(40, bold=True), TEXT), (x, y + int(28 * s)))
+        self.screen.blit(self._text("Finding games, picking favorites, and more", self._font(21), MUTED), (x, y + int(80 * s)))
+        report = self._tracked("HELP & FEEDBACK", 15, TEXT, tracking=0.2)
+        report_rect = pygame.Rect(box.right - int(38 * s) - report.get_width() - int(26 * s), y + int(78 * s), report.get_width() + int(26 * s), int(38 * s))
+        pygame.draw.rect(self.screen, self.theme.accent, report_rect, border_radius=int(8 * s))
+        self.screen.blit(report, (report_rect.centerx - report.get_width() // 2, report_rect.centery - report.get_height() // 2))
+        self.hits.append(Hit(report_rect, lambda: webbrowser.open(ISSUE_URL)))
+
+        old_clip = self.screen.get_clip()
+        self.screen.set_clip(body)
+        line_y = body.y - int(self.help_view)
+        for (text, is_head), row_h in zip(rows, heights):
+            if line_y + row_h >= body.y and line_y <= body.bottom:
+                if is_head:
+                    self.screen.blit(self._tracked(text, 15, self.theme.label, tracking=0.25), (body.x, line_y))
+                elif text:
+                    self.screen.blit(self._text(text, self._font(21), (206, 194, 178)), (body.x, line_y))
+            line_y += row_h
+        self.screen.set_clip(old_clip)
+        if total > body.height:
+            track_x = body.right + int(12 * s)
+            thumb_h = max(int(40 * s), int(body.height * body.height / total))
+            max_scroll = max(1, total - body.height)
+            thumb_y = body.y + int((body.height - thumb_h) * min(1.0, self.help_view / max_scroll))
+            self.screen.blit(draw.rounded_rect(max(2, int(4 * s)), body.height, 2 * s, (255, 255, 255, 18)), (track_x, body.y))
+            self.screen.blit(draw.rounded_rect(max(2, int(4 * s)), thumb_h, 2 * s, MUTED), (track_x, thumb_y))
+            self._scrollbar("help", pygame.Rect(track_x, body.y, max(2, int(4 * s)), body.height), thumb_h, max_scroll)
 
     def _draw_osk(self, now: float) -> None:
         s = self.s
@@ -2723,6 +3010,15 @@ class App:
                 self.info_view = self.info_scroll
             else:
                 self.info_view = _lerp(self.info_view, self.info_scroll, min(1.0, dt * 18))
+        elif self.mode == "help":
+            stick = max(self.input.right_y, self.input.left_y, key=abs) if now >= self.ignore_until else 0.0
+            if stick:
+                self.help_scroll += stick * abs(stick) * INFO_STICK_LINES_PER_SEC * self._help_line_h() * dt
+            self.help_scroll = max(0.0, min(self._help_max_scroll(), self.help_scroll))
+            if stick:
+                self.help_view = self.help_scroll
+            else:
+                self.help_view = _lerp(self.help_view, self.help_scroll, min(1.0, dt * 18))
         if self.rows:
             self.scroll = _lerp(self.scroll, self._target_scroll(), min(1.0, dt * 14))
             self.bar_y = _lerp(self.bar_y, self.row_y[self._sel_row()], min(1.0, dt * 20))

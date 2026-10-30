@@ -16,6 +16,8 @@ class Action(Enum):
     BACK = auto()
     SEARCH = auto()
     ALT = auto()  # X: info sheet / backspace in search
+    HELP = auto()
+    ISSUES = auto()
     PREV_SECTION = auto()
     NEXT_SECTION = auto()
     PAGE_UP = auto()
@@ -67,6 +69,8 @@ _JOY_BUTTONS = {
 }
 
 _KEYS = {
+    pygame.K_F1: Action.HELP,
+    pygame.K_F5: Action.ISSUES,
     pygame.K_UP: Action.UP,
     pygame.K_DOWN: Action.DOWN,
     pygame.K_LEFT: Action.LEFT,

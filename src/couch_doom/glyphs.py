@@ -54,6 +54,7 @@ _KEY_FILES = {
     "RIGHT": "keyboard_mouse/keyboard_arrow_right",
     "UP": "keyboard_mouse/keyboard_arrow_up",
     "DOWN": "keyboard_mouse/keyboard_arrow_down",
+    "F1": "keyboard_mouse/keyboard_f1",
     "F2": "keyboard_mouse/keyboard_f2",
     "F3": "keyboard_mouse/keyboard_f3",
     "F4": "keyboard_mouse/keyboard_f4",
