@@ -140,6 +140,8 @@ def test_self_paths_accepts_known_argv_names(monkeypatch, tmp_path):
 
 def _drop_app(calls, *, launchers=True, add_result=None):
     app = ui.App.__new__(ui.App)
+    app.state = SimpleNamespace(menu_sounds=True)
+    app.quit_at = None
     app.launchers = SimpleNamespace(add=lambda path: add_result) if launchers else None
     app.theme = SimpleNamespace(label=(255, 100, 20))
     app.sfx = SimpleNamespace(play=lambda name: calls.append(("sound", name)))
@@ -220,6 +222,7 @@ def test_browser_confirmation_keeps_place_when_self_is_selected(monkeypatch, tmp
     app.browser_scroll = 0
     app.mode = "browse"
     app.sfx = SimpleNamespace(play=lambda _name: None)
+    app.state = SimpleNamespace(menu_sounds=True)
     app.theme = SimpleNamespace(label=(255, 100, 20))
     app.launchers = SimpleNamespace(add=lambda _path: (_ for _ in ()).throw(AssertionError("launcher detection")))
     monkeypatch.setattr(ui.easter_eggs, "react_to_pick", lambda path: easter_eggs.Reaction("Doomception!"))

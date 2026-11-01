@@ -1,123 +1,53 @@
-# Main Menu, Play History, Navigation, and Color Options Implementation Plan
+# Menu, Navigation, and Color Plan
 
-> **For agentic workers:** Implement this plan inline in small reviewable steps. The plan follows the creator's direction in GitHub issues #5, #6, and #10 and the follow-up discussion in this session.
+**Status:** Menu and navigation changes are implemented. Follow-up performance fixes are complete and tested; this plan and handoff are being refreshed for the next thread. Recent-played group and color review remain open. The earlier menu/browser baseline is `7eadf9f` (`feat(ui): add menu and improve file browser navigation`).
 
-**Goal:** Explore a compact, controller-friendly menu for common actions, finer automatic color detection, and a small set of optional per-preset color overrides.
+## Goal
 
-**Architecture:** Extend the existing UI mode/overlay flow rather than introducing a separate settings framework. Reuse the saved local state file for the recent-group toggle and limited per-preset color overrides; keep launcher configuration read-only. Keep Home/End as direct list navigation actions. Increase hue resolution in the existing title-art theme algorithm while retaining automatic color as the default and the current contrast ladder.
+Keep CouchDoom's direct game-list flow while adding the creator-requested menu and improving keyboard/controller file navigation. Consider more nuanced automatic art colors and a small set of manual color controls without duplicating existing metadata behavior or expanding the UI unnecessarily.
 
-**Tech Stack:** Python 3.11+, pygame, existing `State` JSON persistence, existing `UI` action/mode/drawing architecture, pytest project tests, local interactive build.
+## Completed
 
-**Spec:** Creator direction and GitHub issues [#5](https://github.com/KrisEnigma/couch-doom/issues/5), [#6](https://github.com/KrisEnigma/couch-doom/issues/6), [#10](https://github.com/KrisEnigma/couch-doom/issues/10); issue [#7](https://github.com/KrisEnigma/couch-doom/issues/7) motivates an optional recent-played group.
+- Added an overlay menu opened with Escape or controller Start. Its first selected option returns to the list. It includes refresh, title music, menu sounds, launcher selection when available, Help, and Quit.
+- Refresh leaves the menu open and shows a temporary inline confirmation. Music and menu sound settings are separate and toggle with either Left or Right. Removed the no-longer-needed F2 and launcher shortcuts.
+- Menu Quit exits without another confirmation and uses Doom's player-death sound (`DSPLDETH`) from the selected IWAD, trying a bundled fallback when one is available.
+- Kept F1/Back/View as Help shortcuts. B does nothing on the main selector and backs out of open panels. Help & Feedback remains reachable from Help rather than as a separate menu item.
+- Added Home/End list navigation and updated the main-list footer hint order.
+- Improved the launcher browser: distinct drive/home chooser and drive contents, parent/location rows, non-wrapping Page Up/Down and Left/Right page navigation, Home/End, non-wrapping wheel scrolling, a styled draggable scrollbar, and click-only row selection. Escape closes the browser.
+- Removed redundant “Select to load” text in the launcher picker. Updated README guidance.
+- Creator has manually reviewed and steered the menu/browser iterations. The original menu/browser baseline is commit `7eadf9f`.
+- Reduced selection hitches in the 105-preset local launcher: art, theme, and logo rendering stay off the UI thread; logos are prepared independently and appear without first flashing the text fallback; long detail text layout is cached and bounded; music preparation starts only after a 0.65-second selection dwell and its file/cache identity work and stream pruning run off-thread at lower priority.
+- Added regression coverage for dwell timing, asynchronous music identity/pruning, art/logo job ordering and title fallback, long-text layout, theme/cache behavior, and background worker priority.
+- Replayed the complete local list down and back up at both 0.5-second and 0.2-second press intervals (231 presses each). The dummy-display runs recorded no frame intervals over 50 ms. These runs exercise the application loop but do not replace a hardware/fullscreen check.
+- Reviewed and refreshed tests that had become stale against current behavior: incomplete app fixtures, current menu/controller bindings, browser parent rows and startup-root semantics, and the optional IWAD quit sound (there is no bundled `DSPLDETH` asset). Full suite: **125 passed, 2 skipped**.
 
-## Global Constraints
+## Remaining Work
 
-- Keep launcher settings read-only; CouchDoom preferences belong in its existing `last_played.json` state file.
-- Keep colors automatic and art-derived by default. Offer only a small curated set of manual per-preset overrides; do not expose arbitrary RGB input or every automatic hue bucket as a manual option.
-- Keep menu actions usable by keyboard, controller, and mouse, following existing overlay patterns.
-- Do not add dependencies or change launch behavior.
-- Treat the UI as an experiment: locally inspect it and narrow or roll back menu/palette scope if it makes the list flow worse.
-- Add focused regression tests for state persistence, recent-group construction, palette selection, and list navigation; run relevant tests and perform a local keyboard/controller interaction review.
+### 1. Verify the latest browser behavior on Windows
 
----
+- Manually check the browser on Windows, especially drive-root versus “Drives & Home” navigation, parent-folder behavior, and scrollbar dragging.
+- Check Page Up/Down and Left/Right advance exactly one visible page, stop at both ends, and keep the selection visible. Check Home/End and mouse wheel do not wrap.
+- Automated browser tests now reflect the separate root chooser and parent-directory row. Manual checks for drive-root navigation, page-sized movement, scrollbar dragging, and non-wrapping endpoints remain useful.
 
-## Code Map
+### 2. Revisit the color request against the actual code
 
-- `src/couch_doom/theme.py`: maps title-art hue to the current theme. There are currently 36 hue buckets; label/accent/background saturation and lightness are fixed, and warm red/orange art uses `HOUSE`.
-- `src/couch_doom/ui.py`: owns the `mode` overlay dispatch, keyboard/controller actions, section list construction, theme transitions, footer hints, and overlay drawing. `_reload()` already refreshes source data and `_apply()` resets dependent caches and list state.
-- `src/couch_doom/gamepad.py`: translates physical keys to semantic `Action`s. F5 currently means `ISSUES`; F1 and controller Back/View mean `HELP`; Escape and controller B mean `BACK`; controller Start means `MUSIC`; PgUp/PgDn are list paging.
-- `src/couch_doom/state.py`: persists `last_played`, unique recent `history` (up to 10), favorites, music, and preferences in `last_played.json`.
-- `README.md`: documents current controls and art-driven experience.
-- `tests/test_ui_features.py`, `tests/test_issue_fixes.py`, `tests/test_config.py`: existing test locations to inspect for relevant fixtures and behavior.
+- `src/couch_doom/theme.py` groups vivid pixels into 72 five-degree hue bins, then derives theme colors from the weighted mean hue inside the dominant bin. The warm house fallback now covers hues within 8 degrees of its red center; low-color art still uses the fallback. Four focused tests pass. The saved launcher has 105 presets with title art and no load failures: the 8-degree range yields 53 house fallbacks and 41 distinct visual themes, compared with 67 and 30 at the original 22-degree range. Hands-on UI review is still useful.
+- Fixed raw asset cache serialization for ENDOOM bytes; 37 of the creator's 105 presets include ENDOOM. The local scan now finds cache entries for all presets. Bounded rendered theme caches to 48 entries, enough for the current 41 visual themes. Reworked background generation to expand a one-pixel gradient strip; sampled output pixels match the prior renderer. App-path profiling found three completed art jobs could be processed in one UI frame (~30 ms), so `_update_art` now prioritizes the selected preset and processes at most one surface per frame. In the dummy display run this split into ~10–12 ms per frame; manual hardware review remains necessary.
+- Found the persistent slowdown in the Hell Revealed 2 detail panel: its 403-character byline made `_fit` measure and trim one character at a time, costing about 145 ms on every draw. `_fit` now binary-searches the fitting prefix. The detail panel measures about 5.5 ms, and warmed 2048x1152 dummy-display frames measure 8.9 ms for Hell Revealed 2 versus 8.0 ms for Doom II. Manual hardware review remains necessary.
+- The creator clarified that the request is for more buckets in **automatic color detection**, not a larger manual palette. Keep any existing color controls limited; inspect the current metadata/color behavior first so we do not duplicate functionality or misread the code.
+- The code inspection found no manual color setting or metadata color field. Keep changes easy to roll back if the finer distinctions add noise rather than value.
+- Do not add arbitrary RGB controls or an expansive manual palette. Preserve existing color controls unless code review shows they are redundant; any additions should stay curated and small.
 
-## Proposed interaction decisions
+### 3. Add the optional last-played group
 
-- In the main selector, Escape or controller Start opens a compact menu. Controller B does nothing on the main selector for now; it does not open the menu or quit. Preserve B/Escape back behavior inside existing overlays and search. The menu has Back to games, Refresh list, Recent games (on/off), Title music (on/off), Colors for this preset, Help & Feedback, and Quit. Back to games is the default selected row and simply closes the menu. Quit from the deliberately opened menu exits immediately without a second confirmation.
-- Help remains directly available through F1 and controller Back/View, and is also listed in the menu. Do not repurpose F1 or controller Back/View as menu triggers. Menu Back/Escape returns to the list.
-- Refresh calls existing `_reload()`. It is enabled only when reload is available; preserve the current blocked-screen reload behavior.
-- Recent games is an optional synthetic group built from `State.history`, ordered newest first, limited by existing history length, and filtered to names present in current launcher data. It is off by default. Reuse existing category-row and collapse behavior; don't introduce a second history store or frequency counts.
-- Automatic color remains the default. Increase the current 36 hue buckets to finer resolution (initial proposal: 72 buckets, five degrees each), preserving the existing saturation/lightness contrast ladder and warm red/orange `HOUSE` treatment unless local inspection shows that boundary also needs adjustment. Also offer a small curated override set for the selected preset (initial proposal: Automatic, Warm, Gold, Green, Blue, Violet). Persist overrides per preset, scoped by launcher source, settings path, and preset name. Automatic removes that preset's override and returns to art-derived color.
-- Home and End select the first/last selectable row in the current visible list, including headers, matching existing row navigation. They keep selection visible. In search mode, retain text-editing semantics; in other overlays, retain existing behavior unless a screen already uses these keys for navigation.
+- This was part of the creator's original menu direction but is not in the current menu. `State.history` already records recent presets (up to 10).
+- If proceeding, add a small on/off setting and synthetic group using that existing history, with stale names filtered against the active launcher data. Reuse current category behavior and avoid play counts or a second history store.
+- Implement as a separate, locally reviewable change so the creator can try it and roll it back if it clutters the list.
 
-## Task 1: Add Home/End actions
+## Working Style / Scope
 
-**Files:**
-- Modify: `src/couch_doom/gamepad.py`
-- Modify: `src/couch_doom/ui.py`
-- Modify: `tests/test_ui_features.py`
-
-- [ ] Add semantic `HOME` and `END` actions and map `pygame.K_HOME` / `pygame.K_END`.
-- [ ] Route the actions in list mode to a row-selection helper targeting the first/last visible row; preserve existing row selection and scroll invariants.
-- [ ] Do not add footer hints; these are conventional keyboard affordances.
-- [ ] Preserve search editing and overlay scrolling semantics.
-- [ ] Add focused tests for first/last row selection, including collapsed headers and an active filter.
-
-## Task 2: Add recent-group preference and row source
-
-**Files:**
-- Modify: `src/couch_doom/state.py`
-- Modify: `src/couch_doom/ui.py`
-- Modify: `tests/test_config.py`
-- Modify: `tests/test_ui_features.py`
-
-- [ ] Add backward-compatible boolean state preference `recent_group`, default `False`; load missing/invalid values safely and save alongside existing preferences.
-- [ ] When enabled, build a `Recently Played` category from `history`, retaining only current preset names and deduplicating names. Place it after Favorites and before normal sections.
-- [ ] Use existing category rows, detail preview, collapse, selection, and search logic. Search matching includes recent preset names; selecting a duplicate preset row still refers to the same preset identity.
-- [ ] Keep favorites and recent history distinct; do not add play counts or change history policy.
-- [ ] Add focused tests for old state files, persistence, filtering stale history from another launcher, and recent group ordering.
-
-## Task 3: Add menu overlay and consolidate selected actions
-
-**Files:**
-- Modify: `src/couch_doom/gamepad.py`
-- Modify: `src/couch_doom/ui.py`
-- Modify: `README.md`
-- Modify: `tests/test_ui_features.py`
-
-- [ ] Add a distinct menu action for Escape and controller Start. In the main list it opens the menu; controller B (`BACK`) has no main-list action. Preserve Escape/B behavior inside search, info, launcher picker, file browser, and update overlay. Keep `HELP` (F1 and controller Back/View) opening Help directly.
-- [ ] Add menu UI mode with selected-row state and an overlay matching existing launcher/update overlay interaction and visuals.
-- [ ] Add Back to games, Refresh list, Recent games toggle, Title music toggle, Colors for this preset, Help & Feedback, and Quit entries. Select Back to games by default. Omit or disable Refresh when no reload callback exists; reflect toggle state in its label/check mark.
-- [ ] Implement Back to games as plain overlay close; Refresh through `_reload()`; Recent games by saving preference and rebuilding rows while preserving current preset when possible; Music through `_toggle_music()`; Help by opening existing Help mode; Feedback by opening the existing issue URL; Quit by setting `running = False` directly without a second confirmation.
-- [ ] Menu confirmation executes the selected action; up/down moves selection; mouse clicks use the existing `Hit` model. Start/Escape closes the menu; B may close it as an overlay back action. Clicking the shaded backdrop does not trigger an action.
-- [ ] Keep F2 as direct keyboard music toggle if useful; controller Start becomes menu, so music remains accessible as a menu action and via F2. Remove stale controller Start/music hint.
-- [ ] Update footer hints and README controls to describe Escape/Start opening the menu, F1/Back/View opening Help directly, B doing nothing on the main selector, and Home/End navigation.
-- [ ] Add focused input/action tests for menu open/close, default selection, each action callback, direct Quit, and unchanged B behavior on the main list.
-
-## Task 4: Increase automatic theme hue resolution
-
-**Files:**
-- Modify: `src/couch_doom/theme.py`
-- Modify: `src/couch_doom/state.py`
-- Modify: `src/couch_doom/ui.py`
-- Modify: `tests/test_theme.py`
-- Modify: `tests/test_config.py`
-- Modify: `tests/test_ui_features.py`
-
-- [ ] Increase `HUE_STEPS` from 36 to 72, making hue buckets five degrees wide while retaining the automatic `from_art()` flow.
-- [ ] Keep the existing saturation/lightness ladder, `HOUSE` fallback, and theme fade/cache architecture unless visual inspection reveals a specific issue.
-- [ ] Add focused tests that confirm art samples falling in separate five-degree buckets yield distinct theme keys, achromatic art still selects `HOUSE`, and hues in the warm house range retain current behavior.
-- [ ] Inspect the 72-bucket result across representative title art to ensure finer hue differences feel intentional and not noisy; adjust bucket count only if visual review supports it.
-- [ ] Define a compact manual palette registry (Automatic, Warm, Gold, Green, Blue, Violet) using stable keys and the existing contrast ladder. Keep this list intentionally smaller than the automatic hue resolution; no custom RGB picker.
-- [ ] Persist selected-preset color overrides keyed by launcher source, settings path, and preset name. Invalid keys and malformed state entries fall back to Automatic without affecting startup.
-- [ ] Add a Colors submenu for the currently selected preset. Selecting a manual palette updates the active theme immediately and persists it; selecting Automatic removes that preset's override. Other presets continue to use their own override or automatic art-derived hue.
-- [ ] Add focused tests for override persistence, same-name preset isolation, and restoring Automatic; keep the override set small enough to review directly without paging.
-
-## Task 5: Local product review and scope gate
-
-**Files:**
-- Modify only if findings warrant: `src/couch_doom/ui.py`, `src/couch_doom/theme.py`, `README.md`
-
-- [ ] Launch locally at couch distance and use keyboard, controller, and mouse. Judge whether Escape/Start menu entry is discoverable, Back to games is an obvious first option, actions are quick to reach, and the current list flow still feels direct.
-- [ ] Check that B is inert on the main selector while still backing out of overlays, and that quitting from the menu exits immediately as requested.
-- [ ] Inspect automatic hues on bright, dark, monochrome, and warm/red art; verify text, selection, and toast contrast and confirm achromatic art still uses the house theme. Try each manual override on several presets and confirm Automatic restores the art tint.
-- [ ] If the menu feels busy, remove duplicate entry points or the optional Recent games item first. If 72 hue buckets produce distinctions too subtle to matter, adjust the resolution based on hands-on use. Keep manual choices curated and few rather than exposing all hue buckets.
-- [ ] Keep changes easy to revert as a cohesive feature set; no launcher config migration is needed.
-
-## Self-review
-
-- Issue #5 is addressed with finer automatic hue detection plus a small, reversible per-preset override set; automatic art-derived color remains the default.
-- Issue #6 is covered by unhinted Home/End list navigation.
-- Issue #7 is addressed narrowly as an opt-in recent group using existing history; most-played counts are excluded.
-- Issue #10 uses the existing reload path.
-- Menu triggers follow creator direction: Escape and Start open it; F1/Back/View remain Help shortcuts; B has no main-selector action. The first menu selection returns to the game list, and intentional Quit is immediate.
-- No implementation changes are part of this plan-editing turn.
+- The creator is open to experimentation and local rollback. Be selective with public-user feature requests, but take creator-directed ideas seriously and finish the requested change before asking for manual review.
+- Work one feature at a time and return the app for hands-on testing between features.
+- Read the current implementation before proposing or changing behavior; metadata is already possible in relevant parts of the app, so verify exact capabilities instead of assuming they are absent.
+- Do not add unrelated polish or broad settings frameworks. Prefer existing navigation, persistence, and drawing helpers.
+- No tests were run for the changes in commit `7eadf9f`; `git diff --check` passed before commit. Do not claim broader verification.

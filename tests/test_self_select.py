@@ -22,6 +22,8 @@ def test_self_selection_shows_toast_and_skips_launcher_detection(monkeypatch, tm
     executable = tmp_path / "CouchDoom"
     calls = []
     app = ui.App.__new__(ui.App)
+    app.state = SimpleNamespace(menu_sounds=True)
+    app.quit_at = None
     app.launchers = SimpleNamespace(add=lambda _path: calls.append("launcher") or None)
     app.theme = SimpleNamespace(label=(255, 100, 20))
     app.sfx = SimpleNamespace(play=lambda name: calls.append(name))
@@ -39,6 +41,7 @@ def test_packaged_executable_is_listed_in_default_browser_filter(monkeypatch, tm
     executable = tmp_path / "CouchDoom"
     executable.touch()
     app = ui.App.__new__(ui.App)
+    app.state = SimpleNamespace(menu_sounds=True)
     app.browser_scroll = 0
     app.mode = "launcher"
     app.sfx = None
@@ -55,12 +58,14 @@ def test_open_browser_starts_at_self_location(monkeypatch, tmp_path):
     monkeypatch.setattr(ui.config, "self_location", lambda: install)
     monkeypatch.setattr(ui.easter_eggs, "self_paths", lambda: set())
     app = ui.App.__new__(ui.App)
+    app.state = SimpleNamespace(menu_sounds=True)
     app.sfx = None
 
     app._open_browser()
 
     assert app.file_browser.directory == install
-    assert app.file_browser.roots[0] == install
+    assert install not in app.file_browser.roots
+    assert app.file_browser.roots[0] == Path.home()
     assert Path.home() in app.file_browser.roots
 
 
@@ -72,6 +77,7 @@ def test_open_browser_starts_at_source_project_when_not_packaged(monkeypatch, tm
     monkeypatch.setattr(ui.config, "PROJECT_ROOT", project)
     monkeypatch.setattr(ui.easter_eggs, "self_paths", lambda: set())
     app = ui.App.__new__(ui.App)
+    app.state = SimpleNamespace(menu_sounds=True)
     app.sfx = None
 
     app._open_browser()
@@ -84,6 +90,7 @@ def test_open_browser_falls_back_to_home_without_self_location(monkeypatch):
     monkeypatch.setattr(ui.config, "SOURCE_TREE", False)
     monkeypatch.setattr(ui.easter_eggs, "self_paths", lambda: set())
     app = ui.App.__new__(ui.App)
+    app.state = SimpleNamespace(menu_sounds=True)
     app.sfx = None
 
     app._open_browser()
@@ -97,6 +104,7 @@ def test_open_browser_lists_its_own_executable_without_a_name_filter(monkeypatch
     monkeypatch.setattr(ui.config, "self_location", lambda: tmp_path)
     monkeypatch.setattr(ui.easter_eggs, "self_paths", lambda: {executable.resolve()})
     app = ui.App.__new__(ui.App)
+    app.state = SimpleNamespace(menu_sounds=True)
     app.sfx = None
 
     app._open_browser()
@@ -116,6 +124,7 @@ def test_open_browser_uses_executable_name_for_all_matching_files(monkeypatch, t
     monkeypatch.setattr(ui.config, "SOURCE_TREE", False)
     monkeypatch.setattr(ui.easter_eggs, "self_paths", lambda: {install_exe.resolve()})
     app = ui.App.__new__(ui.App)
+    app.state = SimpleNamespace(menu_sounds=True)
     app.sfx = None
 
     app._open_browser()
@@ -131,6 +140,7 @@ def test_open_browser_always_lists_couchdoom_executable_name(monkeypatch, tmp_pa
     monkeypatch.setattr(ui.config, "self_location", lambda: tmp_path)
     monkeypatch.setattr(ui.easter_eggs, "self_paths", lambda: set())
     app = ui.App.__new__(ui.App)
+    app.state = SimpleNamespace(menu_sounds=True)
     app.sfx = None
 
     app._open_browser()

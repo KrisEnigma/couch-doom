@@ -54,7 +54,13 @@ def test_bundled_freedoom_menu_sounds_load_without_iwad(monkeypatch):
         def play(self):
             pass
 
-    monkeypatch.setattr(sfx.pygame.mixer, "Sound", lambda file: requested.append(file) or FakeSound())
+    def load_sound(file):
+        if not isinstance(file, Path) or not file.is_file():
+            raise OSError("bundled sound is missing")
+        requested.append(file)
+        return FakeSound()
+
+    monkeypatch.setattr(sfx.pygame.mixer, "Sound", load_sound)
     result = Sfx(options(), SimpleNamespace(play=lambda _sound: None))
 
     assert set(result.sounds) == {"move", "confirm", "open", "close", "error", "secret"}
@@ -101,8 +107,12 @@ def test_easter_egg_sound_uses_powerup_pickup_then_bundled(monkeypatch, tmp_path
     else:
         lumps["DSITMBK"] = dmx(3)
     monkeypatch.setattr(sfx, "open_archive", lambda _path: FakeWad(lumps))
-    monkeypatch.setattr(sfx.pygame.mixer, "Sound", lambda file: loaded.append(file) or FakeSound(
-        file.getvalue() if hasattr(file, "getvalue") else file.read_bytes()))
+    def load_sound(file):
+        data = file.getvalue() if hasattr(file, "getvalue") else file.read_bytes()
+        loaded.append(file)
+        return FakeSound(data)
+
+    monkeypatch.setattr(sfx.pygame.mixer, "Sound", load_sound)
 
     result = Sfx(options(iwad), SimpleNamespace(play=lambda _sound: None))
 

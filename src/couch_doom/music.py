@@ -25,6 +25,7 @@ from pathlib import Path
 import pygame
 
 from .archive import ArchiveSource, Archives
+from .background import lower_current_thread_priority
 from .config import DATA_DIR, PROJECT_ROOT, home, xdg
 from .options import Engine
 
@@ -61,7 +62,8 @@ VOLUME = 0.55  # streamed tracks (OGG, MP3, ...) play as mastered, at this level
 MIDI_LOUDNESS_DB = -23.0
 PEAK_TARGET = 0.9  # never louder than this, so nothing clips
 # Just long enough to skip presets flown past while holding a direction (repeat is 70 ms).
-DWELL_SECONDS = 0.12
+# Avoid starting title-track preparation while the player is moving through the list.
+DWELL_SECONDS = 0.65
 FADE_IN_MS = 500
 FADE_OUT_MS = 700
 CACHE_BYTES = 24 * 1024 * 1024  # rendered MIDI PCM; encoded streams live in the persistent disk cache
@@ -437,6 +439,7 @@ class MidiRenderer:
     def render(self, midi: bytes, cancel: threading.Event) -> tuple[bytes, float, float] | None:
         """Float32 stereo PCM plus its peak and RMS. The synth's float output isn't clipped, so the
         caller can normalize with channel volume (SDL scales before it clamps)."""
+        lower_current_thread_priority()
         from tinysoundfont import Sequencer, midi as tsf_midi
         from . import log
 
@@ -477,8 +480,7 @@ class MidiRenderer:
             for i in range(fade):
                 samples[start + i] *= 1.0 - i / fade
             out = samples.tobytes()
-        peak = max(max(samples, default=0.0), -min(samples, default=0.0))
-        rms = math.sqrt(sum(x * x for x in samples) / len(samples)) if samples else 0.0
+        peak, rms = _pcm_stats(samples)
         return bytes(out), peak, rms
 
 
@@ -498,6 +500,21 @@ def midi_volume(peak: float, rms: float) -> float:
     if peak <= 0 or rms <= 0:
         return VOLUME
     return min(1.0, 10 ** (MIDI_LOUDNESS_DB / 20) / rms, PEAK_TARGET / peak)
+
+
+def _pcm_stats(samples: array, chunk_size: int = 16_384) -> tuple[float, float]:
+    """Measure float PCM in bounded chunks so MIDI analysis yields to the UI thread."""
+    peak = 0.0
+    squares = 0.0
+    count = len(samples)
+    for start in range(0, count, chunk_size):
+        for sample in samples[start : start + chunk_size]:
+            value = float(sample)
+            peak = max(peak, abs(value))
+            squares += value * value
+        time.sleep(0)  # give foreground Python threads a chance to run
+    rms = math.sqrt(squares / count) if count else 0.0
+    return peak, rms
 
 
 def _prepare(
@@ -544,6 +561,8 @@ def _prepare(
     if track is None:
         log.write("music: track search", f"iwad: {iwad}\nfiles: {[str(f) for f in files]}\nresult: no title music lump found")
         return None
+
+
     if cancel.is_set():
         return None
     if track.kind == "midi" and track.midi_data is None:
@@ -599,6 +618,21 @@ def _prepare(
         return None
 
 
+def _prepare_preset(
+    preset, renderer: MidiRenderer | None, cancel: threading.Event, ready: dict[str, Prepared],
+    protected_streams: set[Path] | None = None,
+) -> Prepared | None:
+    """Resolve a preset's files and cache identity on the music worker, not the UI thread."""
+    lower_current_thread_priority()
+    from . import asset_cache, music_cache
+    from .launch import load_order, presented_files
+
+    iwad, files = presented_files(preset)
+    asset_key = asset_cache.key_for(preset, iwad, load_order(preset))
+    selection_key = music_cache.selection_key(asset_key, iwad, list(files))
+    return _prepare(iwad, list(files), renderer, cancel, ready, selection_key, protected_streams)
+
+
 class MusicPlayer:
     """One preset's title track at a time, crossfading on change.
 
@@ -646,6 +680,7 @@ class MusicPlayer:
         self.streaming = False
         self.stream_path: Path | None = None
         self._prune_needed = False
+        self.prune_job: Future | None = None
 
     def request(
         self, key: object, iwad: Path | None = None, files: list[Path] | None = None,
@@ -660,7 +695,7 @@ class MusicPlayer:
             self.stop()
             return
         soundfont = soundfont or self.soundfont
-        ident = (iwad, tuple(files or ()), soundfont)
+        ident = (key, soundfont) if preset is not None else (iwad, tuple(files or ()), soundfont)
         if ident in self.tracks:
             sig = self.tracks[ident]
             if sig is not None and sig == self.playing and self._audible():
@@ -678,15 +713,12 @@ class MusicPlayer:
             renderer = self.renderers.get(soundfont)
             if renderer is None:
                 renderer = self.renderers[soundfont] = MidiRenderer(soundfont)
-        selection_key = None
-        if preset is not None:
-            from . import asset_cache, music_cache
-            from .launch import load_order
-            asset_key = asset_cache.key_for(preset, iwad, load_order(preset))
-            selection_key = music_cache.selection_key(asset_key, iwad, list(files or ()))
         protected = {self.stream_path} if self.stream_path is not None else set()
-        future = self.pool.submit(_prepare, iwad, list(files or ()), renderer, cancel, dict(self.cache),
-                                  selection_key, protected)
+        if preset is not None:
+            future = self.pool.submit(_prepare_preset, preset, renderer, cancel, dict(self.cache), protected)
+        else:
+            future = self.pool.submit(_prepare, iwad, list(files or ()), renderer, cancel, dict(self.cache),
+                                      None, protected)
         self.job = (key, ident, future, cancel)
 
     def _cancel(self) -> None:
@@ -723,6 +755,8 @@ class MusicPlayer:
             self.streaming = False
 
     def update(self) -> None:
+        if self.prune_job and self.prune_job.done():
+            self.prune_job = None
         if self.job and self.job[2].done():
             key, ident, future, _ = self.job
             self.job = None
@@ -741,7 +775,7 @@ class MusicPlayer:
             self._start()
         self._release_stream_if_idle()
         if self._prune_needed and self.job is None:
-            self._prune_stream_cache()
+            self._schedule_stream_prune()
             self._prune_needed = False
 
     def _start(self) -> None:
@@ -778,9 +812,6 @@ class MusicPlayer:
             import traceback
             log.write("music: playback error", f"Error playing {prepared.kind}:\n{traceback.format_exc()}")
         self.pending = None
-        if self._prune_needed:
-            self._prune_stream_cache()
-            self._prune_needed = False
 
     def _protected_stream_paths(self) -> set[Path]:
         paths = {self.stream_path} if self.stream_path is not None else set()
@@ -807,6 +838,12 @@ class MusicPlayer:
             music_cache.prune(self._protected_stream_paths())
         except Exception:
             pass
+
+    def _schedule_stream_prune(self) -> None:
+        if self.prune_job and not self.prune_job.done():
+            return
+        from . import music_cache
+        self.prune_job = self.pool.submit(music_cache.prune, self._protected_stream_paths())
 
     def shutdown(self) -> None:
         self.stop(0)

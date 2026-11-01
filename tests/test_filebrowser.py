@@ -55,19 +55,20 @@ def test_selection_wraps_at_both_ends(tmp_path):
     for name in ("a", "b", "c"):
         (tmp_path / name).mkdir()
     browser = Browser(tmp_path, candidates=[tmp_path])
+    last = len(browser.entries) - 1
 
     browser.move(-1)
-    assert browser.selected == 2
+    assert browser.selected == last
     browser.move(1)
     assert browser.selected == 0
     browser.move(5)
-    assert browser.selected == 2
+    assert browser.selected == 5 % len(browser.entries)
     browser.selected = 0
     browser.move(-1, wrap=False)
     assert browser.selected == 0
-    browser.selected = 2
+    browser.selected = last
     browser.move(1, wrap=False)
-    assert browser.selected == 2
+    assert browser.selected == last
 
 
 def test_macos_app_bundle_is_selectable_as_a_file(tmp_path):
@@ -77,10 +78,10 @@ def test_macos_app_bundle_is_selectable_as_a_file(tmp_path):
     executable.touch()
     browser = Browser(tmp_path, candidates=[tmp_path], suffixes=(".app",), app_bundles=True)
 
-    assert len(browser.entries) == 1
-    assert browser.entries[0].path == bundle
-    assert browser.entries[0].is_dir is False
-    assert browser.entries[0].display_name == "GZDoom.app"
+    app_entry = next(entry for entry in browser.entries if entry.path == bundle)
+    assert app_entry.is_dir is False
+    assert app_entry.display_name == "GZDoom.app"
+    browser.selected = browser.entries.index(app_entry)
     assert browser.open_selected() == bundle
 
     from couch_doom.sources import identify
@@ -112,7 +113,7 @@ def test_roots_put_home_first_and_deduplicate(tmp_path):
     assert roots(tmp_path, candidates=[tmp_path, Path("/")]) == [tmp_path, Path("/")]
 
 
-def test_browser_can_start_in_a_separate_folder_without_losing_home(tmp_path):
+def test_browser_can_start_in_a_separate_folder_without_adding_it_to_root_chooser(tmp_path):
     home = tmp_path / "home"
     start = tmp_path / "install"
     home.mkdir()
@@ -120,7 +121,8 @@ def test_browser_can_start_in_a_separate_folder_without_losing_home(tmp_path):
     browser = Browser(home, candidates=[Path("/")], start=start)
 
     assert browser.directory == start
-    assert browser.roots[0] == start
+    assert browser.roots == [home, Path("/")]
+    assert not browser.selecting_root
     assert home in browser.roots
 
 
@@ -146,12 +148,14 @@ def test_browser_enters_directories_selects_files_and_returns_to_parent(tmp_path
     (child / "doomrunner.exe").touch()
     browser = Browser(tmp_path, candidates=[tmp_path], names={"doomrunner.exe"})
 
+    browser.selected = next(i for i, entry in enumerate(browser.entries) if entry.path == child)
     assert browser.open_selected() is None
     assert browser.directory == child
+    browser.selected = next(i for i, entry in enumerate(browser.entries) if entry.path == child / "doomrunner.exe")
     assert browser.open_selected() == child / "doomrunner.exe"
     assert browser.back()
     assert browser.directory == tmp_path
-    assert browser.selected == 0
+    assert browser.entries[browser.selected].path == child
 
 
 def test_browser_toggle_all_resets_selection_and_change_root_clamps(tmp_path):
@@ -162,7 +166,7 @@ def test_browser_toggle_all_resets_selection_and_change_root_clamps(tmp_path):
     browser = Browser(home, candidates=[other], names={"launcher.exe"})
 
     browser.toggle_all()
-    assert [entry.path.name for entry in browser.entries] == ["notes.txt"]
+    assert [entry.path.name for entry in browser.entries if not entry.parent_selector] == ["notes.txt"]
     browser.change_root(1)
     assert browser.directory == other
     browser.change_root(1)

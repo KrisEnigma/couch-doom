@@ -95,7 +95,7 @@ def _endoom_to_dict(e: Endoom | None) -> dict[str, Any] | None:
     if e is None:
         return None
     d = asdict(e)
-    # cells might contain tuples
+    d["data"] = base64.b64encode(d["data"]).decode("ascii")
     return d
 
 
@@ -103,9 +103,8 @@ def _endoom_from_dict(d: dict[str, Any] | None) -> Endoom | None:
     if d is None:
         return None
     try:
-        # cells are list of tuples
-        if "cells" in d and isinstance(d["cells"], list):
-            d["cells"] = [tuple(c) for c in d["cells"]]
+        if "data" in d and isinstance(d["data"], str):
+            d["data"] = base64.b64decode(d["data"])
         return Endoom(**d)
     except Exception:
         return None

@@ -13,6 +13,7 @@ import webbrowser
 from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 
@@ -24,6 +25,7 @@ from . import self_update
 from . import config
 from .config import ASSET_DIR
 from . import handover, asset_cache
+from .background import lower_current_thread_priority
 from .filebrowser import Browser as FileBrowser
 from .gamepad import Action, Input
 from .glyphs import BUTTON_NAMES, Glyphs
@@ -64,6 +66,7 @@ WINDOW_RETRIES = 20  # half a second apart
 INPUT_COOLDOWN = 0.45
 ART_FADE_SECONDS = 0.45
 ART_CACHE_SIZE = 24
+THEME_CACHE_SIZE = 48
 ART_MIN_FILL = 0.62  # of the art panel's height
 ART_MAX_ZOOM = 1.25
 FAVORITES = "Favorites"
@@ -132,6 +135,17 @@ class Hit:
 
 def _lerp(a: float, b: float, k: float) -> float:
     return a + (b - a) * k
+
+
+def _theme_cache(cache: OrderedDict, key: int, create: Callable):
+    if key in cache:
+        cache.move_to_end(key)
+        return cache[key]
+    value = create()
+    cache[key] = value
+    while len(cache) > THEME_CACHE_SIZE:
+        cache.popitem(last=False)
+    return value
 
 
 def _ease_out(t: float) -> float:
@@ -396,6 +410,7 @@ class App:
         self.update_progress: tuple[int, int | None] = (0, None)
         self.update_error: str | None = None
         self.soundfont_choice = soundfont
+        self._engine_soundfonts: dict[tuple, Path | None] = {}
 
         # Check while the window, assets, and music are being initialized so a ready notice can appear promptly.
         self._start_update_check(time.monotonic())
@@ -450,6 +465,8 @@ class App:
 
         self.art_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="titleart")
         self.art_jobs: dict[int, Future] = {}
+        self.art_render_jobs: dict[int, Future] = {}
+        self.logo_render_jobs: dict[int, Future] = {}
         self.art_cache: OrderedDict[int, pygame.Surface | None] = OrderedDict()
         self.art_layers: list[tuple[int, pygame.Surface | None, float]] = []
         self.readmes: dict[int, Readme | None] = {}
@@ -461,9 +478,9 @@ class App:
         self.theme_from: Theme | None = None  # set while the previous theme fades out
         self.theme_born = 0.0
         self.theme_t = 1.0
-        self._theme_bgs: dict[int, pygame.Surface] = {}
-        self._theme_bars: dict[int, pygame.Surface] = {}
-        self._theme_layers: dict[int, dict] = {}
+        self._theme_bgs: OrderedDict[int, pygame.Surface] = OrderedDict()
+        self._theme_bars: OrderedDict[int, pygame.Surface] = OrderedDict()
+        self._theme_layers: OrderedDict[int, dict] = OrderedDict()
 
         self.rows: list[Row] = []
         self.collapsed_sections: set[str] = set()
@@ -515,12 +532,17 @@ class App:
         """Show a freshly loaded set of presets: a reload, or another launcher picked."""
         for job in self.art_jobs.values():
             job.cancel()
-        for cache in (self.art_jobs, self.art_cache, self.readmes, self.endooms, self.logos, self.themes, self.row_offset):
+        for job in self.art_render_jobs.values():
+            job.cancel()
+        for job in self.logo_render_jobs.values():
+            job.cancel()
+        for cache in (self.art_jobs, self.art_render_jobs, self.logo_render_jobs, self.art_cache, self.readmes, self.endooms, self.logos, self.themes, self.row_offset):
             cache.clear()
         self.art_layers.clear()
         self.opts, self.problem = opts, None
         self.commands = [build_command(opts, p) for p in opts.presets]
         self._audio_down()  # sounds and SoundFont come from the engines and IWADs in the new settings
+        self._engine_soundfonts.clear()
         self.soundfont = find_soundfont(self.soundfont_choice)
         self._audio_up()
         self.filter = ""
@@ -858,8 +880,8 @@ class App:
             engine_font = None
             overrides = (self.soundfont_choice, os.environ.get("DOOMRUNNER_SOUNDFONT"))
             if not any(font and Path(font).is_file() for font in overrides):
-                engine_font = find_engine_soundfont(self.opts.engine_for(p))
-            self.music.request(self.current, *presented_files(p), soundfont=engine_font or self.soundfont, preset=p)
+                engine_font = self._engine_soundfont_for(self.opts.engine_for(p))
+            self.music.request(self.current, soundfont=engine_font or self.soundfont, preset=p)
         # While the selection is still moving, the current track plays on: the next preset may share it.
 
     def _set_music(self, on: bool) -> None:
@@ -989,30 +1011,29 @@ class App:
             self.logos.clear()
 
     def _background_for(self, theme: Theme) -> pygame.Surface:
-        bg = self._theme_bgs.get(theme.key)
-        if bg is None:
-            bg = self._theme_bgs[theme.key] = self._make_background(theme)
-        return bg
+        return _theme_cache(self._theme_bgs, theme.key, lambda: self._make_background(theme))
 
     def _bar_for(self, theme: Theme) -> pygame.Surface:
-        bar = self._theme_bars.get(theme.key)
-        if bar is None:
+        def create() -> pygame.Surface:
             w = self.list_rect.width + int(28 * self.s)
             left, right = theme.bar
-            bar = self._theme_bars[theme.key] = draw.horizontal_ramp(w, self.preset_h, (*left, 240), (*right, 0), curve=1.3)
-        return bar
+            return draw.horizontal_ramp(w, self.preset_h, (*left, 240), (*right, 0), curve=1.3)
+        return _theme_cache(self._theme_bars, theme.key, create)
 
     def _make_background(self, theme: Theme) -> pygame.Surface:
-        bg = pygame.Surface((self.w, self.h)).convert(_OPAQUE)
+        # Build the vertical gradient in a one-pixel strip, then expand it in C instead of
+        # issuing one full-screen draw call per scanline on the UI thread.
+        strip = pygame.Surface((1, self.h))
         top, bottom = theme.bg_top, theme.bg_bottom
         for y in range(self.h):
             t = (y / max(1, self.h - 1)) ** 1.6
-            pygame.draw.line(bg, [int(_lerp(top[i], bottom[i], t)) for i in range(3)], (0, y), (self.w, y))
-        lines = pygame.Surface((self.w, self.h), pygame.SRCALPHA)
+            strip.set_at((0, y), [int(_lerp(top[i], bottom[i], t)) for i in range(3)])
+        bg = pygame.transform.scale(strip.convert(_OPAQUE), (self.w, self.h))
+        lines = pygame.Surface((1, self.h), pygame.SRCALPHA)
         step = max(3, int(4 * self.s))
         for y in range(0, self.h, step):
-            pygame.draw.line(lines, (0, 0, 0, 30), (0, y), (self.w, y))
-        bg.blit(lines, (0, 0))
+            lines.set_at((0, y), (0, 0, 0, 30))
+        bg.blit(pygame.transform.scale(lines, (self.w, self.h)), (0, 0))
         return bg
 
     def _alpha_mask(self, size: tuple[int, int], fn) -> pygame.Surface:
@@ -1054,13 +1075,15 @@ class App:
 
     def _layers_for(self, theme: Theme) -> dict[str, tuple[pygame.Surface, tuple[int, int]]]:
         """Background plus the overlays that must match it, cached per theme."""
-        layers = self._theme_layers.get(theme.key)
-        if layers is None:
+        def create() -> dict[str, tuple[pygame.Surface, tuple[int, int]]]:
             bg = self._background_for(theme)
-            layers = {"bg": (bg, (0, 0))}
-            for name, (rect, mask) in self._masks.items():
-                layers[name] = (self._bg_overlay(bg, rect, mask), rect.topleft)
-            self._theme_layers[theme.key] = layers
+            return self._make_theme_layers(bg)
+        return _theme_cache(self._theme_layers, theme.key, create)
+
+    def _make_theme_layers(self, bg: pygame.Surface) -> dict[str, tuple[pygame.Surface, tuple[int, int]]]:
+        layers = {"bg": (bg, (0, 0))}
+        for name, (rect, mask) in self._masks.items():
+            layers[name] = (self._bg_overlay(bg, rect, mask), rect.topleft)
         return layers
 
     def _blit_layer(self, name: str) -> None:
@@ -1240,10 +1263,24 @@ class App:
 
     # ---------- title art ----------
 
+    def _engine_soundfont_for(self, engine) -> Path | None:
+        if engine is None:
+            return None
+        key = (engine.id, engine.name, engine.path, engine.config_dir)
+        if key not in self._engine_soundfonts:
+            self._engine_soundfonts[key] = find_engine_soundfont(engine)
+        return self._engine_soundfonts[key]
+
     def _request_art(self, idx: int) -> None:
-        if idx in self.art_cache or idx in self.art_jobs or not (0 <= idx < len(self.opts.presets)):
+        if idx in self.art_cache or idx in self.art_jobs or idx in self.art_render_jobs or not (0 <= idx < len(self.opts.presets)):
             return
         self.art_jobs[idx] = self.art_pool.submit(_load_extras, self.opts.presets[idx])
+
+    def _should_show_title_text(self, idx: int) -> bool:
+        """Keep the fallback title hidden until async asset loading decides whether a logo exists."""
+        if idx in self.logos:
+            return self.logos[idx] is None
+        return not any(idx in jobs for jobs in (self.art_jobs, self.art_render_jobs, self.logo_render_jobs))
 
     def _logo_surface(self, logo: Art | None) -> pygame.Surface | None:
         """Menu logo scaled for the details panel, with a soft drop shadow like the text title's."""
@@ -1283,9 +1320,11 @@ class App:
         out.blit(img, (0, 0))
         return out
 
-    def _art_surface(self, idx: int, art: Art | None) -> pygame.Surface | None:
+    def _render_art(self, art: Art | None, logo: Art | None):
+        """Prepare selected art off-thread; return surfaces for the UI thread to adopt."""
+        lower_current_thread_priority()
         if art is None:
-            return None
+            return None, None, None, self._logo_surface(logo), None
         try:
             if art.kind == "encoded":
                 img = pygame.image.load(io.BytesIO(art.data)).convert(_OPAQUE)
@@ -1294,7 +1333,7 @@ class App:
                 img.set_palette([tuple(art.palette[i * 3 : i * 3 + 3]) for i in range(256)])
                 img = img.convert(_OPAQUE)
         except (pygame.error, ValueError):
-            return None
+            return None, None, None, self._logo_surface(logo), None
         w, h = img.get_size()
         # Doom-era art is 200 (or 400) lines tall at any width (320, KEX's 426 widescreen, ...) and the
         # engine stretches those lines 1.2x, so the pixels aren't square.
@@ -1307,8 +1346,7 @@ class App:
         if w > width_169:
             img = img.subsurface(pygame.Rect((w - width_169) // 2, 0, width_169, h)).copy()
             w = width_169
-        if idx not in self.themes:
-            self.themes[idx] = from_art(img)
+        theme = from_art(img)
         tw, th = self.art_rect.size
         # Fit the width; art that's still short after that may zoom up to 25% so it isn't a thin strip.
         # Short art dissolves at the bottom.
@@ -1318,14 +1356,16 @@ class App:
         size = (int(w * scale) + 1, int(h * aspect * scale) + 1)
         scaled = pygame.transform.scale(img, size) if w <= 640 else pygame.transform.smoothscale(img, size)
         out = pygame.Surface((tw, th)).convert(_OPAQUE)
-        out.blit(self._background_for(self.themes[idx]), (0, 0), self.art_rect)  # its own theme, for short art
+        background = self._make_background(theme)
+        out.blit(background, (0, 0), self.art_rect)  # its own theme, for short art
+        layers = self._make_theme_layers(background)
         crop = scaled.subsurface(pygame.Rect((size[0] - tw) // 2, max(0, (size[1] - th) // 3), tw, min(th, size[1])))
         if crop.get_height() < th:
             # Art shorter than the panel: dissolve its bottom edge instead of leaving a hard line.
             crop = crop.convert_alpha()
             crop.blit(self._alpha_mask(crop.get_size(), lambda u, v: 1 - _smoothstep((v - 0.55) / 0.45)), (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
         out.blit(crop, (0, 0))
-        return out
+        return theme, out, background, self._logo_surface(logo), layers
 
     def _update_art(self, now: float) -> None:
         if self._category_selected():
@@ -1333,25 +1373,59 @@ class App:
                 self.art_layers.append((-1, None, now))
                 self.art_layers = self.art_layers[-2:]
             return
-        near = {self.current, *self._neighbors()}
+        selected = self.current
         for idx, job in list(self.art_jobs.items()):
-            if job.done():
-                try:
-                    art, readme, endoom, logo = job.result()
-                except Exception:
-                    art, readme, endoom, logo = None, None, None, None
-                self.art_cache[idx] = self._art_surface(idx, art)
-                self.logos[idx] = self._logo_surface(logo)
-                self.readmes[idx] = readme
-                self.endooms[idx] = endoom
-                while len(self.art_cache) > ART_CACHE_SIZE:
-                    self.art_cache.popitem(last=False)
+            if idx != selected:
+                job.cancel()
                 del self.art_jobs[idx]
-            elif idx not in near and job.cancel():
-                del self.art_jobs[idx]
-        self._request_art(self.current)
-        for idx in self._neighbors():
-            self._request_art(idx)
+        for idx, job in list(self.art_render_jobs.items()):
+            if idx != selected:
+                job.cancel()
+                del self.art_render_jobs[idx]
+        for idx, job in list(self.logo_render_jobs.items()):
+            if idx != selected:
+                job.cancel()
+                del self.logo_render_jobs[idx]
+
+        if selected in self.art_jobs and self.art_jobs[selected].done():
+            job = self.art_jobs.pop(selected)
+            try:
+                art, readme, endoom, logo = job.result()
+            except Exception:
+                art, readme, endoom, logo = None, None, None, None
+            self.readmes[selected] = readme
+            self.endooms[selected] = endoom
+            self.logo_render_jobs[selected] = self.art_pool.submit(self._logo_surface, logo)
+            self.art_render_jobs[selected] = self.art_pool.submit(self._render_art, art, None)
+
+        if selected in self.logo_render_jobs and self.logo_render_jobs[selected].done():
+            job = self.logo_render_jobs.pop(selected)
+            try:
+                self.logos[selected] = job.result()
+            except Exception:
+                self.logos[selected] = None
+
+        if selected in self.art_render_jobs and self.art_render_jobs[selected].done():
+            job = self.art_render_jobs.pop(selected)
+            try:
+                theme, surface, background, logo, layers = job.result()
+            except Exception:
+                theme, surface, background, logo, layers = None, None, None, None, None
+            if theme is not None:
+                self.themes[selected] = theme
+                self._theme_bgs[theme.key] = background
+                self._theme_bgs.move_to_end(theme.key)
+                while len(self._theme_bgs) > THEME_CACHE_SIZE:
+                    self._theme_bgs.popitem(last=False)
+                self._theme_layers[theme.key] = layers
+                self._theme_layers.move_to_end(theme.key)
+                while len(self._theme_layers) > THEME_CACHE_SIZE:
+                    self._theme_layers.popitem(last=False)
+            self.art_cache[selected] = surface
+            while len(self.art_cache) > ART_CACHE_SIZE:
+                self.art_cache.popitem(last=False)
+
+        self._request_art(selected)
 
         if self.current in self.art_cache and (not self.art_layers or self.art_layers[-1][0] != self.current):
             self.art_cache.move_to_end(self.current)
@@ -1372,6 +1446,7 @@ class App:
 
             def worker():
                 try:
+                    lower_current_thread_priority()
                     present_keys = []
                     music_keys = []
                     rows = self._preset_rows()
@@ -2091,14 +2166,23 @@ class App:
         return surf
 
     @staticmethod
+    @lru_cache(maxsize=512)
     def _fit(text: str, font: pygame.font.Font, max_w: int) -> str:
-        if font.size(text)[0] <= max_w:
+        width = font.size(text)[0]
+        if width <= max_w:
             return text
-        while text and font.size(text + "…")[0] > max_w:
-            text = text[:-1]
-        return text.rstrip() + "…"
+        length = min(len(text), max(0, int(len(text) * max_w / width)))
+        while length:
+            candidate = text[:length].rstrip() + "…"
+            candidate_width = font.size(candidate)[0]
+            if candidate_width <= max_w:
+                return candidate
+            shorter = int(length * max_w / candidate_width)
+            length = min(length - 1, shorter)
+        return "…"
 
     @staticmethod
+    @lru_cache(maxsize=512)
     def _wrap(text: str, font: pygame.font.Font, max_w: int, max_lines: int) -> list[str]:
         lines, line = [], ""
         for word in text.split():
@@ -2108,6 +2192,9 @@ class App:
             else:
                 if line:
                     lines.append(line)
+                    if len(lines) == max_lines:
+                        lines[-1] = App._fit(lines[-1] + " …", font, max_w)
+                        return lines
                 line = word
         if line:
             lines.append(line)
@@ -2372,7 +2459,7 @@ class App:
         logo = self.logos.get(self.current)
         if logo:
             blocks.append((logo, title_gap + int(10 * s)))
-        else:
+        elif self._should_show_title_text(self.current):
             for n, line in enumerate(lines):
                 blocks.append((self._shadowed(line, title_font, TEXT), title_gap if n == len(lines) - 1 else -int(8 * s)))
         if byline:

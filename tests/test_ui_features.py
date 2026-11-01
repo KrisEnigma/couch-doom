@@ -14,7 +14,10 @@ def make_app(sections=("Section A", "Section B"), collapsed=(), filter_text=""):
     ]
     app = ui.App.__new__(ui.App)
     app.opts = SimpleNamespace(presets=presets, sections=list(sections))
-    app.state = SimpleNamespace(favorites=[], music=False)
+    app.state = SimpleNamespace(favorites=[], music=False, menu_sounds=True)
+    app.state.set_music = lambda on: setattr(app.state, "music", on)
+    app.state.set_menu_sounds = lambda on: setattr(app.state, "menu_sounds", on)
+    app.quit_at = None
     app.launchers = None
     app.filter = filter_text
     app.mode = "list"
@@ -94,7 +97,7 @@ def test_f1_opens_separate_help_and_info_button_keeps_readme_default():
     assert ui.INFO_TABS[app.info_tab] == "Readme"
 
 
-def test_back_button_opens_help_and_start_toggles_music():
+def test_back_opens_help_and_start_opens_menu_with_music_option():
     inp = gamepad.Input.__new__(gamepad.Input)
     inp._pad_last = False
     inp._held = {}
@@ -103,22 +106,27 @@ def test_back_button_opens_help_and_start_toggles_music():
     start = inp.handle(pygame.event.Event(pygame.CONTROLLERBUTTONDOWN, instance_id=0, button=pygame.CONTROLLER_BUTTON_START), 2.0)
 
     assert back == [Action.HELP]
-    assert start == [Action.MUSIC]
+    assert start == [Action.MENU]
 
     app = make_app()
     app.input.pad_mode = True
     app._on_action(back[0], 1.0)
     assert app.mode == "help"
+    app.mode = "list"
+    app._on_action(start[0], 2.0)
+    assert app.mode == "menu"
+    app._menu_pick(2)
+    assert app.state.music
 
 
-def test_pad_footer_puts_help_on_back_and_music_on_start():
+def test_pad_footer_puts_help_on_back_and_menu_on_start():
     app = make_app()
     app.input.pad_mode = True
 
     hints = app._footer_hints()
 
     assert any(glyphs == ("BACK",) and label == "Help" for glyphs, label, _ in hints)
-    assert any(glyphs == ("START",) and label in {"Music", "Mute"} for glyphs, label, _ in hints)
+    assert any(glyphs == ("START",) and label == "Menu" for glyphs, label, _ in hints)
 
 
 def test_help_covers_the_usage_guide_without_hard_coded_buttons():
@@ -190,7 +198,7 @@ def test_keyboard_footer_separates_help_and_info_and_has_feedback_shortcut():
     assert "Help / Info" not in labels
     assert not any(label == "Fold group" for label in labels)
     assert any("KEY:F3" in glyphs and label == "Favorite" for glyphs, label, _ in hints)
-    assert any("KEY:F2" in glyphs and label in {"Music", "Mute"} for glyphs, label, _ in hints)
+    assert any("KEY:ESC" in glyphs and label == "Menu" for glyphs, label, _ in hints)
 
     app.mode = "help"
     hints = app._footer_hints()
@@ -342,14 +350,16 @@ def test_folder_browser_wraps_on_press_but_not_while_held(tmp_path):
     app.file_browser = Browser(tmp_path, candidates=[tmp_path])
     app.browser_scroll = 0
     app.mode = "browse"
+    app.quit_at = None
     app.h, app.s = 810, 1
+    app.footer_h = 48
     app._sound = lambda _name: None
 
     app._on_action(Action.UP, 1.0, repeat=True)
     assert app.file_browser.selected == 0
 
     app._on_action(Action.UP, 2.0)
-    assert app.file_browser.selected == 2
+    assert app.file_browser.selected == len(app.file_browser.entries) - 1
 
 
 def test_section_jump_lands_on_the_category_card():
