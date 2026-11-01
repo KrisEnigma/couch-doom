@@ -19,8 +19,9 @@ LUMPS = {
     "open": "DSSWTCHN",
     "close": "DSSWTCHX",
     "error": "DSOOF",
+    "quit": "DSPLDETH",
 }
-VOLUMES = {"move": 0.22, "confirm": 0.30, "open": 0.30, "close": 0.30, "error": 0.32}
+VOLUMES = {"move": 0.22, "confirm": 0.30, "open": 0.30, "close": 0.30, "error": 0.32, "quit": 0.34}
 EASTER_EGG_LUMP = "DSGETPOW"
 IWAD_NAMES = {
     "doom.wad", "doom1.wad", "doom2.wad", "tnt.wad", "plutonia.wad",
@@ -97,11 +98,12 @@ class Sfx:
         sound.set_volume(volume)
         self.sounds[name] = sound
 
-    def play(self, name: str) -> None:
+    def play(self, name: str) -> bool:
         snd = self.sounds.get(name)
         if snd is None:
-            return
+            return False
         if name == "move":
             self.channel.play(snd)
         else:
             snd.play()
+        return True

@@ -419,7 +419,12 @@ class App:
 
         self.commands: list[LaunchCommand] = [build_command(opts, p) for p in opts.presets]
         self.filter = ""
-        self.mode = "list"  # "list" | "search" | "info" | "help" | "launcher" | "browse" | "update"
+        self.mode = "list"  # "list" | "menu" | "search" | "info" | "help" | "launcher" | "browse" | "update"
+        self.menu_sel = 0
+        self.menu_opened = 0.0
+        self.menu_status = ""
+        self.menu_status_at = 0.0
+        self.quit_at: float | None = None
         self.help_scroll = 0.0
         self.help_view = 0.0
         self.info_tab = 0
@@ -500,9 +505,13 @@ class App:
             self._sound("error")
             self._notify(f"Still the same: {exc.title[0].lower()}{exc.title[1:]}", ERROR)
             return
-        self._apply(opts)
+        in_menu = self.mode == "menu"
+        self._apply(opts, announce=not in_menu)
+        if in_menu:
+            self.menu_status = "Refreshed"
+            self.menu_status_at = time.monotonic()
 
-    def _apply(self, opts: Options) -> None:
+    def _apply(self, opts: Options, *, announce: bool = True) -> None:
         """Show a freshly loaded set of presets: a reload, or another launcher picked."""
         for job in self.art_jobs.values():
             job.cancel()
@@ -523,8 +532,9 @@ class App:
         self._warm_cache()
         if opts.presets:
             self._sound("open")
-            source = f" from {opts.launcher}" if opts.launcher else ""
-            self._notify(f"Loaded {len(opts.presets)} presets{source}", MUTED)
+            if announce:
+                source = f" from {opts.launcher}" if opts.launcher else ""
+                self._notify(f"Loaded {len(opts.presets)} presets{source}", MUTED)
         else:
             self._sound("error")
 
@@ -552,7 +562,7 @@ class App:
                 self._sound("move")
         elif action == Action.CONFIRM:
             self._picker_pick(self.picker_sel)
-        elif action in (Action.BACK, Action.LAUNCHER):
+        elif action == Action.BACK:
             self._close_overlay()
 
     def _picker_hover(self, i: int) -> None:
@@ -724,27 +734,39 @@ class App:
             browser.move(-1, wrap=wrap)
         elif action == Action.DOWN:
             browser.move(1, wrap=wrap)
-        elif action == Action.PAGE_UP:
-            browser.move(-8, wrap=wrap)
-        elif action == Action.PAGE_DOWN:
-            browser.move(8, wrap=wrap)
-        elif action in (Action.LEFT, Action.PREV_SECTION):
-            browser.change_root(-1)
-        elif action in (Action.RIGHT, Action.NEXT_SECTION):
-            browser.change_root(1)
+        elif action in (Action.PAGE_UP, Action.LEFT):
+            page_size = self._browser_page_size()
+            browser.move(-page_size, wrap=False)
+            self.browser_scroll = max(0, self.browser_scroll - page_size)
+        elif action in (Action.PAGE_DOWN, Action.RIGHT):
+            page_size = self._browser_page_size()
+            browser.move(page_size, wrap=False)
+            self.browser_scroll += page_size
+        elif action == Action.HOME:
+            browser.move(-browser.selected, wrap=False)
+            self.browser_scroll = 0
+        elif action == Action.END:
+            browser.move(len(browser.entries) - 1 - browser.selected, wrap=False)
+            self.browser_scroll = max(0, len(browser.entries) - self._browser_page_size())
         elif action == Action.ALT:
             browser.toggle_all()
             self.browser_scroll = 0
         elif action == Action.CONFIRM:
             entry = browser.entries[browser.selected] if browser.entries else None
-            if entry is not None and not entry.is_dir and (reaction := easter_eggs.react_to_pick(entry.path)):
-                self._show_reaction(reaction)
-                return
-            path = browser.open_selected()
-            if path is not None:
-                self.file_browser = None
-                self.mode = "launcher"
-                self._on_drop(path)
+            if entry is not None and entry.root_selector:
+                browser.select_root(entry.path)
+                self.browser_scroll = 0
+            elif entry is not None and entry.parent_selector:
+                browser.back()
+            else:
+                if entry is not None and not entry.is_dir and (reaction := easter_eggs.react_to_pick(entry.path)):
+                    self._show_reaction(reaction)
+                    return
+                path = browser.open_selected()
+                if path is not None:
+                    self.file_browser = None
+                    self.mode = "launcher"
+                    self._on_drop(path)
         elif action == Action.BACK:
             if browser.back():
                 browser.move(0)
@@ -762,7 +784,9 @@ class App:
             self._sound("move")
 
     def _browser_page_size(self) -> int:
-        return max(1, min(16, (self.h - int(330 * self.s)) // int(54 * self.s)))
+        pad, row_h, head_h = int(28 * self.s), int(54 * self.s), int(118 * self.s)
+        max_height = self.h - self.footer_h - int(32 * self.s)
+        return max(1, min(16, (max_height - 2 * pad - head_h) // row_h))
 
     def _on_drop(self, path: Path) -> None:
         """A file or folder dropped on the window, or picked in the browser: use the launcher it belongs to."""
@@ -790,7 +814,7 @@ class App:
     def _show_reaction(self, reaction: easter_eggs.Reaction) -> None:
         """The only place an easter egg is presented, so handlers stay free of message and sound details."""
         self._notify(reaction.message, self.theme.label)
-        if reaction.sound and self.sfx:
+        if reaction.sound and self.state.menu_sounds and self.sfx:
             self.sfx.play(reaction.sound)
 
     # ---------- audio ----------
@@ -814,9 +838,10 @@ class App:
         self._music_sel = None
         pygame.mixer.quit()
 
-    def _sound(self, name: str) -> None:
-        if self.sfx:
-            self.sfx.play(name)
+    def _sound(self, name: str) -> bool:
+        if self.state.menu_sounds and self.sfx:
+            return self.sfx.play(name)
+        return False
 
     def _update_music(self, now: float) -> None:
         if not self.music:
@@ -837,12 +862,12 @@ class App:
             self.music.request(self.current, *presented_files(p), soundfont=engine_font or self.soundfont, preset=p)
         # While the selection is still moving, the current track plays on: the next preset may share it.
 
-    def _toggle_music(self) -> None:
-        on = not self.state.music
+    def _set_music(self, on: bool) -> None:
+        if self.state.music == on:
+            return
         self.state.set_music(on)
         self._music_sel = None
         self._sound("open" if on else "close")
-        self._notify("Title music on" if on else "Title music off", MUTED)
         log.write("music: toggled", "Title music on" if on else "Title music off")
 
     def _toggle_favorite(self) -> None:
@@ -1134,13 +1159,19 @@ class App:
             self.detail_changed = time.monotonic()
             self._sound("move")
 
+    @staticmethod
+    def _step_index(index: int, count: int, delta: int, *, wrap: bool) -> int:
+        if count <= 0:
+            return 0
+        target = index + delta
+        return target % count if wrap else max(0, min(count - 1, target))
+
     def _move(self, delta: int, *, wrap: bool = True) -> None:
         if not self.rows:
             return
         self.free_scroll = None
         sel = self._sel_row()
-        target = sel + delta
-        selected = target % len(self.rows) if wrap else max(0, min(len(self.rows) - 1, target))
+        selected = self._step_index(sel, len(self.rows), delta, wrap=wrap)
         if selected != sel:
             self._select_row(selected)
 
@@ -1428,21 +1459,38 @@ class App:
         self.toast = Toast(text, color, time.monotonic())
 
     def _on_action(self, action: Action, now: float, *, repeat: bool = False) -> None:
+        if self.quit_at is not None:
+            return
+        if self.mode == "menu":
+            self._on_menu_action(action, repeat=repeat)
+            return
         if self.mode == "browse":
-            self._browser_action(action, wrap=not repeat)
+            if action == Action.MENU:
+                self.file_browser = None
+                self.mode = "launcher"
+                self._sound("close")
+            else:
+                self._browser_action(action, wrap=not repeat)
             return
         if self.mode == "launcher":
-            self._on_picker_action(action, repeat=repeat)
+            self._on_picker_action(Action.BACK if action == Action.MENU else action, repeat=repeat)
             return
         if self.mode == "update":
-            self._on_update_action(action)
+            self._on_update_action(Action.BACK if action == Action.MENU else action)
             return
         if self.mode == "help":
-            self._on_help_action(action)
+            self._on_help_action(Action.BACK if action == Action.MENU else action)
             return
-        if action == Action.LAUNCHER:
-            if self.mode == "list":
-                self._open_picker()
+        if action == Action.MENU:
+            if self.mode == "list" and not self.blocked:
+                self.menu_sel = 0
+                self.menu_opened = now
+                self.mode = "menu"
+                self._sound("open")
+            elif self.blocked:
+                self.running = False
+            else:
+                self._on_action(Action.BACK, now, repeat=repeat)
             return
         if action == Action.HELP:
             self.mode = "help"
@@ -1459,18 +1507,15 @@ class App:
             elif action == Action.BACK:
                 self.running = False  # nothing to lose here, so no press-twice guard
             return
-        if action == Action.MUSIC:
-            self._toggle_music()
-            return
         if action == Action.FAVORITE:
             if self.mode == "list" and self.rows and self.rows[self._sel_row()].kind == "preset":
                 self._toggle_favorite()
             return
         if self.mode == "search":
-            self._on_search_action(action, now)
+            self._on_search_action(Action.BACK if action == Action.MENU else action, now)
             return
         if self.mode == "info":
-            self._on_info_action(action, now)
+            self._on_info_action(Action.BACK if action == Action.MENU else action, now)
             return
         if action == Action.UP:
             self._move(-1, wrap=not repeat)
@@ -1510,11 +1555,80 @@ class App:
         elif action == Action.SEARCH:
             self._open_search(now)
         elif action == Action.BACK:
-            if self.filter:
-                self._set_filter("")
-                self._sound("close")
+            return  # B has no action on the main selector; Escape opens the menu.
+
+    def _on_menu_action(self, action: Action, *, repeat: bool = False) -> None:
+        items = self._menu_items()
+        if action in (Action.MENU, Action.BACK):
+            self._close_overlay()
+        elif action == Action.UP:
+            self._move_menu(-1, repeat=repeat)
+        elif action == Action.DOWN:
+            self._move_menu(1, repeat=repeat)
+        elif action == Action.LEFT:
+            self._set_menu_option()
+        elif action == Action.RIGHT:
+            self._set_menu_option()
+        elif action == Action.HELP:
+            self.mode = "help"
+            self.help_scroll = self.help_view = 0.0
+            self.info_opened = time.monotonic()
+            self._sound("open")
+        elif action == Action.CONFIRM:
+            self._menu_pick(self.menu_sel)
+
+    def _move_menu(self, delta: int, *, repeat: bool = False) -> None:
+        selected = self._step_index(self.menu_sel, len(self._menu_items()), delta, wrap=not repeat)
+        if selected != self.menu_sel:
+            self.menu_sel = selected
+            self._sound("move")
+
+    def _menu_items(self) -> list[tuple[str, str]]:
+        items = [
+            ("back", "Back to list"),
+            ("refresh", "Refresh list"),
+            ("music", "Title music"),
+            ("sounds", "Menu sounds"),
+        ]
+        if self.launchers:
+            items.append(("launcher", "Choose launcher"))
+        items.extend((("help", "Help"), ("quit", "Quit")))
+        return items
+
+    def _set_menu_option(self) -> None:
+        key = self._menu_items()[self.menu_sel][0]
+        if key == "music":
+            self._set_music(not self.state.music)
+        elif key == "sounds":
+            self.state.set_menu_sounds(not self.state.menu_sounds)
+            self._sound("open")
+
+    def _menu_pick(self, index: int) -> None:
+        key = self._menu_items()[index][0]
+        if key == "back":
+            self._close_overlay()
+        elif key == "refresh":
+            if not self.reload:
+                return
+            self.menu_status = ""
+            self._reload()
+        elif key == "music":
+            self._set_music(not self.state.music)
+        elif key == "sounds":
+            self.state.set_menu_sounds(not self.state.menu_sounds)
+            self._sound("open")
+        elif key == "launcher":
+            self._open_picker()
+        elif key == "help":
+            self.mode = "help"
+            self.help_scroll = self.help_view = 0.0
+            self.info_opened = time.monotonic()
+            self._sound("open")
+        elif key == "quit":
+            if self._sound("quit"):
+                self.quit_at = time.monotonic() + 0.7
             else:
-                self._arm_quit(now, self._button_name("B") if self.input.pad_mode else "Esc")
+                self.running = False
 
     def _button_name(self, button: str) -> str:
         return BUTTON_NAMES[self.input.family].get(button, button)
@@ -1642,7 +1756,7 @@ class App:
             elif self.mode == "help":
                 self.help_scroll = max(0, min(self._help_max_scroll(), self.help_scroll + 3 * self._help_line_h() * notches))
             elif self.mode == "browse" and self.file_browser:
-                self._browser_action(Action.UP if notches < 0 else Action.DOWN)
+                self._browser_action(Action.UP if notches < 0 else Action.DOWN, wrap=False)
         elif t == pygame.MOUSEBUTTONDOWN:
             self._mouse_on()
             if event.button == pygame.BUTTON_LEFT:
@@ -1660,7 +1774,11 @@ class App:
         self.hits.append(Hit(area, lambda: self._start_drag(kind)))
 
     def _scroll_value(self, kind: str) -> float:
-        return self.scroll if kind == "list" else self.help_view if kind == "help" else self.info_view
+        if kind == "list":
+            return self.scroll
+        if kind == "browser":
+            return float(self.browser_scroll)
+        return self.help_view if kind == "help" else self.info_view
 
     def _start_drag(self, kind: str) -> None:
         track, thumb_h, max_scroll = self.scrollbars[kind]
@@ -1681,6 +1799,8 @@ class App:
         value = max(0.0, min(1.0, frac)) * max_scroll
         if kind == "list":
             self.free_scroll = self.scroll = value
+        elif kind == "browser":
+            self.browser_scroll = int(round(value))
         elif kind == "help":
             self.help_scroll = self.help_view = value
         else:
@@ -1749,6 +1869,8 @@ class App:
 
     def _on_key(self, event: pygame.event.Event) -> bool:
         """Keyboard-only behaviour that does not map onto pad actions. Returns True if consumed."""
+        if self.mode == "menu" and event.key == pygame.K_BACKSPACE:
+            return True
         if self.mode in ("info", "help"):
             return False
         if event.key == pygame.K_BACKSPACE:
@@ -1760,7 +1882,7 @@ class App:
         return False
 
     def _on_text(self, text: str, now: float) -> None:
-        if self.mode in ("info", "help"):
+        if self.mode in ("menu", "info", "help"):
             return
         if text == "/" and self.mode == "list":
             self._open_search(now)
@@ -2037,6 +2159,8 @@ class App:
         self._draw_footer()
         if self.mode == "search":
             self._draw_osk(now)
+        elif self.mode == "menu":
+            self._draw_menu(now)
         elif self.mode == "info":
             self._draw_info(now)
         elif self.mode == "help":
@@ -2357,20 +2481,20 @@ class App:
         """(glyphs, label, actions): one action for the whole hint, or one per glyph (LB = previous, RB = next)."""
         pad = self.input.pad_mode
         A = Action
-        launcher = [(("L3",) if pad else ("KEY:F4",), "Launcher", (A.LAUNCHER,))] if self.launchers else []
         if self.mode == "browse":
             toggle = "All files" if not self.file_browser or not self.file_browser.show_all else "Doom files"
             if pad:
                 return [(("A",), "Open", (A.CONFIRM,)), (("B",), "Back", (A.BACK,)),
-                        (("X",), toggle, (A.ALT,)), (("LB", "RB"), "Roots", (A.PREV_SECTION, A.NEXT_SECTION)),
-                        (("LT", "RT"), "Page", (A.PAGE_UP, A.PAGE_DOWN))]
+                        (("X",), toggle, (A.ALT,))]
             return [(("KEY:ENTER",), "Open", (A.CONFIRM,)), (("KEY:ESC",), "Back", (A.BACK,)),
-                    (("KEY:TAB",), toggle, (A.ALT,)), (("KEY:LEFT", "KEY:RIGHT"), "Roots", (A.PREV_SECTION, A.NEXT_SECTION)),
-                    (("KEY:PGUP", "KEY:PGDN"), "Page", (A.PAGE_UP, A.PAGE_DOWN))]
+                    (("KEY:TAB",), toggle, (A.ALT,))]
         if self.mode == "launcher":
             return [(("A",) if pad else ("KEY:ENTER",), "Choose", (A.CONFIRM,)), (("B",) if pad else ("KEY:ESC",), "Close", (A.BACK,))]
         if self.mode == "update":
             return [(("A",) if pad else ("KEY:ENTER",), "Choose", (A.CONFIRM,)), (("B",) if pad else ("KEY:ESC",), "Later", (A.BACK,))]
+        if self.mode == "menu":
+            return [(("A",) if pad else ("KEY:ENTER",), "Choose", (A.CONFIRM,)),
+                    (("B",) if pad else ("KEY:ESC",), "Close", (A.BACK,))]
         if self.mode == "help":
             if pad:
                 return [(("RS",), "Scroll", ()), (("Y",), "Help & Feedback", (A.SEARCH,)), (("B",), "Close", (A.BACK,))]
@@ -2378,8 +2502,7 @@ class App:
         if self.blocked:
             picking = self.launchers is not None and self.launchers.must_pick
             reload = [(("A",) if pad else ("KEY:ENTER",), "Choose" if picking else "Reload", (A.CONFIRM,))]
-            return [*(reload if self.reload else []), *([] if picking else launcher), (("B",) if pad else ("KEY:ESC",), "Quit", (A.BACK,))]
-        music = "Mute" if self.state.music else "Music"
+            return [*(reload if self.reload else []), (("B",) if pad else ("KEY:ESC",), "Quit", (A.BACK,))]
         if self.mode == "search":
             if pad:
                 return [(("A",), "Type", (A.CONFIRM,)), (("X",), "Delete", (A.ALT,)), (("Y",), "Done", (A.SEARCH,)), (("B",), "Cancel", (A.BACK,))]
@@ -2395,21 +2518,17 @@ class App:
             return [(("KEY:ENTER",), "Play", (A.CONFIRM,)), *scroll, (("KEY:ESC",), "Close", (A.BACK,))]
         category_selected = self._category_selected()
         fav = "Unfavorite" if self.rows and self.opts.presets[self.current].name in self.state.favorites else "Favorite"
-        back = ("Clear filter" if self.filter else "Quit", (A.BACK,))
         section = (A.PREV_SECTION, A.NEXT_SECTION)
         primary = "Open / Close" if category_selected else "Play"
         info_hint = [] if category_selected else [(('X',) if pad else ('KEY:TAB',), "Info", (A.ALT,))]
         favorite_hint = [] if category_selected else [(('R3',) if pad else ('KEY:F3',), fav, (A.FAVORITE,))]
         if pad:
-            return [(("A",), primary, (A.CONFIRM,)), (("BACK",), "Help", (A.HELP,)), *info_hint, (("Y",), "Search", (A.SEARCH,)),
+            return [(("START",), "Menu", (A.MENU,)), (("A",), primary, (A.CONFIRM,)), (("BACK",), "Help", (A.HELP,)), *info_hint, (("Y",), "Search", (A.SEARCH,)),
                     (("LB", "RB"), "Section", section),
-                    *favorite_hint, (("START",), music, (A.MUSIC,)),
-                    *launcher, (("B",), *back)]
-        return [(("KEY:ENTER",), primary, (A.CONFIRM,)), (("KEY:F1",), "Help", (A.HELP,)), *info_hint,
+                    *favorite_hint]
+        return [(("KEY:ESC",), "Menu", (A.MENU,)), (("KEY:ENTER",), primary, (A.CONFIRM,)), (("KEY:F1",), "Help", (A.HELP,)), *info_hint,
                 (("KEY:/",), "Search", (A.SEARCH,)), (("KEY:LEFT", "KEY:RIGHT"), "Section", section),
-                (("KEY:F2",), music, (A.MUSIC,)),
-                *([] if category_selected else [(("KEY:F3",), fav, (A.FAVORITE,))]),
-                *launcher, (("KEY:ESC",), *back)]
+                *([] if category_selected else [(("KEY:F3",), fav, (A.FAVORITE,))])]
 
     def _draw_footer(self) -> None:
         s = self.s
@@ -2452,6 +2571,62 @@ class App:
                 self.hits.append(Hit(whole, self._act(actions[0])))
             x += gap
 
+    def _menu_hover(self, index: int) -> None:
+        if index != self.menu_sel:
+            self.menu_sel = index
+            self._sound("move")
+
+    def _draw_menu(self, now: float) -> None:
+        s = self.s
+        t = _ease_out((now - self.menu_opened) / 0.2)
+        items = self._menu_items()
+        pad, row_h, head_h = int(30 * s), int(68 * s), int(100 * s)
+        width = min(self.w - 2 * self.margin, int(760 * s))
+        height = 2 * pad + head_h + len(items) * row_h
+        box = pygame.Rect(0, 0, width, height)
+        box.center = (self.w // 2, (self.h - self.footer_h) // 2 + int(18 * s * (1 - t)))
+
+        shade = pygame.Surface((self.w, self.h - self.footer_h), pygame.SRCALPHA)
+        shade.fill((0, 0, 0, int(155 * t)))
+        self.screen.blit(shade, (0, 0))
+        self.screen.blit(draw.rounded_rect(box.width, box.height, 18 * s, (*PANEL, 250), (78, 62, 55), 1.5 * s), box)
+        self.hits.append(Hit(shade.get_rect(), self._act(Action.BACK)))
+        self.hits.append(Hit(box, lambda: None))
+
+        x, y = box.x + pad, box.y + pad
+        self.screen.blit(self._tracked("MENU", 16, self.theme.label, tracking=0.3), (x, y))
+        self.screen.blit(self._text("CouchDoom", self._font(36, bold=True), TEXT), (x, y + int(28 * s)))
+        y += head_h
+        font = self._font(27)
+        selected_font = self._font(27, bold=True)
+        for index, (key, name) in enumerate(items):
+            rect = pygame.Rect(box.x + int(12 * s), y, box.width - int(24 * s), row_h)
+            selected = index == self.menu_sel
+            enabled = key != "refresh" or self.reload is not None
+            if selected:
+                self.screen.blit(draw.rounded_rect(rect.width, rect.height - int(5 * s), 9 * s, (255, 255, 255, 16)), rect)
+                pygame.draw.rect(self.screen, self.theme.accent,
+                                 (rect.x, rect.y + int(12 * s), int(5 * s), rect.height - int(29 * s)))
+            self.hits.append(Hit(rect, lambda i=index: self._menu_pick(i), lambda i=index: self._menu_hover(i)))
+            ink = TEXT if selected and enabled else MUTED if enabled else DIM
+            row_font = selected_font if selected else font
+            self.screen.blit(self._text(name, row_font, ink),
+                             (x + int(12 * s), self._text_top(row_font, rect.centery)))
+            if key == "refresh" and self.menu_status and now - self.menu_status_at < 2.0:
+                age = max(0.0, now - self.menu_status_at)
+                status = self._text(self.menu_status, self._font(16), self.theme.label)
+                status.set_alpha(int(255 * max(0.0, 1.0 - age / 2.0)))
+                self.screen.blit(status, (rect.right - status.get_width() - int(22 * s), rect.centery - status.get_height() // 2))
+            if key == "music":
+                value = "ON" if self.state.music else "OFF"
+                badge = self._tracked(value, 14, self.theme.label if self.state.music else MUTED, tracking=0.2)
+                self.screen.blit(badge, (rect.right - badge.get_width() - int(22 * s), rect.centery - badge.get_height() // 2))
+            if key == "sounds":
+                value = "ON" if self.state.menu_sounds else "OFF"
+                badge = self._tracked(value, 14, self.theme.label if self.state.menu_sounds else MUTED, tracking=0.2)
+                self.screen.blit(badge, (rect.right - badge.get_width() - int(22 * s), rect.centery - badge.get_height() // 2))
+            y += row_h
+
     def _draw_picker(self, now: float) -> None:
         s = self.s
         t = _ease_out((now - self.picker_opened) / 0.25)
@@ -2489,7 +2664,7 @@ class App:
                 result = self.launchers.cached_preview(choice)
                 name, sub = choice.name, str(choice.path)
                 if result is None:
-                    side, side_color = "Select to load", DIM
+                    side, side_color = "", DIM
                 elif isinstance(result, OptionsError):
                     side, side_color = "Can't read", ERROR
                 else:
@@ -2518,15 +2693,6 @@ class App:
         self.file_browser.selected = index
         self._browser_action(Action.CONFIRM)
 
-    def _browser_hover(self, index: int) -> None:
-        if self.file_browser and index != self.file_browser.selected:
-            self.file_browser.selected = index
-            page = self._browser_page_size()
-            if index < self.browser_scroll:
-                self.browser_scroll = index
-            elif index >= self.browser_scroll + page:
-                self.browser_scroll = index - page + 1
-
     def _draw_browser(self, now: float) -> None:
         browser = self.file_browser
         if browser is None:
@@ -2534,9 +2700,9 @@ class App:
         s = self.s
         page = self._browser_page_size()
         shown = browser.entries[self.browser_scroll:self.browser_scroll + page]
-        pad, row_h, head_h, note_h = int(28 * s), int(54 * s), int(118 * s), int(52 * s)
+        pad, row_h, head_h = int(28 * s), int(54 * s), int(118 * s)
         width = min(self.w - 2 * self.margin, int(1120 * s))
-        height = min(self.h - self.footer_h - int(32 * s), 2 * pad + head_h + max(1, len(shown)) * row_h + note_h)
+        height = min(self.h - self.footer_h - int(32 * s), 2 * pad + head_h + max(1, len(shown)) * row_h)
         box = pygame.Rect(0, 0, width, height)
         box.center = (self.w // 2, (self.h - self.footer_h) // 2)
         shade = pygame.Surface((self.w, self.h - self.footer_h), pygame.SRCALPHA)
@@ -2549,7 +2715,8 @@ class App:
         x, y = box.x + pad, box.y + pad
         inner = box.width - 2 * pad
         self.screen.blit(self._tracked("Find your Doom launcher", 16, self.theme.label, tracking=0.3), (x, y))
-        self.screen.blit(self._text("Choose a file or open a folder", self._font(35, bold=True), TEXT), (x, y + int(26 * s)))
+        subtitle = "Choose a drive or home location" if browser.selecting_root else "Choose a file or open a folder"
+        self.screen.blit(self._text(subtitle, self._font(35, bold=True), TEXT), (x, y + int(26 * s)))
         path_font = self._font(17, mono=True)
         path = self._fit(str(browser.directory), path_font, inner)
         self.screen.blit(self._text(path, path_font, MUTED), (x, y + int(72 * s)))
@@ -2559,22 +2726,34 @@ class App:
             self.screen.blit(self._text("No matching files or folders here", self._font(24), DIM), (x, y + int(12 * s)))
         for offset, entry in enumerate(shown):
             index = self.browser_scroll + offset
-            rect = pygame.Rect(box.x + int(12 * s), y, box.width - int(24 * s), row_h - int(4 * s))
+            scrollbar = len(browser.entries) > page
+            right_reserve = int(16 * s) if scrollbar else 0
+            rect = pygame.Rect(box.x + int(12 * s), y, box.width - int(24 * s) - right_reserve, row_h - int(4 * s))
             selected = index == browser.selected
             if selected:
                 self.screen.blit(draw.rounded_rect(rect.width, rect.height, 9 * s, (255, 255, 255, 18)), rect)
                 pygame.draw.rect(self.screen, self.theme.accent, (rect.x, rect.y + int(8 * s), int(5 * s), rect.height - int(16 * s)))
-            self.hits.append(Hit(rect, lambda i=index: self._browser_pick(i), lambda i=index: self._browser_hover(i)))
+            self.hits.append(Hit(rect, lambda i=index: self._browser_pick(i)))
             label = entry.display_name
-            font = self._font(25, bold=selected)
-            self.screen.blit(self._text(self._fit(label, font, inner - int(16 * s)), font, TEXT if selected else MUTED),
+            navigation = entry.root_selector or entry.parent_selector
+            font = self._font(25, bold=selected and not navigation)
+            self.screen.blit(self._text(self._fit(label, font, rect.right - x - int(16 * s)), font, TEXT if selected else MUTED),
                              (x, self._text_top(font, rect.centery)))
             y += row_h
 
-        note = ("All files shown, including hidden items" if browser.show_all
-                else "Doom launchers and settings files; hidden items are skipped")
-        note_font = self._font(18)
-        self.screen.blit(self._text(self._fit(note, note_font, inner), note_font, DIM), (x, box.bottom - pad - int(20 * s)))
+        if len(browser.entries) > page:
+            track_w = self.scroll_w
+            track = pygame.Rect(box.right - pad - track_w, box.y + pad + head_h,
+                                track_w, max(1, len(shown) * row_h - int(4 * s)))
+            thumb_h = min(track.height, max(int(48 * s), int(track.height * page / len(browser.entries))))
+            max_scroll = max(1, len(browser.entries) - page)
+            thumb_y = track.y + int((track.height - thumb_h) * self.browser_scroll / max_scroll)
+            grabbed = self.drag is not None and self.drag[0] == "browser"
+            self.screen.blit(draw.rounded_rect(track.width, track.height, track.width / 2,
+                                               (255, 255, 255, 18)), track)
+            self.screen.blit(draw.rounded_rect(track.width, thumb_h, track.width / 2,
+                                               TEXT if grabbed else MUTED), (track.x, thumb_y))
+            self._scrollbar("browser", track, thumb_h, max_scroll)
 
     def _draw_update(self, now: float) -> None:
         s = self.s
@@ -2971,6 +3150,9 @@ class App:
         try:
             while self.running:
                 now = time.monotonic()
+                if self.quit_at is not None and now >= self.quit_at:
+                    self.running = False
+                    break
                 dt = now - last
                 last = now
 

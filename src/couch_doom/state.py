@@ -12,6 +12,7 @@ class State:
         self.last_played: str | None = None
         self.history: list[str] = []
         self.music = True
+        self.menu_sounds = True
         self.favorites: list[str] = []
         self.launcher: tuple[str, str] | None = None  # (source key, settings path) the player last picked
         self.added: list[tuple[str, str]] = []  # launchers dropped onto the window, kept for the picker
@@ -27,6 +28,7 @@ class State:
         self.last_played = data.get("last_played")
         self.history = list(data.get("history") or [])
         self.music = bool(data.get("music", True))
+        self.menu_sounds = bool(data.get("menu_sounds", True))
         self.favorites = [f for f in data.get("favorites") or [] if isinstance(f, str)]
         if (pick := _pair(data.get("launcher"))) is not None:
             self.launcher = pick
@@ -46,6 +48,10 @@ class State:
 
     def set_music(self, on: bool) -> None:
         self.music = on
+        self._save()
+
+    def set_menu_sounds(self, on: bool) -> None:
+        self.menu_sounds = on
         self._save()
 
     def set_launcher(self, key: str, path: str, added: bool = False) -> None:
@@ -71,6 +77,7 @@ class State:
             "last_played": self.last_played,
             "history": self.history,
             "music": self.music,
+            "menu_sounds": self.menu_sounds,
             "favorites": self.favorites,
             "launcher": {"source": self.launcher[0], "path": self.launcher[1]} if self.launcher else None,
             "added_launchers": [{"source": k, "path": p} for k, p in self.added],

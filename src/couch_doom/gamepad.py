@@ -14,6 +14,7 @@ class Action(Enum):
     RIGHT = auto()
     CONFIRM = auto()
     BACK = auto()
+    MENU = auto()  # Escape / Start: open the main menu
     SEARCH = auto()
     ALT = auto()  # X: info sheet / backspace in search
     HELP = auto()  # Back/View: quick help
@@ -24,9 +25,7 @@ class Action(Enum):
     PAGE_DOWN = auto()
     HOME = auto()
     END = auto()
-    MUSIC = auto()  # Start: title music on/off
     FAVORITE = auto()  # R3: add/remove from Favorites
-    LAUNCHER = auto()  # L3: pick which launcher's presets to show
 
 
 DIRECTIONS = {Action.UP, Action.DOWN, Action.LEFT, Action.RIGHT, Action.PAGE_UP, Action.PAGE_DOWN}
@@ -44,9 +43,8 @@ _CONTROLLER_BUTTONS = {
     pygame.CONTROLLER_BUTTON_X: Action.ALT,
     pygame.CONTROLLER_BUTTON_Y: Action.SEARCH,
     pygame.CONTROLLER_BUTTON_BACK: Action.HELP,
-    pygame.CONTROLLER_BUTTON_START: Action.MUSIC,
+    pygame.CONTROLLER_BUTTON_START: Action.MENU,
     pygame.CONTROLLER_BUTTON_RIGHTSTICK: Action.FAVORITE,
-    pygame.CONTROLLER_BUTTON_LEFTSTICK: Action.LAUNCHER,
     pygame.CONTROLLER_BUTTON_LEFTSHOULDER: Action.PREV_SECTION,
     pygame.CONTROLLER_BUTTON_RIGHTSHOULDER: Action.NEXT_SECTION,
     pygame.CONTROLLER_BUTTON_DPAD_UP: Action.UP,
@@ -64,8 +62,7 @@ _JOY_BUTTONS = {
     4: Action.PREV_SECTION,
     5: Action.NEXT_SECTION,
     6: Action.HELP,
-    7: Action.MUSIC,
-    8: Action.LAUNCHER,
+    7: Action.MENU,
     9: Action.FAVORITE,
 }
 
@@ -78,15 +75,13 @@ _KEYS = {
     pygame.K_RIGHT: Action.RIGHT,
     pygame.K_RETURN: Action.CONFIRM,
     pygame.K_KP_ENTER: Action.CONFIRM,
-    pygame.K_ESCAPE: Action.BACK,
+    pygame.K_ESCAPE: Action.MENU,
     pygame.K_TAB: Action.ALT,
     pygame.K_PAGEUP: Action.PAGE_UP,
     pygame.K_PAGEDOWN: Action.PAGE_DOWN,
     pygame.K_HOME: Action.HOME,
     pygame.K_END: Action.END,
-    pygame.K_F2: Action.MUSIC,
     pygame.K_F3: Action.FAVORITE,
-    pygame.K_F4: Action.LAUNCHER,
 }
 
 

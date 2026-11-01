@@ -35,9 +35,9 @@ If you use a launcher, CouchDoom uses its engine choices and settings. Without o
 
 ### Finding your setup
 
-CouchDoom checks common install locations and follows Windows shortcuts, including portable installs. If it finds one setup, it opens it. If it finds several, choose one; CouchDoom remembers your choice. Switch later with **L3** (click the left stick) or **F4**.
+CouchDoom checks common install locations and follows Windows shortcuts, including portable installs. If it finds one setup, it opens it. If it finds several, choose one; CouchDoom remembers your choice. Switch later from the menu.
 
-If nothing is found, choose **Find it myself…** and browse with a controller: D-pad or stick to move, **A** to open or choose, **B** to go up, **X** to show all files, **LB/RB** to switch drives or roots, and **LT/RT** to page through the list. In an installed copy the browser starts in CouchDoom's own folder, so a launcher kept beside it is right there. You can also drag a file onto the window.
+If nothing is found, choose **Find it myself…** and browse with a controller: D-pad or stick to move, **A** to open or choose, **B** to go up, and **X** to show all files. Select **../** to go up one folder; at a drive root, select **Drives & Home/** for the separate location list. On the keyboard, **Escape** closes the browser and Page Up/Down move by one visible page without wrapping. In an installed copy the browser starts in CouchDoom's own folder, so a launcher kept beside it is right there. You can also drag a file onto the window.
 
 ![The launcher picker showing DoomRunner, ZDL, Doom Launcher and UZDoom](docs/screenshots/launcher-picker.jpg)
 
@@ -74,17 +74,17 @@ MIDI playback support from source also needs tinysoundfont. On macOS, if GZDoom 
 | D-pad / stick left or right | Left / Right | Left goes to the current group heading, then the previous group; Right goes to the next group |
 | A | Enter | Play or open / close a section heading |
 | Back / View | F1 | Quick help |
-| Start | F2 | Toggle title music |
+| Start | Esc | Open the menu |
 | — | F5 | Help & feedback |
 | X | Tab | Readme and ENDOOM info |
 | Y | / or type | Search |
 | R3 | F3 | Add or remove a favorite |
-| L3 | F4 | Choose a launcher |
 | LB / RB | — | Jump between sections |
 | LT / RT | PgUp / PgDn | Jump through the list |
-| B | Esc | Clear search, or press twice to quit |
+| — | Home / End | Jump to the top / bottom of the list |
+| B | — | Back from an open panel |
 
-Mouse and keyboard prompts are available too. CouchDoom hides while a game runs and returns when it closes. Favorites have their own section at the top.
+Escape or Start opens the menu for returning to the list, refreshing launcher data, choosing a launcher, toggling title music or menu sounds with Left/Right, opening Help, and quitting. B closes an open panel and does nothing on the main selector. Mouse and keyboard prompts are available too. CouchDoom hides while a game runs and returns when it closes. Favorites have their own section at the top.
 
 ## What you'll see and hear
 

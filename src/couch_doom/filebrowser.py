@@ -13,9 +13,20 @@ from typing import Callable, Collection
 class Entry:
     path: Path
     is_dir: bool
+    root_selector: bool = False
+    parent_selector: bool = False
+    location_selector: bool = False
 
     @property
     def display_name(self) -> str:
+        if self.parent_selector:
+            if self.location_selector:
+                return "< Drives & Home >"
+            return "< Parent directory >"
+        if self.root_selector:
+            if self.path == Path.home():
+                return f"Home - {self.path}"
+            return str(self.path)
         return self.path.name + ("/" if self.is_dir else "")
 
 
@@ -97,11 +108,10 @@ class Browser:
         self.roots = roots(home, candidates=candidates)
         if start is not None and Path(start).is_dir():
             start = Path(start)
-            if start not in self.roots:
-                self.roots.insert(0, start)  # LB/RB can still jump back to CouchDoom's folder
             self.directory = start
         else:
             self.directory = self.roots[0]
+        self.selecting_root = parent(self.directory) is None
         self.names, self.suffixes = tuple(names), tuple(suffixes)
         self.app_bundles = app_bundles
         self.include = include
@@ -109,10 +119,21 @@ class Browser:
         self.selected = 0
         self.entries: list[Entry] = []
         self.refresh()
+        if self.selecting_root:
+            self.selected = next((i for i, entry in enumerate(self.entries) if entry.path == self.directory), 0)
 
     def refresh(self) -> None:
-        self.entries = list_entries(self.directory, show_all=self.show_all, names=self.names, suffixes=self.suffixes,
-                                    app_bundles=self.app_bundles, include=self.include)
+        if self.selecting_root:
+            roots = [Entry(root, True, root_selector=True) for root in self.roots]
+            self.entries = roots
+        else:
+            self.entries = list_entries(self.directory, show_all=self.show_all, names=self.names, suffixes=self.suffixes,
+                                        app_bundles=self.app_bundles, include=self.include)
+            above = parent(self.directory)
+            if above is None:
+                self.entries.insert(0, Entry(self.directory, True, parent_selector=True, location_selector=True))
+            else:
+                self.entries.insert(0, Entry(above, True, parent_selector=True))
         self.selected = max(0, min(self.selected, len(self.entries) - 1))
 
     def move(self, amount: int, *, wrap: bool = True) -> None:
@@ -129,6 +150,8 @@ class Browser:
         if not self.entries:
             return None
         entry = self.entries[self.selected]
+        if entry.root_selector or entry.parent_selector:
+            return None
         if entry.is_dir:
             self.directory = entry.path
             self.selected = 0
@@ -137,9 +160,14 @@ class Browser:
         return entry.path
 
     def back(self) -> bool:
+        if self.selecting_root:
+            return False
         above = parent(self.directory)
         if above is None:
-            return False
+            self.selecting_root = True
+            self.refresh()
+            self.selected = next((i for i, e in enumerate(self.entries) if e.path == self.directory), 0)
+            return True
         old = self.directory
         self.directory = above
         self.refresh()
@@ -153,5 +181,14 @@ class Browser:
             # From a nested folder, left/right jumps from the closest listed root.
             current = max((i for i, root in enumerate(self.roots) if self.directory == root or root in self.directory.parents), default=0)
         self.directory = self.roots[max(0, min(len(self.roots) - 1, current + amount))]
+        self.selected = 0
+        self.refresh()
+
+    def select_root(self, root: Path) -> None:
+        root = Path(root)
+        if root not in self.roots:
+            return
+        self.directory = root
+        self.selecting_root = False
         self.selected = 0
         self.refresh()
