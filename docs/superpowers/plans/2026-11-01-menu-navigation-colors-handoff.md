@@ -4,7 +4,7 @@
 
 - Repository: `F:\Projects\Programming\Tools\couch-doom`
 - Branch: `main`
-- The menu/browser baseline is `7eadf9f` (`feat(ui): add menu and improve file browser navigation`). Follow-up performance fixes, regression tests, and this documentation refresh are being committed and pushed in the current thread.
+- The menu/browser baseline is `7eadf9f` (`feat(ui): add menu and improve file browser navigation`). Follow-up performance fixes and regression tests are committed as `5acb810` (`perf(ui): reduce preset selection hitches`). This documentation update records that status.
 - The full test suite passes: **125 passed, 2 skipped**. `git diff --check` passes; Git only reports working-tree line-ending conversion warnings.
 
 ## Completed Since the Baseline

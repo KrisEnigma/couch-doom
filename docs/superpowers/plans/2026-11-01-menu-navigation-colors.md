@@ -1,6 +1,6 @@
 # Menu, Navigation, and Color Plan
 
-**Status:** Menu and navigation changes are implemented. Follow-up performance fixes are complete and tested; this plan and handoff are being refreshed for the next thread. Recent-played group and color review remain open. The earlier menu/browser baseline is `7eadf9f` (`feat(ui): add menu and improve file browser navigation`).
+**Status:** Menu and navigation changes are implemented. Follow-up performance fixes and regression tests are committed in `5acb810`; this plan and handoff are refreshed for the next thread. Recent-played group and color review remain open. The earlier menu/browser baseline is `7eadf9f` (`feat(ui): add menu and improve file browser navigation`).
 
 ## Goal
 
@@ -20,6 +20,7 @@ Keep CouchDoom's direct game-list flow while adding the creator-requested menu a
 - Added regression coverage for dwell timing, asynchronous music identity/pruning, art/logo job ordering and title fallback, long-text layout, theme/cache behavior, and background worker priority.
 - Replayed the complete local list down and back up at both 0.5-second and 0.2-second press intervals (231 presses each). The dummy-display runs recorded no frame intervals over 50 ms. These runs exercise the application loop but do not replace a hardware/fullscreen check.
 - Reviewed and refreshed tests that had become stale against current behavior: incomplete app fixtures, current menu/controller bindings, browser parent rows and startup-root semantics, and the optional IWAD quit sound (there is no bundled `DSPLDETH` asset). Full suite: **125 passed, 2 skipped**.
+- Follow-up performance and test changes are committed as `5acb810` (`perf(ui): reduce preset selection hitches`).
 
 ## Remaining Work
 
