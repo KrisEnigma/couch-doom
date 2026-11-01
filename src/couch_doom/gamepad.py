@@ -22,6 +22,8 @@ class Action(Enum):
     NEXT_SECTION = auto()
     PAGE_UP = auto()
     PAGE_DOWN = auto()
+    HOME = auto()
+    END = auto()
     MUSIC = auto()  # Start: title music on/off
     FAVORITE = auto()  # R3: add/remove from Favorites
     LAUNCHER = auto()  # L3: pick which launcher's presets to show
@@ -80,6 +82,8 @@ _KEYS = {
     pygame.K_TAB: Action.ALT,
     pygame.K_PAGEUP: Action.PAGE_UP,
     pygame.K_PAGEDOWN: Action.PAGE_DOWN,
+    pygame.K_HOME: Action.HOME,
+    pygame.K_END: Action.END,
     pygame.K_F2: Action.MUSIC,
     pygame.K_F3: Action.FAVORITE,
     pygame.K_F4: Action.LAUNCHER,

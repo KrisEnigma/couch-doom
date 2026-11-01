@@ -1480,6 +1480,10 @@ class App:
             self._move(-8, wrap=not repeat)
         elif action == Action.PAGE_DOWN:
             self._move(8, wrap=not repeat)
+        elif action == Action.HOME:
+            self._move(-self._sel_row(), wrap=False)
+        elif action == Action.END:
+            self._move(len(self.rows), wrap=False)
         elif action == Action.LEFT:
             selected = self._sel_row()
             if self.rows and self.rows[selected].kind != "header":
@@ -1501,7 +1505,7 @@ class App:
             else:
                 self._launch_selected()
         elif action == Action.ALT:
-            if self.rows:
+            if self.rows and self.rows[self._sel_row()].kind == "preset":
                 self._open_info(now)
         elif action == Action.SEARCH:
             self._open_search(now)
@@ -2394,13 +2398,14 @@ class App:
         back = ("Clear filter" if self.filter else "Quit", (A.BACK,))
         section = (A.PREV_SECTION, A.NEXT_SECTION)
         primary = "Open / Close" if category_selected else "Play"
+        info_hint = [] if category_selected else [(('X',) if pad else ('KEY:TAB',), "Info", (A.ALT,))]
         favorite_hint = [] if category_selected else [(('R3',) if pad else ('KEY:F3',), fav, (A.FAVORITE,))]
         if pad:
-            return [(("A",), primary, (A.CONFIRM,)), (("BACK",), "Help", (A.HELP,)), (("X",), "Info", (A.ALT,)), (("Y",), "Search", (A.SEARCH,)),
+            return [(("A",), primary, (A.CONFIRM,)), (("BACK",), "Help", (A.HELP,)), *info_hint, (("Y",), "Search", (A.SEARCH,)),
                     (("LB", "RB"), "Section", section),
                     *favorite_hint, (("START",), music, (A.MUSIC,)),
                     *launcher, (("B",), *back)]
-        return [(("KEY:ENTER",), primary, (A.CONFIRM,)), (("KEY:F1",), "Help", (A.HELP,)), (("KEY:TAB",), "Info", (A.ALT,)),
+        return [(("KEY:ENTER",), primary, (A.CONFIRM,)), (("KEY:F1",), "Help", (A.HELP,)), *info_hint,
                 (("KEY:/",), "Search", (A.SEARCH,)), (("KEY:LEFT", "KEY:RIGHT"), "Section", section),
                 (("KEY:F2",), music, (A.MUSIC,)),
                 *([] if category_selected else [(("KEY:F3",), fav, (A.FAVORITE,))]),
