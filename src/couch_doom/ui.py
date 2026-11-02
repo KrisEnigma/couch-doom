@@ -893,8 +893,13 @@ class App:
         if self.mode == "browse" and before != (browser.directory, browser.selected, browser.show_all):
             self._sound("move")
 
+    def _browser_head_h(self) -> int:
+        """Title plus the folder path; the drive list has no path line."""
+        browser = self.file_browser
+        return int((64 if browser is not None and browser.selecting_root else 92) * self.s)
+
     def _browser_page_size(self) -> int:
-        pad, row_h, head_h = int(28 * self.s), int(54 * self.s), int(92 * self.s)
+        pad, row_h, head_h = int(28 * self.s), int(54 * self.s), self._browser_head_h()
         max_height = self.h - self.footer_h - int(32 * self.s)
         return max(1, min(16, (max_height - 2 * pad - head_h) // row_h))
 
@@ -3231,7 +3236,7 @@ class App:
         s = self.s
         page = self._browser_page_size()
         shown = browser.entries[self.browser_scroll:self.browser_scroll + page]
-        pad, row_h, head_h = int(28 * s), int(54 * s), int(92 * s)
+        pad, row_h, head_h = int(28 * s), int(54 * s), self._browser_head_h()
         width = min(self.w - 2 * self.margin, int(1120 * s))
         rows = max(1, len(shown)) + (1 if browser.empty else 0)
         height = min(self.h - self.footer_h - int(32 * s), 2 * pad + head_h + rows * row_h)
