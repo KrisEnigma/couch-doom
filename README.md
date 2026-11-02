@@ -84,7 +84,13 @@ MIDI playback support from source also needs tinysoundfont. On macOS, if GZDoom 
 | — | Home / End | Jump to the top / bottom of the list or file browser |
 | B | — | Back from an open panel |
 
-Escape or Start opens the menu for returning to the list, refreshing launcher data, choosing a launcher, toggling title music or menu sounds with Left/Right, cycling Colors and Language, turning the optional Recently Played group on or off, opening Help, and quitting. Language follows the OS on first run when CouchDoom supports it (English, Spanish, Brazilian Portuguese, French, German); change it anytime from the menu. Colors can follow each game's art or lock one look for the whole app. Group headings can be folded to keep large libraries manageable; search still finds games inside collapsed groups, and Favorites stay near the top. B closes an open panel and does nothing on the main selector. Mouse and keyboard prompts are available too. CouchDoom hides while a game runs and returns when it closes.
+Escape or Start opens the menu. From there you can return to the list, refresh launcher data, choose a launcher, toggle title music or menu sounds with Left/Right, cycle Colors and Language, turn the optional Recently Played group on or off, open Help, or quit.
+
+Language follows the OS on first run when CouchDoom supports it (English, Spanish, Brazilian Portuguese, French, German). Change it anytime from the menu. Colors can follow each game's art or lock one look for the whole app.
+
+Fold a group heading when you want that section out of the way. Search still finds games inside collapsed groups. Favorites stay near the top.
+
+B closes an open panel and does nothing on the main selector. Mouse and keyboard prompts are available too. CouchDoom hides while a game runs and returns when it closes.
 
 ## What you'll see and hear
 
