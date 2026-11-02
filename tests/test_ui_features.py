@@ -439,20 +439,16 @@ def test_category_preview_uses_available_height_and_two_columns():
     assert (columns, visible, more) == (2, 8, 0)
 
 
-def test_category_selection_shows_its_first_games_art_not_the_previous_games():
+def test_category_selection_shows_no_games_art():
     app = make_app()
     app._rebuild_rows()
     app._select_row(0)
     lead = app._category_presets(app.rows[0])[0]
-    other = next(i for i in range(len(app.opts.presets)) if i != lead)
-    lead_art = object()
-    app.current = other
-    app.art_layers = [(other, object(), 0.0)]
-    app.art_cache = OrderedDict({lead: lead_art})
-    app.art_jobs, app.art_render_jobs, app.logo_render_jobs = {}, {}, {}
+    app.art_layers = [(lead, object(), 0.0)]
+    app.art_cache = OrderedDict({lead: object()})
     app._update_art(1.0)
 
-    assert app.art_layers[-1] == (lead, lead_art, 1.0)
+    assert app.art_layers[-1] == (-1, None, 1.0)
 
 
 def test_category_selection_stops_preset_music():

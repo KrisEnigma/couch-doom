@@ -545,7 +545,6 @@ class App:
         self.scroll = self._target_scroll()
         self.bar_y = self.row_y[self._sel_row()] if self.rows else 0
         self.thumb_scroll, self.thumb_moved = self.scroll, -math.inf
-        self.art_dim = 0.0
         self._loading_cache: tuple | None = None
         self.detail_changed = time.monotonic()
         self._warm_cache()
@@ -1586,14 +1585,13 @@ class App:
         return theme, out, background, layers
 
     def _update_art(self, now: float) -> None:
-        # A heading shows its group's first game, dimmed (see _draw_art), never the game it was reached from.
-        group = self._category_presets(self.rows[self._sel_row()]) if self._category_selected() else None
-        if not self.rows or group == []:
+        # A heading stands for a whole group, so no one game's art (and theme) speaks for it.
+        if not self.rows or self._category_selected():
             if not self.art_layers or self.art_layers[-1][0] != -1:
                 self.art_layers.append((-1, None, now))
                 self.art_layers = self.art_layers[-2:]
             return
-        selected = group[0] if group else self.current
+        selected = self.current
         for idx, job in list(self.art_jobs.items()):
             if idx != selected:
                 job.cancel()
@@ -1747,9 +1745,6 @@ class App:
                 top.set_alpha(int(255 * t))
             self.screen.blit(top, self.art_rect)
             _reset_alpha(top)
-        if self.art_dim > 0.01:
-            k = 255 - int(175 * self.art_dim)
-            self.screen.fill((k, k, k), self.art_rect, special_flags=pygame.BLEND_MULT)
         self._blit_layer("veil")
 
     # ---------- actions ----------
@@ -3833,4 +3828,3 @@ class App:
         if self.rows:
             self.scroll = _lerp(self.scroll, self._target_scroll(), min(1.0, dt * 14))
             self.bar_y = _lerp(self.bar_y, self.row_y[self._sel_row()], min(1.0, dt * 20))
-        self.art_dim = _lerp(self.art_dim, 1.0 if self._category_selected() else 0.0, min(1.0, dt * 10))
