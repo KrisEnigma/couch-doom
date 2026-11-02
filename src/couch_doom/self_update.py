@@ -1,8 +1,10 @@
 """Download, validate, stage, and apply packaged application updates."""
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -20,6 +22,12 @@ from typing import Callable
 from .update import ReleaseAsset
 
 CHUNK = 256 * 1024
+RESULT_FILE = "update-result.json"
+
+# progress(phase, done, total): phases arrive in this order; done/total are bytes while downloading,
+# files while unpacking, and 0/None otherwise.
+PHASES = ("checking", "downloading", "verifying", "unpacking", "preparing")
+Progress = Callable[[str, int, "int | None"], None]
 
 
 class UpdateError(Exception):
@@ -32,6 +40,7 @@ class StagedUpdate:
     root: Path
     app_path: Path
     archive_path: Path
+    helper: Path | None = None  # set by prepare_apply_helper
 
 
 STAGING_PREFIX = "couchdoom-update-"
@@ -68,16 +77,18 @@ def _read(url: str) -> bytes:
 
 
 def download_and_stage(asset: ReleaseAsset, version: str, *, staging_root: Path,
-                       platform: str, progress: Callable[[int, int | None], None] | None = None,
+                       platform: str, progress: Progress | None = None,
                        cancel: threading.Event | None = None) -> StagedUpdate:
     if not asset.name.startswith(f"CouchDoom-v{version}-"):
         raise UpdateError("The release archive name did not match its version.")
+    report = progress or (lambda phase, done, total: None)
     staging_root.mkdir(parents=True, exist_ok=True)
     purge_stale_update_dirs(staging_root)
     root = Path(tempfile.mkdtemp(prefix=STAGING_PREFIX, dir=staging_root))
     archive_path = root / asset.name
     partial = archive_path.with_suffix(archive_path.suffix + ".part")
     try:
+        report("checking", 0, None)
         expected = _read(asset.sha256_url).decode("ascii", "strict").strip().split()
         if (len(expected) != 2 or expected[1].lstrip("* ") != asset.name or len(expected[0]) != 64
                 or any(c not in "0123456789abcdefABCDEF" for c in expected[0])):
@@ -88,27 +99,28 @@ def download_and_stage(asset: ReleaseAsset, version: str, *, staging_root: Path,
             with _request(asset.url) as response, partial.open("wb") as output:
                 length = response.headers.get("Content-Length")
                 total_length = int(length) if length and length.isdigit() else None
+                report("downloading", 0, total_length)
                 while True:
-                    if cancel and cancel.is_set():
-                        raise UpdateError("Update cancelled.")
+                    _check_cancel(cancel)
                     chunk = response.read(CHUNK)
                     if not chunk:
                         break
                     output.write(chunk)
                     digest.update(chunk)
                     total += len(chunk)
-                    if progress:
-                        progress(total, total_length)
+                    report("downloading", total, total_length)
         except (OSError, ValueError) as exc:
             raise UpdateError(f"Could not download the update: {exc}") from exc
+        report("verifying", 0, None)
         if digest.hexdigest().lower() != expected[0].lower():
             raise UpdateError("The downloaded update failed its SHA-256 check.")
         partial.replace(archive_path)
         extracted = root / "extracted"
+        unpacked = lambda done, count: report("unpacking", done, count)
         if asset.name.endswith(".zip"):
-            _extract_zip(archive_path.read_bytes(), extracted)
+            _extract_zip(archive_path, extracted, unpacked, cancel)
         elif asset.name.endswith(".tar.gz"):
-            _extract_tar(archive_path, extracted)
+            _extract_tar(archive_path, extracted, unpacked, cancel)
         else:
             raise UpdateError("The release archive format was not supported.")
         if platform.startswith("macos-"):
@@ -143,16 +155,26 @@ def _safe_link(root: Path, path: Path, target: str) -> str:
     return target
 
 
-def _extract_zip(data: bytes, destination: Path) -> None:
+def _check_cancel(cancel: threading.Event | None) -> None:
+    if cancel and cancel.is_set():
+        raise UpdateError("Update cancelled.")
+
+
+def _extract_zip(source: Path | bytes, destination: Path, progress: Callable[[int, int], None] | None = None,
+                 cancel: threading.Event | None = None) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     try:
-        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        # A path is read member by member; the whole archive never sits in memory.
+        with zipfile.ZipFile(io.BytesIO(source) if isinstance(source, bytes) else source) as archive:
             members = [(item, _safe_destination(destination, item.filename)) for item in archive.infolist()]
             links = {path for item, path in members if ((item.external_attr >> 16) & 0o170000) == 0o120000}
             for item, path in members:
                 if any(parent in links for parent in path.parents):
                     raise UpdateError("The release archive placed a file beneath a symbolic link.")
-            for item, path in members:
+            for done, (item, path) in enumerate(members):
+                _check_cancel(cancel)
+                if progress:
+                    progress(done, len(members))
                 kind = (item.external_attr >> 16) & 0o170000
                 if item.is_dir():
                     path.mkdir(parents=True, exist_ok=True)
@@ -167,13 +189,16 @@ def _extract_zip(data: bytes, destination: Path) -> None:
                     permissions = (item.external_attr >> 16) & 0o777 if item.create_system == 3 else 0
                     if permissions:
                         path.chmod(permissions)
+            if progress:
+                progress(len(members), len(members))
     except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
         if isinstance(exc, UpdateError):
             raise
         raise UpdateError(f"Could not unpack update: {exc}") from exc
 
 
-def _extract_tar(archive_path: Path, destination: Path) -> None:
+def _extract_tar(archive_path: Path, destination: Path, progress: Callable[[int, int], None] | None = None,
+                 cancel: threading.Event | None = None) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     try:
         with tarfile.open(archive_path, "r:gz") as archive:
@@ -184,7 +209,10 @@ def _extract_tar(archive_path: Path, destination: Path) -> None:
             for item, path in members:
                 if any(parent in links for parent in path.parents):
                     raise UpdateError("The release archive placed a file beneath a symbolic link.")
-            for item, path in members:
+            for done, (item, path) in enumerate(members):
+                _check_cancel(cancel)
+                if progress:
+                    progress(done, len(members))
                 if item.isdir():
                     path.mkdir(parents=True, exist_ok=True)
                 elif item.issym():
@@ -198,6 +226,8 @@ def _extract_tar(archive_path: Path, destination: Path) -> None:
                     with source, path.open("wb") as output:
                         shutil.copyfileobj(source, output)
                     path.chmod(item.mode & 0o777)
+            if progress:
+                progress(len(members), len(members))
     except (OSError, tarfile.TarError) as exc:
         if isinstance(exc, UpdateError):
             raise
@@ -228,7 +258,8 @@ def _installed_app_environment() -> dict[str, str]:
     return env
 
 
-def launch_apply_helper(staged: StagedUpdate, install_path: Path, pid: int, platform: str) -> None:
+def prepare_apply_helper(staged: StagedUpdate, platform: str) -> StagedUpdate:
+    """Copy the staged app to run the swap from. Hundreds of files: call it off the UI thread."""
     helper_root = staged.root / "apply-helper"
     helper_root.mkdir(parents=True, exist_ok=True)
     helper_app = helper_root / staged.app_path.name
@@ -236,9 +267,59 @@ def launch_apply_helper(staged: StagedUpdate, install_path: Path, pid: int, plat
     helper = helper_executable(helper_app, platform)
     if not helper.is_file() or (os.name != "nt" and not os.access(helper, os.X_OK)):
         raise UpdateError("The staged update helper was missing.")
-    subprocess.Popen([str(helper), "--apply-update", str(staged.app_path), str(install_path), str(pid), platform, str(staged.root)],
-                     cwd=str(helper_root), close_fds=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True)
+    return dataclasses.replace(staged, helper=helper)
+
+
+def download_and_prepare(asset: ReleaseAsset, version: str, *, staging_root: Path, platform: str,
+                         progress: Progress | None = None, cancel: threading.Event | None = None) -> StagedUpdate:
+    """Everything up to the restart. Cancel is honoured until "preparing" starts, and not after."""
+    staged = download_and_stage(asset, version, staging_root=staging_root, platform=platform,
+                                progress=progress, cancel=cancel)
+    try:
+        _check_cancel(cancel)
+        if progress:
+            progress("preparing", 0, None)
+        return prepare_apply_helper(staged, platform)
+    except Exception:
+        discard_staged(staged)
+        raise
+
+
+def launch_apply_helper(staged: StagedUpdate, install_path: Path, pid: int, platform: str,
+                        result_file: Path | None = None) -> None:
+    """Start the prepared helper, which waits for this process to exit before swapping folders."""
+    if staged.helper is None or not staged.helper.is_file():
+        raise UpdateError("The staged update helper was missing.")
+    argv = [str(staged.helper), "--apply-update", str(staged.app_path), str(install_path), str(pid), platform, str(staged.root)]
+    if result_file is not None:
+        argv.append(str(result_file))
+    subprocess.Popen(argv, cwd=str(staged.root / "apply-helper"), close_fds=True,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def write_result(path: Path | None, ok: bool, error: str = "") -> None:
+    """Leave the outcome for the next CouchDoom to report; the helper has no window of its own."""
+    if path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"ok": ok, "error": error}), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def take_result(path: Path) -> dict | None:
+    """Read and remove the helper's outcome, so it's reported once."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    finally:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+    return data if isinstance(data, dict) and isinstance(data.get("ok"), bool) else None
 
 
 def _wait_for_exit(pid: int, timeout: float = 120) -> None:
@@ -252,15 +333,35 @@ def _wait_for_exit(pid: int, timeout: float = 120) -> None:
     raise UpdateError("CouchDoom did not exit in time to apply the update.")
 
 
+def _relaunch(install_path: Path, platform: str) -> None:
+    subprocess.Popen([str(helper_executable(install_path, platform))], cwd=str(install_path.parent),
+                     close_fds=True, env=_installed_app_environment(), stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
 def apply_staged_update(staged_app: Path, install_path: Path, *, pid: int, platform: str,
-                        relaunch: bool = True, cleanup_root: Path | None = None) -> int:
-    staged_app, install_path = staged_app.resolve(), install_path.resolve()
-    if not staged_app.is_dir() or not install_path.is_dir() or staged_app == install_path:
-        raise UpdateError("The update or installation path was invalid.")
-    _wait_for_exit(pid)
+                        relaunch: bool = True, cleanup_root: Path | None = None,
+                        result_file: Path | None = None) -> int:
+    """Swap the staged app into place and relaunch. The result is written before any relaunch,
+    so the app that starts next can say whether the update worked."""
+    try:
+        staged_app, install_path = staged_app.resolve(), install_path.resolve()
+        if not staged_app.is_dir() or not install_path.is_dir() or staged_app == install_path:
+            raise UpdateError("The update or installation path was invalid.")
+        _wait_for_exit(pid)
+    except UpdateError as exc:
+        write_result(result_file, False, str(exc))
+        raise
     backup = install_path.with_name(f".{install_path.name}.old-{pid}")
     if backup.exists():
-        raise UpdateError("A previous update backup needs attention before another update can be installed.")
+        message = "A previous update backup needs attention before another update can be installed."
+        write_result(result_file, False, message)
+        if relaunch:
+            try:
+                _relaunch(install_path, platform)
+            except OSError:
+                pass
+        raise UpdateError(message)
     moved_new = False
     try:
         if not platform.startswith("macos-"):
@@ -278,11 +379,11 @@ def apply_staged_update(staged_app: Path, install_path: Path, *, pid: int, platf
         except OSError:
             backup.rename(install_path)
             raise
+        write_result(result_file, True)
         if relaunch:
-            subprocess.Popen([str(helper_executable(install_path, platform))], cwd=str(install_path.parent),
-                             close_fds=True, env=_installed_app_environment(), stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            _relaunch(install_path, platform)
     except Exception as exc:
+        error = exc if isinstance(exc, UpdateError) else UpdateError(f"Could not install the update: {exc}")
         try:
             if moved_new and install_path.exists():
                 failed = install_path.with_name(f".{install_path.name}.failed-{pid}")
@@ -291,15 +392,14 @@ def apply_staged_update(staged_app: Path, install_path: Path, *, pid: int, platf
                 backup.rename(install_path)
             if "failed" in locals():
                 shutil.rmtree(failed, ignore_errors=True)
+            write_result(result_file, False, str(error))
             if relaunch and install_path.exists():
-                subprocess.Popen([str(helper_executable(install_path, platform))], cwd=str(install_path.parent),
-                                 close_fds=True, env=_installed_app_environment(), stdin=subprocess.DEVNULL,
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                _relaunch(install_path, platform)
         except OSError:
             pass
-        if isinstance(exc, UpdateError):
+        if error is exc:
             raise
-        raise UpdateError(f"Could not install the update: {exc}") from exc
+        raise error from exc
     shutil.rmtree(backup, ignore_errors=True)
     if cleanup_root:
         shutil.rmtree(cleanup_root, ignore_errors=True)

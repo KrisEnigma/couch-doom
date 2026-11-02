@@ -81,6 +81,8 @@ ENDOOM_TAB = 1
 HELP_SECTION_COUNT = 9
 ISSUE_URL = "https://github.com/KrisEnigma/couch-doom/issues"
 UPDATE_DELAY_SECONDS = 1.0  # let the list settle briefly before a notice appears over it
+UPDATE_VERIFY_HOLD_SECONDS = 0.4
+UPDATE_RESTART_HOLD_SECONDS = 0.6
 
 
 def info_tabs() -> tuple[str, str]:
@@ -150,6 +152,10 @@ class Hit:
 
 def _lerp(a: float, b: float, k: float) -> float:
     return a + (b - a) * k
+
+
+def _mb(size: int) -> str:
+    return f"{size / (1024 * 1024):.1f}".replace(".", tr("update.decimal"))
 
 
 def _theme_cache(cache: OrderedDict, key: int, create: Callable):
@@ -436,8 +442,9 @@ class App:
         self.update_started = 0.0
         self.update_install_job: Future | None = None
         self.update_cancel: threading.Event | None = None
-        self.update_progress: tuple[int, int | None] = (0, None)
+        self.update_progress: tuple[str, int, int | None] = ("checking", 0, None)  # see self_update.PHASES
         self.update_error: str | None = None
+        self.restarting = False  # the restart screen holds until quit_at
         self.soundfont_choice = soundfont
         self._engine_soundfonts: dict[tuple, Path | None] = {}
 
@@ -530,6 +537,7 @@ class App:
         self.bar_y = self.row_y[self._sel_row()] if self.rows else 0
         self.detail_changed = time.monotonic()
         self._warm_cache()
+        self._report_update_result()
         if pick:
             self._open_picker()
 
@@ -651,9 +659,12 @@ class App:
         self.mode = "update"
         self._sound("open")
 
+    def _update_cancellable(self) -> bool:
+        return self.update_install_job is not None and self.update_progress[0] != "preparing"
+
     def _on_update_action(self, action: Action) -> None:
         choices = update_choices(self.update, bool(getattr(sys, "frozen", False)))
-        if action == Action.BACK and self.update_install_job is not None and self.update_cancel:
+        if action == Action.BACK and self._update_cancellable() and self.update_cancel:
             self.update_cancel.set()
             return
         if self.update_install_job is not None:
@@ -683,8 +694,9 @@ class App:
         if self.update_install_job is not None and self.update_choice != "install":
             return
         if self.update_choice == "install":
-            if self.update_install_job is not None and self.update_cancel:
-                self.update_cancel.set()
+            if self.update_install_job is not None:
+                if self._update_cancellable() and self.update_cancel:
+                    self.update_cancel.set()
                 return
             self._start_update_install()
             return
@@ -708,17 +720,19 @@ class App:
             self.update_error = tr("update.packaged_only")
             return
         self.update_error = None
-        self.update_progress = (0, None)
+        self.update_progress = ("checking", 0, None)
         self.update_cancel = threading.Event()
         if self.update_pool is None:
             self.update_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="update")
-        def download():
-            return self_update.download_and_stage(
-                asset, info["version"], staging_root=install_path.parent, platform=asset.target,
-                progress=lambda done, total: setattr(self, "update_progress", (done, total)),
-                cancel=self.update_cancel,
-            )
-        self.update_install_job = self.update_pool.submit(download)
+
+        def progress(phase: str, done: int, total: int | None) -> None:
+            self.update_progress = (phase, done, total)
+            if phase == "verifying":
+                time.sleep(UPDATE_VERIFY_HOLD_SECONDS)  # the hash is ready at the last byte; let the step read
+
+        self.update_install_job = self.update_pool.submit(
+            self_update.download_and_prepare, asset, info["version"], staging_root=install_path.parent,
+            platform=asset.target, progress=progress, cancel=self.update_cancel)
 
     def _start_update_check(self, now: float) -> None:
         if not self.state.update_check or updates.disabled():
@@ -733,21 +747,27 @@ class App:
         if install_job is not None and install_job.done():
             self.update_install_job = None
             staged = None
+            cancelled = bool(self.update_cancel and self.update_cancel.is_set())
             try:
                 staged = install_job.result()
-                if self.update_cancel and self.update_cancel.is_set():
+                if cancelled:
                     self_update.discard_staged(staged)
                     self.update_error = tr("update.cancelled")
                     return
+                # Only a process spawn here: the job already unpacked and copied everything.
                 info = self.update or {}
                 install_path = self_update.installation_path(Path(sys.executable), info["asset"].target)
-                self_update.launch_apply_helper(staged, install_path, os.getpid(), info["asset"].target)
-                self.running = False
+                self_update.launch_apply_helper(staged, install_path, os.getpid(), info["asset"].target,
+                                                config.STATE_DIR / self_update.RESULT_FILE)
+                self._begin_restart(now)
             except Exception as exc:
                 if staged:
                     self_update.discard_staged(staged)
-                self.update_error = str(exc)
-                self._sound("error")
+                if cancelled:
+                    self.update_error = tr("update.cancelled")
+                else:
+                    self.update_error = str(exc)
+                    self._sound("error")
         job = self.update_job
         if job is None or not job.done() or now - self.update_started < UPDATE_DELAY_SECONDS:
             return
@@ -760,6 +780,21 @@ class App:
             info = None
         if info:
             self._open_update(info)
+
+    def _begin_restart(self, now: float) -> None:
+        """Say what's about to happen: the window closes and the desktop shows while the helper swaps folders."""
+        self.restarting = True
+        self.quit_at = self.ignore_until = now + UPDATE_RESTART_HOLD_SECONDS
+
+    def _report_update_result(self) -> None:
+        result = self_update.take_result(config.STATE_DIR / self_update.RESULT_FILE)
+        if result is None:
+            return
+        if result["ok"]:
+            self.toast = Toast(tr("toast.updated", version=__version__), self.theme.label, time.monotonic(), ttl=6.0)
+        else:
+            log.write("update failed", str(result.get("error", "")))
+            self.toast = Toast(tr("toast.update_failed"), ERROR, time.monotonic(), ttl=8.0)
 
     def _choose(self, choice: Choice, added: bool = False) -> None:
         try:
@@ -2442,6 +2477,9 @@ class App:
     def _draw(self, now: float) -> None:
         self.hits = []
         self.scrollbars = {}
+        if self.restarting:
+            self._draw_restarting()
+            return
         self.glyphs.family = self.input.family
         self._update_theme(now)
         self._blit_layer("bg")
@@ -2826,6 +2864,8 @@ class App:
         if self.mode == "launcher":
             return [(("A",) if pad else ("KEY:ENTER",), tr("hint.choose"), (A.CONFIRM,)), (("B",) if pad else ("KEY:ESC",), tr("hint.close"), (A.BACK,))]
         if self.mode == "update":
+            if self.update_install_job is not None:
+                return [(("B",) if pad else ("KEY:ESC",), tr("hint.cancel"), (A.BACK,))] if self._update_cancellable() else []
             return [(("A",) if pad else ("KEY:ENTER",), tr("hint.choose"), (A.CONFIRM,)), (("B",) if pad else ("KEY:ESC",), tr("hint.later"), (A.BACK,))]
         if self.mode == "menu":
             return [(("A",) if pad else ("KEY:ENTER",), tr("hint.choose"), (A.CONFIRM,)),
@@ -3133,6 +3173,29 @@ class App:
                                                TEXT if grabbed else MUTED), (track.x, thumb_y))
             self._scrollbar("browser", track, thumb_h, max_scroll)
 
+    def _update_status(self) -> tuple[str, float | None]:
+        """The install's current step, and how far along it is when that's known."""
+        phase, done, total = self.update_progress
+        if phase == "downloading":
+            if total:
+                return tr("update.downloading_mb_of", done=_mb(done), total=_mb(total)), done / total
+            return tr("update.downloading_mb", done=_mb(done)), None
+        if phase == "unpacking" and total:
+            return tr("update.unpacking", done=done, total=total), done / total
+        return tr({"verifying": "update.verifying", "preparing": "update.preparing"}.get(phase, "update.checking")), None
+
+    def _draw_restarting(self) -> None:
+        s = self.s
+        self._blit_layer("bg")
+        cx, cy = self.w // 2, self.h // 2
+        title = self._text(tr("update.restarting"), self._font(52, bold=True), TEXT)
+        sub = self._text(tr("update.restarting_sub"), self._font(28), MUTED)
+        stripe = pygame.Rect(0, 0, int(150 * s), int(7 * s))
+        stripe.midbottom = (cx, cy - title.get_height() - int(18 * s))
+        pygame.draw.rect(self.screen, self.theme.accent, stripe)
+        self.screen.blit(title, title.get_rect(midbottom=(cx, cy)))
+        self.screen.blit(sub, sub.get_rect(midtop=(cx, cy + int(12 * s))))
+
     def _draw_update(self, now: float) -> None:
         s = self.s
         info = self.update or {}
@@ -3150,7 +3213,11 @@ class App:
         if info.get("more_notes"):
             notes_h += int(28 * s)
         downloading = self.update_install_job is not None
-        status_h = int(28 * s) if self.update_error or downloading else 0
+        cancellable = self._update_cancellable()
+        status, fraction = self._update_status() if downloading else ("", None)
+        status_h = int(28 * s) if self.update_error else int(48 * s) if downloading else 0
+        if downloading and fraction is not None:
+            status_h += int(20 * s)
         box = pygame.Rect(0, 0, width, 2 * pad + head_h + notes_h + status_h + len(choices) * row_h)
         box.center = (self.w // 2, (self.h - self.footer_h) // 2 + int(24 * s * (1 - t)))
 
@@ -3182,22 +3249,29 @@ class App:
             self.screen.blit(self._text(self._fit(self.update_error, sub_font := self._font(20), inner), sub_font, ERROR), (x, y))
             y += int(28 * s)
         elif downloading:
-            done, total = self.update_progress
-            kb = done // 1024
-            progress = tr("update.downloading_of", done=kb, total=total // 1024) if total else tr("update.downloading", done=kb)
-            self.screen.blit(self._text(self._fit(progress, self._font(20), inner), self._font(20), MUTED), (x, y))
-            y += int(28 * s)
+            y += int(14 * s)
+            status_font = self._font(22)
+            self.screen.blit(self._text(self._fit(status, status_font, inner), status_font, MUTED), (x, y))
+            y += int(34 * s)
+            if fraction is not None:
+                bar_h = max(2, int(6 * s))
+                pygame.draw.rect(self.screen, KEY_IDLE, (x, y, inner, bar_h), border_radius=bar_h // 2)
+                if fill := int(inner * max(0.0, min(1.0, fraction))):
+                    pygame.draw.rect(self.screen, self.theme.accent, (x, y, fill, bar_h), border_radius=bar_h // 2)
+                y += int(20 * s)
         for i, (_, name, sub) in enumerate(choices):
             rect = pygame.Rect(box.x + int(12 * s), y, box.width - int(24 * s), row_h - int(6 * s))
             selected = i == self.update_sel
-            if selected:
+            installing_row = downloading and choices[i][0] == "install"
+            if selected and (cancellable or not installing_row):
                 self.screen.blit(draw.rounded_rect(rect.width, rect.height, 10 * s, (255, 255, 255, 16)), rect)
                 pygame.draw.rect(self.screen, self.theme.accent, (rect.x, rect.y + int(10 * s), int(5 * s), rect.height - int(20 * s)))
-            if not downloading or choices[i][0] == "install":
+            if not downloading or installing_row and cancellable:
                 self.hits.append(Hit(rect, lambda i=i: self._update_pick(i), lambda i=i: self._update_hover(i)))
             font = sel_font if selected else name_font
-            label = (tr("update.cancel_download") if downloading and choices[i][0] == "install" else name)
-            self.screen.blit(self._text(label, font, TEXT if selected else MUTED), (x, self._text_top(font, rect.y + int(26 * s))))
+            label = tr("update.cancel") if installing_row else name
+            color = DIM if installing_row and not cancellable else TEXT if selected else MUTED
+            self.screen.blit(self._text(label, font, color), (x, self._text_top(font, rect.y + int(26 * s))))
             sub = sub.replace("{v}", str(info.get("version", "")))
             self.screen.blit(self._text(self._fit(sub, sub_font, inner), sub_font, DIM), (x, rect.y + int(52 * s)))
             y += row_h

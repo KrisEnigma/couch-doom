@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import sys
@@ -243,9 +244,11 @@ class DownloadTests(unittest.TestCase):
             staged = self_update.StagedUpdate("1.2.0", root / "stage", app, root / "archive.zip")
             install = root / "installed" / "CouchDoom"
             install.parent.mkdir()
+            staged = self_update.prepare_apply_helper(staged, "windows-x64")
             with patch.object(self_update.subprocess, "Popen") as popen:
-                self_update.launch_apply_helper(staged, install, 42, "windows-x64")
+                self_update.launch_apply_helper(staged, install, 42, "windows-x64", root / "state" / "result.json")
             helper_argv = popen.call_args.args[0]
+            self.assertEqual(helper_argv[-1], str(root / "state" / "result.json"))
             self.assertNotEqual(Path(helper_argv[0]).parent, app)
             self.assertTrue(Path(helper_argv[0]).is_relative_to(staged.root))
             self.assertTrue(Path(helper_argv[0]).is_file())
@@ -366,6 +369,146 @@ class DownloadTests(unittest.TestCase):
             self.assertTrue(staged.root.exists())
             self.assertTrue(staged.root.name.startswith("couchdoom-update-"))
             self_update.discard_staged(staged)
+
+
+def _fake_release(files: dict[str, bytes]):
+    """A zip release served through a patched urlopen, and its asset."""
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as zf:
+        for name, data in files.items():
+            zf.writestr(name, data)
+    archive = payload.getvalue()
+    digest = hashlib.sha256(archive).hexdigest()
+
+    class Response(io.BytesIO):
+        headers = {"Content-Length": str(len(archive))}
+        def __enter__(self): return self
+        def __exit__(self, *args): self.close()
+
+    def open_url(request, timeout):
+        body = archive if request.full_url.endswith(".zip") else f"{digest}  CouchDoom-v1.2.0-windows-x64.zip\n".encode()
+        return Response(body)
+
+    asset = update.ReleaseAsset(
+        name="CouchDoom-v1.2.0-windows-x64.zip",
+        url="https://github.com/KrisEnigma/couch-doom/releases/download/v1.2.0/archive.zip",
+        sha256_url="https://github.com/KrisEnigma/couch-doom/releases/download/v1.2.0/archive.zip.sha256",
+        target="windows-x64",
+    )
+    return patch.object(self_update.urllib.request, "urlopen", side_effect=open_url), asset
+
+
+class InstallFlowTests(unittest.TestCase):
+    FILES = {"CouchDoom/CouchDoom.exe": b"app", "CouchDoom/lib/a.dll": b"a", "CouchDoom/lib/b.dll": b"b"}
+
+    def test_phases_arrive_in_order_and_the_helper_is_ready(self):
+        network, asset = _fake_release(self.FILES)
+        seen: list[tuple[str, int, int | None]] = []
+        with tempfile.TemporaryDirectory() as temp, network:
+            staged = self_update.download_and_prepare(asset, "1.2.0", staging_root=Path(temp), platform="windows-x64",
+                                                      progress=lambda *step: seen.append(step))
+            self.assertTrue(staged.helper.is_file())
+            self.assertTrue(staged.helper.is_relative_to(staged.root / "apply-helper"))
+        phases = [phase for phase, _, _ in seen]
+        order = [p for i, p in enumerate(phases) if i == 0 or phases[i - 1] != p]
+        self.assertEqual(order, list(self_update.PHASES))
+        unpacking = [(done, total) for phase, done, total in seen if phase == "unpacking"]
+        self.assertEqual(unpacking[-1][0], unpacking[-1][1])
+        self.assertEqual(unpacking[-1][1], len(self.FILES))
+
+    def test_cancel_while_unpacking_stops_and_removes_the_stage(self):
+        network, asset = _fake_release(self.FILES)
+        cancel = __import__("threading").Event()
+
+        def progress(phase, done, total):
+            if phase == "unpacking" and done == 1:
+                cancel.set()
+
+        with tempfile.TemporaryDirectory() as temp, network:
+            with self.assertRaises(self_update.UpdateError):
+                self_update.download_and_prepare(asset, "1.2.0", staging_root=Path(temp), platform="windows-x64",
+                                                 progress=progress, cancel=cancel)
+            self.assertEqual([p for p in Path(temp).iterdir() if p.name.startswith("couchdoom-update-")], [])
+
+    def test_unprepared_stage_is_not_launched(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            staged = self_update.StagedUpdate("1.2.0", root, root / "CouchDoom", root / "a.zip")
+            with patch.object(self_update.subprocess, "Popen") as popen, self.assertRaises(self_update.UpdateError):
+                self_update.launch_apply_helper(staged, root / "install", 1, "windows-x64")
+            popen.assert_not_called()
+
+    def test_finished_job_only_spawns_the_helper_on_the_ui_thread(self):
+        from concurrent.futures import Future
+        from couch_doom import ui
+
+        staged = self_update.StagedUpdate("1.2.0", Path("stage"), Path("stage/app"), Path("a.zip"), Path("stage/helper"))
+        job = Future()
+        job.set_result(staged)
+        app = ui.App.__new__(ui.App)
+        app.update_install_job, app.update_cancel, app.update_job = job, None, None
+        app.update = {"version": "1.2.0", "asset": SimpleNamespace(target="windows-x64")}
+        app.restarting, app.quit_at = False, None
+        app.ignore_until = 0.0
+        no_copy = AssertionError("file copying belongs on the worker thread")
+        with patch.object(self_update.shutil, "copytree", side_effect=no_copy), \
+                patch.object(self_update, "prepare_apply_helper", side_effect=no_copy), \
+                patch.object(self_update, "installation_path", return_value=Path("install")), \
+                patch.object(self_update, "launch_apply_helper") as launch:
+            app._poll_update(100.0)
+        launch.assert_called_once()
+        self.assertIs(launch.call_args.args[0], staged)
+        self.assertEqual(launch.call_args.args[4].name, self_update.RESULT_FILE)
+        self.assertTrue(app.restarting)
+        self.assertGreater(app.quit_at, 100.0)
+
+
+class ResultFileTests(unittest.TestCase):
+    def _swap(self, base: Path, popen_effect=None):
+        install, staged = base / "CouchDoom", base / "new" / "CouchDoom"
+        install.mkdir()
+        (install / "CouchDoom.exe").write_text("old")
+        staged.mkdir(parents=True)
+        (staged / "CouchDoom.exe").write_text("new")
+        result = install / "state" / self_update.RESULT_FILE
+        seen = []
+
+        def relaunch(*args, **kwargs):
+            seen.append(json.loads(result.read_text()) if result.exists() else None)
+            if popen_effect:
+                effect = popen_effect.pop(0)
+                if effect:
+                    raise effect
+            return object()
+
+        with patch.object(self_update, "_wait_for_exit"), patch.object(self_update.subprocess, "Popen", side_effect=relaunch):
+            try:
+                self_update.apply_staged_update(staged, install, pid=81, platform="windows-x64", result_file=result)
+            except self_update.UpdateError:
+                pass
+        return result, seen
+
+    def test_success_is_recorded_before_the_new_version_starts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            result, seen = self._swap(Path(temp))
+            self.assertEqual(seen, [{"ok": True, "error": ""}])
+            self.assertEqual(self_update.take_result(result), {"ok": True, "error": ""})
+            self.assertIsNone(self_update.take_result(result))
+
+    def test_failure_is_recorded_before_the_old_version_returns(self):
+        with tempfile.TemporaryDirectory() as temp:
+            result, seen = self._swap(Path(temp), [OSError("blocked"), None])
+            self.assertFalse(seen[-1]["ok"])
+            self.assertIn("blocked", seen[-1]["error"])
+            self.assertEqual((Path(temp) / "CouchDoom" / "CouchDoom.exe").read_text(), "old")
+
+    def test_older_six_argument_helper_call_still_applies(self):
+        with patch.object(self_update, "apply_staged_update", return_value=0) as apply:
+            self.assertEqual(main(["--apply-update", "a", "b", "1", "windows-x64", "c"]), 0)
+        self.assertIsNone(apply.call_args.kwargs["result_file"])
+        with patch.object(self_update, "apply_staged_update", return_value=0) as apply:
+            self.assertEqual(main(["--apply-update", "a", "b", "1", "windows-x64", "c", "r.json"]), 0)
+        self.assertEqual(apply.call_args.kwargs["result_file"], Path("r.json"))
 
 
 if __name__ == "__main__":
