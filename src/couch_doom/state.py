@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from . import log
 from .i18n import LANGUAGE_CODES, detect_system_language
 from .theme import MANUAL_PALETTE_KEYS
 
@@ -69,10 +70,7 @@ class State:
             self.language = detect_system_language()
             self.language_source = "auto"
             if not unreadable:
-                try:
-                    self._save()
-                except OSError:
-                    pass  # read-only location: detection simply runs again next launch
+                self._save()  # if this can't be written, detection simply runs again next launch
 
     def skip_update(self, version: str) -> None:
         self.update_skip = version
@@ -121,7 +119,8 @@ class State:
         return on
 
     def _save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        """Never raises: antivirus or a sync client briefly holding the file (or a read-only folder) must not
+        crash a favorite toggle. The change still applies for this session."""
         tmp = self.path.with_suffix(".tmp")
         data = {
             "last_played": self.last_played,
@@ -138,8 +137,12 @@ class State:
             "update_check": self.update_check,
             "update_skip": self.update_skip,
         }
-        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        tmp.replace(self.path)
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            tmp.replace(self.path)
+        except OSError as exc:
+            log.write("settings not saved", f"{self.path}: {exc}")
 
 
 def _pair(item) -> tuple[str, str] | None:

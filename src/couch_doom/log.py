@@ -18,6 +18,7 @@ from .config import LOG_FILE
 
 MAX_BYTES = 256 * 1024  # per file
 OUTPUT_TAIL = 16 * 1024  # engine output kept per launch: the end, because that's where errors are
+_write_lock = threading.Lock()  # art, music and cache workers log too; two rotations at once would empty .1
 
 
 def write(title: str, body: str = "", path: Path | None = None) -> None:
@@ -25,11 +26,12 @@ def write(title: str, body: str = "", path: Path | None = None) -> None:
     path = path or LOG_FILE
     head = f"=== {time.strftime('%Y-%m-%d %H:%M:%S')}  CouchDoom {__version__}  {sys.platform} {platform.machine()}  {title}\n"
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if path.exists() and path.stat().st_size > MAX_BYTES:
-            os.replace(path, path.with_name(path.name + ".1"))
-        with path.open("a", encoding="utf-8", errors="replace") as f:
-            f.write(head + (body.rstrip("\n") + "\n" if body else "") + "\n")
+        with _write_lock:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists() and path.stat().st_size > MAX_BYTES:
+                os.replace(path, path.with_name(path.name + ".1"))
+            with path.open("a", encoding="utf-8", errors="replace") as f:
+                f.write(head + (body.rstrip("\n") + "\n" if body else "") + "\n")
     except OSError:
         pass
     try:

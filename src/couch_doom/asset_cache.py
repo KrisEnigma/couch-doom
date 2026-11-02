@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -140,6 +141,8 @@ def get(key: str) -> CachedAssets | None:
 
 def put(key: str, assets: CachedAssets) -> None:
     path = _assets_dir() / f"{key}.json"
+    # The art pool and the cache warmer can write the same key at once; each writes its own file and swaps it in.
+    tmp = path.with_name(f"{key}.{os.getpid()}-{threading.get_ident()}.tmp")
     try:
         data = {
             "art": _art_to_dict(assets.art),
@@ -148,9 +151,13 @@ def put(key: str, assets: CachedAssets) -> None:
             "logo": _art_to_dict(assets.logo),
             "ts": time.time(),
         }
-        path.write_text(json.dumps(data), encoding="utf-8")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        os.replace(tmp, path)
     except Exception:
-        pass
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def invalidate_missing(present_keys: set[str]) -> None:
