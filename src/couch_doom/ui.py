@@ -1453,6 +1453,17 @@ class App:
                 target = min(target, self.row_y[sel - 1])
         return max(0.0, min(target, max(0, self.content_h - self.list_rect.height)))
 
+    def _delete_filter_word(self) -> None:
+        """Ctrl+Backspace: drop the trailing word (and spaces after the previous one)."""
+        text = self.filter
+        i = len(text)
+        while i > 0 and text[i - 1].isspace():
+            i -= 1
+        while i > 0 and not text[i - 1].isspace():
+            i -= 1
+        if i != len(text):
+            self._set_filter(text[:i])
+
     def _set_filter(self, text: str) -> None:
         self.filter = text
         self._rebuild_rows()
@@ -1765,6 +1776,44 @@ class App:
             self.screen.blit(top, self.art_rect)
             _reset_alpha(top)
         self._blit_layer("veil")
+        if self._category_selected() and self.rows:
+            self._draw_category_mural(self.rows[self._sel_row()])
+
+    def _category_count_label(self, row: Row) -> str:
+        key = "group.n_games" if row.count == 1 else "group.n_games_plural"
+        return tr(key, count=row.count)
+
+    def _draw_category_mural(self, row: Row) -> None:
+        """Category name as the art: kind, title, then preset count. No game picture."""
+        ar, s = self.art_rect, self.s
+        pad_x = int(72 * s)
+        pad_top = int(96 * s)
+        max_w = ar.width - pad_x - int(48 * s)
+        max_bottom = self.detail_rect.y - int(12 * s)
+        kind = tr("header.favorites_kind") if row.group_id == FAVORITES_ID else tr("header.category_kind")
+        count = self._text(self._category_count_label(row), self._font(24), MUTED)
+
+        y = ar.y + pad_top
+        kind_surf = self._tracked(kind, 16, self.theme.label, tracking=0.28)
+        self.screen.blit(kind_surf, (ar.x + pad_x, y))
+        y += kind_surf.get_height() + int(14 * s)
+
+        budget = max(40, max_bottom - y - count.get_height() - int(12 * s))
+        size = 72
+        lines: tuple[str, ...] = ()
+        font = self._font(size, bold=True)
+        while size >= 48:
+            font = self._font(size, bold=True)
+            lines = self._wrap(row.text, font, max_w, 2)
+            tall = len(lines) * font.get_height() + (len(lines) - 1) * int(2 * s)
+            wide = max(font.size(line)[0] for line in lines)
+            if tall <= budget and wide <= max_w:
+                break
+            size -= 2
+        for n, line in enumerate(lines):
+            self.screen.blit(self._shadowed(line, font, TEXT), (ar.x + pad_x, y))
+            y += font.get_height() + (int(2 * s) if n + 1 < len(lines) else 0)
+        self.screen.blit(count, (ar.x + pad_x, y + int(12 * s)))
 
     # ---------- actions ----------
 
@@ -2233,6 +2282,10 @@ class App:
         if event.key == pygame.K_ESCAPE and self.mode == "list" and self.filter and not self.blocked:
             self._set_filter("")  # Escape clears the search before it reaches the menu.
             return True
+        if event.key == pygame.K_BACKSPACE and getattr(event, "mod", 0) & pygame.KMOD_CTRL:
+            if self.mode in ("list", "search") and not self.blocked:
+                self._delete_filter_word()
+                return True
         if event.key == pygame.K_BACKSPACE:
             return self.mode not in ("list", "search", "info", "help")
         if self.mode == "search" and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
@@ -3029,30 +3082,20 @@ class App:
         self._blit_detail_panel(now, panel)
 
     def _build_category_panel(self, row: Row, presets: list[int]) -> pygame.Surface:
+        """Roster under the mural; open/collapse hint stays at the bottom of the card."""
         dr, s = self.detail_rect, self.s
         w = dr.width
-        header: list[tuple[pygame.Surface, int]] = []
-        kind = tr("header.favorites_kind") if row.group_id == FAVORITES_ID else tr("header.category_kind")
-        header.append((self._tracked(kind, 16, self.theme.label, tracking=0.28), int(16 * s)))
-        title_font = self._font(60, bold=True)
-        title_lines = self._wrap(row.text, title_font, w, 3)
-        for n, line in enumerate(title_lines):
-            header.append((self._shadowed(line, title_font, TEXT), int(10 * s) if n == len(title_lines) - 1 else int(2 * s)))
-
-        count_label = tr("group.n_games", count=row.count) if row.count == 1 else tr("group.n_games_plural", count=row.count)
-        header.append((self._text(count_label, self._font(24), MUTED), int(28 * s)))
         preview_label = self._tracked(tr("group.in_this"), 15, self.theme.label, tracking=0.25)
         preview_font = self._font(23)
-
         if self.filter:
             state_text = tr("group.search_keeps")
         else:
             state_text = tr("group.state_collapsed") if row.collapsed else tr("group.state_open")
         state = self._text(state_text, self._font(20), MUTED)
-        top = int(54 * s)
+        top = int(24 * s)
+        bottom_pad = int(24 * s)
         row_h = preview_font.get_linesize() + int(9 * s)
-        fixed_h = sum(surf.get_height() + gap for surf, gap in header)
-        fixed_h += preview_label.get_height() + int(12 * s) + state.get_height() + int(12 * s)
+        fixed_h = preview_label.get_height() + int(12 * s) + state.get_height() + bottom_pad
         available_h = max(0, dr.height - top - fixed_h)
         columns, visible, more = self._category_preview_capacity(len(presets), w, available_h, row_h)
         col_gap = int(28 * s)
@@ -3065,17 +3108,17 @@ class App:
             ink = self._text(f"•  {title}", preview_font, (206, 194, 178))
             preview.blit(ink, (col * (col_w + col_gap), line * row_h))
 
-        blocks = [*header, (preview_label, int(12 * s))]
+        blocks: list[tuple[pygame.Surface, int]] = [(preview_label, int(12 * s))]
         if visible:
             blocks.append((preview, int(8 * s)))
         if more:
             blocks.append((self._text(tr("group.and_more", count=more), self._font(20), MUTED), int(8 * s)))
-        blocks.append((state, 0))
         panel = pygame.Surface(dr.size, pygame.SRCALPHA)
         y = top
         for surf, gap in blocks:
             panel.blit(surf, (0, y))
             y += surf.get_height() + gap
+        panel.blit(state, (0, dr.height - state.get_height() - bottom_pad))
         return panel
 
     def _footer_hints(self) -> list[tuple[tuple[str, ...], str, tuple[Action, ...]]]:

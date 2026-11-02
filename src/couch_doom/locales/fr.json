@@ -27,8 +27,8 @@
   "group.open": "Ouvert",
   "group.search_keeps": "La recherche garde les jeux correspondants visibles",
   "group.and_more": "et {count} autres",
-  "group.n_games": "{count} jeu",
-  "group.n_games_plural": "{count} jeux",
+  "group.n_games": "{count} preset",
+  "group.n_games_plural": "{count} presets",
   "group.state_collapsed": "Repliée — sélectionnez pour ouvrir",
   "group.state_open": "Ouverte — sélectionnez pour replier",
 

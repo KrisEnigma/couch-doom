@@ -27,8 +27,8 @@
   "group.open": "Open",
   "group.search_keeps": "Search keeps matching games visible",
   "group.and_more": "and {count} more",
-  "group.n_games": "{count} game",
-  "group.n_games_plural": "{count} games",
+  "group.n_games": "{count} preset",
+  "group.n_games_plural": "{count} presets",
   "group.state_collapsed": "Collapsed — select to open",
   "group.state_open": "Open — select to collapse",
 

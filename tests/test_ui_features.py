@@ -192,6 +192,33 @@ def test_backspace_is_consumed_by_overlays_but_reaches_the_filter_in_list_mode()
     assert app.filter == "ab"
 
 
+def test_ctrl_backspace_deletes_the_last_filter_word():
+    app = make_app(filter_text="hello world ")
+    app.mode = "list"
+    down = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_BACKSPACE, mod=pygame.KMOD_CTRL)
+
+    assert app._on_key(down) is True
+    assert app.filter == "hello "
+
+    assert app._on_key(down) is True
+    assert app.filter == ""
+
+    app.filter = "alpha beta"
+    app.mode = "search"
+    assert app._on_key(down) is True
+    assert app.filter == "alpha "
+
+    app.mode = "menu"
+    app.filter = "keep me"
+    assert app._on_key(down) is True  # overlays still swallow Backspace
+    assert app.filter == "keep me"
+
+    plain = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_BACKSPACE, mod=0)
+    app.mode = "list"
+    app.filter = "ab"
+    assert app._on_key(plain) is False  # bare Backspace still reaches Action.DELETE
+
+
 def test_escape_clears_the_filter_before_opening_the_menu():
     from couch_doom.i18n import t as tr
 
@@ -449,6 +476,20 @@ def test_category_selection_shows_no_games_art():
     app._update_art(1.0)
 
     assert app.art_layers[-1] == (-1, None, 1.0)
+
+
+def test_category_count_says_presets_not_games():
+    from couch_doom.i18n import t as tr
+
+    app = make_app()
+    app._rebuild_rows()
+    row = next(r for r in app.rows if r.kind == "header")
+    row.count = 2
+    label = app._category_count_label(row)
+
+    assert label == tr("group.n_games_plural", count=2)
+    assert "preset" in label.lower()
+    assert "game" not in label.lower()
 
 
 def test_category_selection_stops_preset_music():

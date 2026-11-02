@@ -27,8 +27,8 @@
   "group.open": "Offen",
   "group.search_keeps": "Suche lässt passende Spiele sichtbar",
   "group.and_more": "und {count} weitere",
-  "group.n_games": "{count} Spiel",
-  "group.n_games_plural": "{count} Spiele",
+  "group.n_games": "{count} Preset",
+  "group.n_games_plural": "{count} Presets",
   "group.state_collapsed": "Eingeklappt — auswählen zum Öffnen",
   "group.state_open": "Offen — auswählen zum Einklappen",
 
