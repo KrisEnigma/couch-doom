@@ -150,6 +150,28 @@ def test_typing_only_edits_the_filter_in_list_and_search():
     assert app.filter == "abcx"
 
 
+def test_keyboard_slash_types_into_the_filter_instead_of_opening_search():
+    app = make_app()
+    app.mode = "list"
+    opened = []
+    app._open_search = lambda now: opened.append(now)
+
+    app._on_text("/", 0.0)
+
+    assert app.filter == "/"
+    assert opened == []
+
+
+def test_keyboard_list_footer_has_no_search_hint_but_pad_does():
+    app = make_app()
+    app._rebuild_rows()
+    app.input = SimpleNamespace(pad_mode=False, left_y=0.0, family="xbox")
+    assert not any(label == "Search" for _, label, _ in app._footer_hints())
+
+    app.input.pad_mode = True
+    assert any("Y" in glyphs and label == "Search" for glyphs, label, _ in app._footer_hints())
+
+
 def test_backspace_is_consumed_by_overlays_but_reaches_the_filter_in_list_mode():
     app = make_app(filter_text="abc")
     down = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_BACKSPACE)

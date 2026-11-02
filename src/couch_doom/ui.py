@@ -2082,9 +2082,6 @@ class App:
     def _on_text(self, text: str, now: float) -> None:
         if self.mode not in ("list", "search"):
             return
-        if text == "/" and self.mode == "list":
-            self._open_search(now)
-            return
         if not text.isprintable() or (not self.filter and text.isspace()):
             return
         self._set_filter(self.filter + text.lower())
@@ -2751,7 +2748,7 @@ class App:
                     *favorite_hint]
         clear = (("KEY:ESC",), "Clear", (A.BACK,)) if self.filter else (("KEY:ESC",), "Menu", (A.MENU,))
         return [clear, (("KEY:ENTER",), primary, (A.CONFIRM,)), (("KEY:F1",), "Help", (A.HELP,)), *info_hint,
-                (("KEY:/",), "Search", (A.SEARCH,)), (("KEY:LEFT", "KEY:RIGHT"), "Section", section),
+                (("KEY:LEFT", "KEY:RIGHT"), "Section", section),
                 *([] if category_selected else [(("KEY:F3",), fav, (A.FAVORITE,))])]
 
     def _draw_footer(self) -> None:
