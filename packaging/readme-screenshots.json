@@ -1,0 +1,27 @@
+{
+  "render_size": [1920, 1080],
+  "save_size": [1600, 900],
+  "language": "en",
+  "picker_paths": {
+    "doomrunner": "C:\\Games\\DoomRunner\\options.json",
+    "zdl": "C:\\Users\\Player\\AppData\\Roaming\\Vectec Software\\qZDL.ini",
+    "doomlauncher": "C:\\Games\\DoomLauncher\\DoomLauncher.sqlite",
+    "gzdoom": "C:\\Games\\UZDoom\\uzdoom.exe"
+  },
+  "shots": [
+    {"file": "eviternity-2.jpg", "preset": "Eviternity II"},
+    {"file": "alien-vendetta.jpg", "preset": "Alien Vendetta"},
+    {"file": "valiant.jpg", "preset": "Valiant"},
+    {"file": "castlevania.jpg", "preset": "Castlevania: Simon's Destiny"},
+    {"file": "elementalism.jpg", "preset": "Elementalism"},
+    {"file": "legacy-of-rust.jpg", "preset": "Legacy of Rust (KEX)"},
+    {"file": "doom-2.jpg", "preset": "Doom II"},
+    {"file": "loading.jpg", "preset": "Harmony", "screen": "loading"},
+    {"file": "category.jpg", "category": "Modern megawads"},
+    {"file": "menu.jpg", "preset": "Chex Quest 3", "screen": "menu"},
+    {"file": "search.jpg", "preset": "Pirate Doom 2", "search": "doom 2"},
+    {"file": "readme.jpg", "preset": "Ancient Aliens", "screen": "readme"},
+    {"file": "endoom.jpg", "preset": "Ancient Aliens", "screen": "endoom"},
+    {"file": "launcher-picker.jpg", "preset": "Harmony", "screen": "picker"}
+  ]
+}
