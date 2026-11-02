@@ -29,6 +29,7 @@ from .background import lower_current_thread_priority
 from .filebrowser import Browser as FileBrowser
 from .gamepad import Action, Input, keyboard_repeat_timing
 from .glyphs import BUTTON_NAMES, Glyphs
+from .i18n import set_language
 from .launch import LaunchCommand, build_command, load_order, presented_files, split_args
 from . import log
 from .log import closed_early, last_line, needs_extract_retry, spawn
@@ -389,6 +390,7 @@ class App:
     ):
         self.opts = opts
         self.state = state
+        set_language(state.language)
         self.windowed = windowed
         self.problem = problem  # options.json missing/unreadable: the notice screen replaces the list
         self.launchers = launchers

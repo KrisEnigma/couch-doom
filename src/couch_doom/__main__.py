@@ -8,6 +8,7 @@ from pathlib import Path
 
 from . import log
 from .config import FROZEN, STATE_FILE
+from .i18n import set_language
 from .launch import build_command
 from .launchers import Launchers
 from .options import OptionsError, empty_options
@@ -61,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(raw_argv)
 
     state = State(STATE_FILE)
+    set_language(state.language)
     explicit = Choice(*plan(args.options, args.launcher)[0]) if args.options else None
     launchers = Launchers(state, args.launcher, explicit)
     choice = launchers.startup()

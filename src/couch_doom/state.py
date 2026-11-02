@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .i18n import LANGUAGE_CODES, detect_system_language
 from .theme import MANUAL_PALETTE_KEYS
 
 HISTORY_LIMIT = 10
@@ -20,29 +21,39 @@ class State:
         self.launcher: tuple[str, str] | None = None  # (source key, settings path) the player last picked
         self.added: list[tuple[str, str]] = []  # launchers dropped onto the window, kept for the picker
         self.color_palette = "auto"  # app-wide Colors choice; automatic keeps art-derived themes
+        self.language = "en"
         self.update_check = True  # set false in the file to never contact GitHub
         self.update_skip: str | None = None  # a release the player said not to be reminded about
         self._load()
 
     def _load(self) -> None:
+        data: dict = {}
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return
-        self.last_played = data.get("last_played")
-        self.history = list(data.get("history") or [])
-        self.music = bool(data.get("music", True))
-        self.menu_sounds = bool(data.get("menu_sounds", True))
-        self.recent_group = bool(data.get("recent_group", False))
-        self.favorites = [f for f in data.get("favorites") or [] if isinstance(f, str)]
-        if (pick := _pair(data.get("launcher"))) is not None:
-            self.launcher = pick
-        self.added = [p for item in data.get("added_launchers") or [] if (p := _pair(item)) is not None]
-        palette = data.get("color_palette", "auto")
-        self.color_palette = palette if isinstance(palette, str) and palette in MANUAL_PALETTE_KEYS else "auto"
-        self.update_check = bool(data.get("update_check", True))
-        skip = data.get("update_skip")
-        self.update_skip = skip if isinstance(skip, str) else None
+            data = {}
+        if data:
+            self.last_played = data.get("last_played")
+            self.history = list(data.get("history") or [])
+            self.music = bool(data.get("music", True))
+            self.menu_sounds = bool(data.get("menu_sounds", True))
+            self.recent_group = bool(data.get("recent_group", False))
+            self.favorites = [f for f in data.get("favorites") or [] if isinstance(f, str)]
+            if (pick := _pair(data.get("launcher"))) is not None:
+                self.launcher = pick
+            self.added = [p for item in data.get("added_launchers") or [] if (p := _pair(item)) is not None]
+            palette = data.get("color_palette", "auto")
+            self.color_palette = palette if isinstance(palette, str) and palette in MANUAL_PALETTE_KEYS else "auto"
+            self.update_check = bool(data.get("update_check", True))
+            skip = data.get("update_skip")
+            self.update_skip = skip if isinstance(skip, str) else None
+        if "language" in data:
+            lang = data.get("language")
+            self.language = lang if isinstance(lang, str) and lang in LANGUAGE_CODES else "en"
+        else:
+            # First run (or older state file): stick the OS locale so the menu starts there.
+            self.language = detect_system_language()
+            self._save()
 
     def skip_update(self, version: str) -> None:
         self.update_skip = version
@@ -67,6 +78,10 @@ class State:
 
     def set_color_palette(self, palette: str) -> None:
         self.color_palette = palette if palette in MANUAL_PALETTE_KEYS else "auto"
+        self._save()
+
+    def set_language(self, code: str) -> None:
+        self.language = code if code in LANGUAGE_CODES else "en"
         self._save()
 
     def set_launcher(self, key: str, path: str, added: bool = False) -> None:
@@ -98,6 +113,7 @@ class State:
             "launcher": {"source": self.launcher[0], "path": self.launcher[1]} if self.launcher else None,
             "added_launchers": [{"source": k, "path": p} for k, p in self.added],
             "color_palette": self.color_palette,
+            "language": self.language,
             "update_check": self.update_check,
             "update_skip": self.update_skip,
         }

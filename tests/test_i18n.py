@@ -1,4 +1,5 @@
 from couch_doom import i18n
+from couch_doom.state import State
 
 
 def test_t_returns_english_by_default():
@@ -27,3 +28,25 @@ def test_detect_maps_es_family():
 def test_set_language_unknown_falls_back_to_en():
     assert i18n.set_language("ja") == "en"
     assert i18n.current_language() == "en"
+
+
+def test_state_language_round_trip(tmp_path):
+    path = tmp_path / "state.json"
+    s = State(path)
+    s.set_language("es")
+    s2 = State(path)
+    assert s2.language == "es"
+
+
+def test_state_rejects_unknown_language(tmp_path):
+    path = tmp_path / "state.json"
+    path.write_text('{"language": "ja"}', encoding="utf-8")
+    assert State(path).language == "en"
+
+
+def test_state_first_run_persists_detected_language(tmp_path, monkeypatch):
+    path = tmp_path / "state.json"
+    monkeypatch.setattr("couch_doom.state.detect_system_language", lambda: "fr")
+    s = State(path)
+    assert s.language == "fr"
+    assert State(path).language == "fr"
