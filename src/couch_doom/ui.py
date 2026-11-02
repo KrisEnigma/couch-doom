@@ -29,7 +29,8 @@ from .background import lower_current_thread_priority
 from .filebrowser import Browser as FileBrowser
 from .gamepad import Action, Input, keyboard_repeat_timing
 from .glyphs import BUTTON_NAMES, Glyphs
-from .i18n import LANGUAGES, current_language, set_language, t
+from .i18n import LANGUAGES, current_language, set_language
+from .i18n import t as tr  # not `t`: draw helpers bind local `t` to ease floats
 from .launch import LaunchCommand, build_command, load_order, presented_files, split_args
 from . import log
 from .log import closed_early, last_line, needs_extract_retry, spawn
@@ -1765,7 +1766,7 @@ class App:
             ("recent", "Recently played group"),
         ]
         items.append(("colors", "Colors"))
-        items.append(("language", t("menu.language")))
+        items.append(("language", tr("menu.language")))
         if self.launchers:
             items.append(("launcher", "Choose launcher"))
         items.extend((("help", "Help"), ("quit", "Quit")))
@@ -2867,7 +2868,7 @@ class App:
                 badge = self._tracked(current, 14, self.theme.label, tracking=0.2)
                 self.screen.blit(badge, (rect.right - badge.get_width() - int(22 * s), rect.centery - badge.get_height() // 2))
             if key == "language":
-                badge = self._tracked(t(f"lang.{current_language()}"), 14, self.theme.label, tracking=0.2)
+                badge = self._tracked(tr(f"lang.{current_language()}"), 14, self.theme.label, tracking=0.2)
                 self.screen.blit(badge, (rect.right - badge.get_width() - int(22 * s), rect.centery - badge.get_height() // 2))
             y += row_h
 
