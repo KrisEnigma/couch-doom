@@ -84,14 +84,12 @@ Privacy & Security. Scroll down and click "Open Anyway" next to CouchDoom.
 MIDI MUSIC
 ----------
 
-MIDI title music uses the selected source port's configured or included
-SoundFont when available. Chocolate Doom and its forks can use the FluidSynth
-SoundFont from their settings. CouchDoom includes a default SoundFont for ports
-without one.
+Title music that is MIDI plays automatically. CouchDoom ships with a SoundFont,
+and prefers the selected source port's own bank when it has one (including the
+FluidSynth SoundFont Chocolate Doom and its forks can set in their settings).
 
-Use --soundfont <file> to choose another. A SoundFont in a "soundfonts" folder
-beside CouchDoom.exe, CouchDoom.app or CouchDoom is used when the port has no
-own bank.
+To use a different bank, pass --soundfont <file>, or put a SoundFont in a
+"soundfonts" folder beside CouchDoom.exe, CouchDoom.app or CouchDoom.
 
 MUSIC CACHE
 -----------
