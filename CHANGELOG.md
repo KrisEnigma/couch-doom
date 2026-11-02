@@ -4,15 +4,12 @@ Each release's notes on GitHub are its own section below, behind the download in
 
 **New in 1.2.0**
 
-- Escape or Start opens a menu that gathers refresh, title music, menu sounds, Colors, Language, choosing a launcher, Help, and Quit in one place.
-- Menus, help, and prompts are available in English, Spanish, Brazilian Portuguese, French, and German; first run follows the OS language when supported.
-- Automatic accents follow each game's art more closely, and Colors can lock one accent for the whole app.
-- Optional Recently Played group (off by default) for games from your play history.
-- On a group heading, Tab (or X on a controller) expands or collapses every group at once.
-- Home and End jump to the top and bottom of the game list and the file browser.
-- The file browser lists a parent folder and a Drives & Home picker instead of cycling roots with the shoulders; Escape closes it.
-- Selecting games feels snappier.
-- Leftover update folders from an interrupted install are cleaned up on the next launch.
+- Escape or Start opens a menu for refresh, title music, menu sounds, Colors, Language, choosing a launcher, Help, and Quit.
+- Menus, help, and prompts in English, Spanish, Brazilian Portuguese, French, and German; first run follows the OS when supported.
+- Art-driven accents, plus Colors to lock one look for the whole app; optional Recently Played group (off by default).
+- On a group heading, Tab or X expands or collapses every group at once.
+- Home and End jump to the ends of the list and file browser; the browser uses Parent and Drives & Home instead of shoulder cycling, and Escape closes it.
+- Selecting games feels snappier, and leftover folders from an interrupted update are cleaned up on the next launch.
 
 **New in 1.1.0**
 

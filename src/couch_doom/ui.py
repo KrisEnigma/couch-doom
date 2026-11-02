@@ -3022,7 +3022,7 @@ class App:
         inner = width - 2 * pad
         notes_font = self._font(23)
         notes: list[str] = []
-        for item in info.get("notes", [])[:4]:
+        for item in info.get("notes", [])[:updates.MAX_NOTES]:
             wrapped = self._wrap(item, notes_font, inner - int(26 * s), 2)
             notes += [(("•  " if i == 0 else "    ") + line) for i, line in enumerate(wrapped)]
         notes_h = (int(34 * s) + len(notes) * int(32 * s)) if notes else 0

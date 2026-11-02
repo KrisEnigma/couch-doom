@@ -16,7 +16,7 @@ from . import log
 
 API = "https://api.github.com/repos/KrisEnigma/couch-doom/releases/latest"
 TIMEOUT = 10.0
-MAX_NOTES = 4
+MAX_NOTES = 6
 
 
 @dataclass(frozen=True)
@@ -100,7 +100,7 @@ def disabled() -> bool:
 
 
 def check(current: str, skipped: str | None = None, *, platform: str | None = None) -> dict | None:
-    """Release metadata, including whether the four displayed notes omit extra entries."""
+    """Release metadata, including whether the displayed notes omit extra entries."""
     if disabled():
         return None
     try:
