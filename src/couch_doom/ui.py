@@ -2146,6 +2146,10 @@ class App:
 
     def _on_search_action(self, action: Action, now: float) -> None:
         r, c = self.osk
+        if not self.input.pad_mode and action in (Action.UP, Action.DOWN, Action.PAGE_UP, Action.PAGE_DOWN):
+            step = {Action.UP: -1, Action.DOWN: 1, Action.PAGE_UP: -8, Action.PAGE_DOWN: 8}[action]
+            self._move(step, wrap=abs(step) == 1)
+            return
         if action in (Action.UP, Action.DOWN, Action.LEFT, Action.RIGHT):
             if action in (Action.UP, Action.DOWN):
                 nr = (r + (-1 if action == Action.UP else 1)) % len(OSK_ROWS)
@@ -2519,7 +2523,8 @@ class App:
             self._draw_detail(now)
         self._draw_footer()
         if self.mode == "search":
-            self._draw_osk(now)
+            if self.input.pad_mode:  # on a keyboard the header's filter field is all typing needs
+                self._draw_osk(now)
         elif self.mode == "menu":
             self._draw_menu(now)
         elif self.mode == "info":
@@ -2736,10 +2741,13 @@ class App:
         readme = self.readmes.get(self.current)
         logo = self.logos.get(self.current)
         show_title = not logo and self._should_show_title_text(self.current)
+        # The list's group header beside it already names the section, unless it's Favorites or Recently played.
+        header = next((self.rows[i] for i in range(selected, -1, -1) if self.rows[i].kind == "header"), None)
+        show_section = header is None or header.group_id in (FAVORITES_ID, RECENT_ID)
         panel = self._cached_detail_panel(
             (preset, cmd, engine, readme, logo),
-            (show_title, self.theme.label, self.detail_rect.size, self.s, current_language()),
-            lambda: self._build_detail_panel(preset, cmd, engine, readme, logo, show_title),
+            (show_title, show_section, self.theme.label, self.detail_rect.size, self.s, current_language()),
+            lambda: self._build_detail_panel(preset, cmd, engine, readme, logo, show_title, show_section),
         )
         self._blit_detail_panel(now, panel)
 
@@ -2757,12 +2765,14 @@ class App:
         panel.set_alpha(int(255 * t))
         self.screen.blit(panel, (dr.x + int(32 * s * (1 - t)), dr.y))
 
-    def _build_detail_panel(self, preset: Preset, cmd, engine, readme, logo: pygame.Surface | None, show_title: bool) -> pygame.Surface:
+    def _build_detail_panel(self, preset: Preset, cmd, engine, readme, logo: pygame.Surface | None, show_title: bool,
+                            show_section: bool = False) -> pygame.Surface:
         dr, s = self.detail_rect, self.s
         w = dr.width
         blocks: list[tuple[pygame.Surface, int]] = []  # (surface, gap after)
 
-        blocks.append((self._tracked(preset.section, 18, self.theme.label, tracking=0.22), int(10 * s)))
+        if show_section:
+            blocks.append((self._tracked(preset.section, 18, self.theme.label, tracking=0.22), int(10 * s)))
         title_font = self._font(64, bold=True)
         lines = self._wrap(preset.name, title_font, w, 3)
         byline = " · ".join(x for x in ((tr("tag.by", author=readme.author) if readme.author else ""), readme.year) if x) if readme else ""
@@ -3382,17 +3392,20 @@ class App:
 
     def _draw_osk(self, now: float) -> None:
         s = self.s
-        cell_h, gap = int(64 * s), int(8 * s)
+        gap, pad = int(8 * s), int(30 * s)
         cols = max(len(r) for r in OSK_ROWS)
-        cell_w = int(76 * s)
+        # Docked over the details column so the list, and what matches, stays in view while typing.
+        column = pygame.Rect(self.list_edge, 0, self.w - self.list_edge, self.h - self.footer_h)
+        cell_w = min(int(76 * s), (column.width - 2 * self.margin - 2 * pad - (cols - 1) * gap) // cols)
+        cell_h = min(int(64 * s), int(cell_w * 0.85))
         grid_w = cols * cell_w + (cols - 1) * gap
         grid_h = len(OSK_ROWS) * cell_h + (len(OSK_ROWS) - 1) * gap
-        pad = int(30 * s)
         field_h = int(78 * s)
         box = pygame.Rect(0, 0, grid_w + 2 * pad, field_h + grid_h + 2 * pad)
-        box.midbottom = (self.w // 2, self.h - self.footer_h - int(24 * s))
+        box.midbottom = (column.centerx, column.bottom - int(24 * s))
 
-        shade = self._dim_backdrop(130)
+        self.screen.fill((125, 125, 125), column, special_flags=pygame.BLEND_MULT)
+        shade = pygame.Rect(0, 0, self.w, self.h - self.footer_h)
         self.screen.blit(draw.rounded_rect(box.width, box.height, 18 * s, (*PANEL, 248), (78, 62, 55), 1.5 * s), box)
         self.hits.append(Hit(shade, self._act(Action.SEARCH)))  # click outside: done, keep the filter
         self.hits.append(Hit(box, lambda: None))
