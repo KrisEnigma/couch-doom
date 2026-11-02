@@ -546,6 +546,7 @@ class App:
         self.bar_y = self.row_y[self._sel_row()] if self.rows else 0
         self.thumb_scroll, self.thumb_moved = self.scroll, -math.inf
         self.art_dim = 0.0
+        self._loading_cache: tuple | None = None
         self.detail_changed = time.monotonic()
         self._warm_cache()
         self._report_update_result()
@@ -1518,11 +1519,9 @@ class App:
         out.blit(img, (0, 0))
         return out
 
-    def _render_art(self, art: Art | None):
-        """Prepare selected art off-thread; return (theme, art, background, layers) for the UI thread to adopt."""
-        lower_current_thread_priority()
-        if art is None:
-            return None, None, None, None
+    @staticmethod
+    def _art_image(art: Art) -> tuple[pygame.Surface, float] | None:
+        """Decoded title art cropped to its 16:9 centre, and the vertical stretch its pixels need."""
         try:
             if art.kind == "encoded":
                 img = pygame.image.load(io.BytesIO(art.data)).convert(_OPAQUE)
@@ -1531,19 +1530,27 @@ class App:
                 img.set_palette([tuple(art.palette[i * 3 : i * 3 + 3]) for i in range(256)])
                 img = img.convert(_OPAQUE)
         except (pygame.error, ValueError):
-            return None, None, None, None
+            return None
         w, h = img.get_size()
         # Doom-era art is 200 (or 400) lines tall at any width (320, KEX's 426 widescreen, ...) and the
         # engine stretches those lines 1.2x, so the pixels aren't square.
-        doom_lines = h in (200, 400)
-        aspect = 1.2 if doom_lines else 1.0
+        aspect = 1.2 if h in (200, 400) else 1.0
         # Ultrawide title art (KEX's 560x200, Axolotl's 854x200) pads its sides for wider-than-16:9
         # displays; the 16:9 centre is what authors compose for. A 4:3 crop would go too far: Master
         # Levels, MyHouse and Technicolor put their logos out past it.
         width_169 = round(h * aspect * 16 / 9)
         if w > width_169:
             img = img.subsurface(pygame.Rect((w - width_169) // 2, 0, width_169, h)).copy()
-            w = width_169
+        return img, aspect
+
+    def _render_art(self, art: Art | None):
+        """Prepare selected art off-thread; return (theme, art, background, layers) for the UI thread to adopt."""
+        lower_current_thread_priority()
+        decoded = self._art_image(art) if art is not None else None
+        if decoded is None:
+            return None, None, None, None
+        img, aspect = decoded
+        w, h = img.get_size()
         theme = from_art(img)
         tw, th = self.art_rect.size
         # Fit the width; art that's still short after that may zoom up to 25% so it isn't a thin strip.
@@ -2291,20 +2298,30 @@ class App:
     def _play_wipe(self, name: str) -> None:
         clock = pygame.time.Clock()
         start = time.monotonic()
-        label, _ = self._loading_label(name)
+        poll = self._start_loading_backdrop()
+        final = None
+        band, slant = int(120 * self.s), int(160 * self.s)
         while (t := (time.monotonic() - start) / LAUNCH_WIPE_SECONDS) < 1:
             pygame.event.pump()
             self._draw(time.monotonic())
-            e = _ease_out(t)
-            wipe_w = int(self.w * e)
-            slant = int(160 * self.s)
-            pygame.draw.polygon(self.screen, self.theme.accent, [(0, 0), (wipe_w + slant, 0), (wipe_w, self.h), (0, self.h)])
-            visible = max(0, wipe_w - self.margin)
-            self.screen.blit(label, (self.margin, self.h // 2 - label.get_height() // 2), pygame.Rect(0, 0, visible, label.get_height()))
+            if final is None and (backdrop := poll()) is not None:
+                final = self._loading_screen(name, backdrop)[0]
+            # An accent blade sweeps across, uncovering the loading screen behind it (accent until it's ready).
+            x = int((self.w + band + slant) * _ease_out(t)) - band
+            if x > 0:
+                if final is not None:
+                    self.screen.blit(final, (0, 0), pygame.Rect(0, 0, x, self.h))
+                else:
+                    self.screen.fill(self.theme.accent, (0, 0, x, self.h))
+            pygame.draw.polygon(self.screen, self.theme.accent, [(x, 0), (x + band + slant, 0), (x + band, self.h), (x, self.h)])
             self._flip()
             clock.tick(60)
-        self.screen.fill(self.theme.accent)
-        self.screen.blit(label, (self.margin, self.h // 2 - label.get_height() // 2))
+        while final is None:
+            if (backdrop := poll()) is not None:
+                final = self._loading_screen(name, backdrop)[0]
+            else:
+                time.sleep(0.005)
+        self.screen.blit(final, (0, 0))
         self._flip()
 
     def _hold_loading(self, name: str, launched: log.Launched) -> None:
@@ -2335,53 +2352,79 @@ class App:
         if reason == "timeout":
             log.write("handover timeout", f"{name}: no engine window after {HANDOVER_TIMEOUT_SECONDS:.0f} seconds")
 
-    def _loading_label(self, name: str) -> tuple[pygame.Surface, int]:
-        """The game's logo, "LOADING" and the name shrunk until it fits across the screen, plus where the
-        "LOADING" line starts so the ticking dots can follow it."""
-        ink = self.theme.bg_top
-        logo = self.logos.get(self.current)
-        key = ("loading", name, tuple(ink), tuple(self.theme.accent), self.s, self.w, id(logo))
-        surf = self._text_cache.get(key)
-        if surf is None:
-            word = self._tracked(tr("loading.label"), 22, ink, tracking=0.3)
-            room = self.w - 2 * self.margin
-            for size in range(68, 31, -4):
-                title = self._tracked(name, size, ink, tracking=0.04)
-                if title.get_width() <= room:
-                    break
-            gap = int(10 * self.s)
-            stamp = self._ink_stamp(logo) if logo else None
-            stamp_h = stamp.get_height() + int(36 * self.s) if stamp else 0
-            width = max(word.get_width(), title.get_width(), stamp.get_width() if stamp else 0)
-            surf = pygame.Surface((width, stamp_h + word.get_height() + gap + title.get_height()), pygame.SRCALPHA)
-            if stamp:
-                surf.blit(stamp, (0, 0))
-            surf.blit(word, (0, stamp_h))
-            surf.blit(title, (0, stamp_h + word.get_height() + gap))
-            surf = self._text_cache[key] = (surf, stamp_h)
+    def _loading_backdrop(self, index: int, bg: pygame.Surface) -> pygame.Surface:
+        """The game's title art across the whole window, dissolving into the theme at the bottom. No text, so
+        it can be built off the main thread while the wipe starts: HD art takes tens of milliseconds."""
+        size = (self.w, self.h)
+        surf = bg.copy()
+        try:
+            art = _load_extras(self.opts.presets[index])[0]
+        except Exception:
+            art = None
+        decoded = self._art_image(art) if art is not None else None
+        if decoded is None:
+            return surf
+        img, aspect = decoded
+        w, h = img.get_size()
+        scale = max(self.w / w, self.h / (h * aspect))
+        cover = (math.ceil(w * scale), math.ceil(h * aspect * scale))
+        scaled = pygame.transform.scale(img, cover) if w <= 640 else pygame.transform.smoothscale(img, cover)
+        # Cropping 4:3 art to the window: keep more of the top, where title pictures put their logo.
+        surf.blit(scaled, ((self.w - cover[0]) // 2, -(cover[1] - self.h) // 6))
+
+        def scrim(u: float, v: float) -> float:
+            return max(0.15, 0.97 * _smoothstep((v - 0.42) / 0.5), 0.55 * (1 - _smoothstep(u / 0.6)) * _smoothstep((v - 0.25) / 0.5))
+
+        surf.blit(self._bg_overlay(bg, pygame.Rect((0, 0), size), self._alpha_mask(size, scrim)), (0, 0))
         return surf
 
-    def _ink_stamp(self, logo: pygame.Surface) -> pygame.Surface | None:
-        """The logo printed onto the wipe colour: greyscale multiplied by the accent, so its shading survives
-        but it reads as part of the red. Logos without transparency would print as a block, so those are left out."""
-        w, h = logo.get_size()
-        if not logo.get_flags() & pygame.SRCALPHA or min(logo.get_at(p)[3] for p in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1))) > 64:
-            return None
-        stamp = pygame.transform.grayscale(logo)
-        stamp.fill((*self.theme.accent[:3], 255), special_flags=pygame.BLEND_RGBA_MULT)
-        return stamp
+    def _start_loading_backdrop(self) -> Callable[[], pygame.Surface | None]:
+        """Build the backdrop on a thread; the returned poll gives it once ready (None until then)."""
+        bg = self._layers_for(self.theme)["bg"][0]
+        index = self.current
+        done: list[pygame.Surface] = []
+
+        def work() -> None:
+            try:
+                done.append(self._loading_backdrop(index, bg))
+            except Exception:
+                done.append(bg.copy())
+
+        thread = threading.Thread(target=work, daemon=True)
+        thread.start()
+        return lambda: done[0] if done else None
+
+    def _loading_screen(self, name: str, backdrop: pygame.Surface | None = None) -> tuple[pygame.Surface, tuple[int, int]]:
+        """The backdrop with the game's name over it, plus where the ticking dots go. Built once per launch:
+        the handover redraws it every frame."""
+        key = (self.current, name, self.w, self.h, self.theme.key)
+        if self._loading_cache and self._loading_cache[0] == key:
+            return self._loading_cache[1]
+        s, m = self.s, self.margin
+        surf = backdrop if backdrop is not None else self._loading_backdrop(self.current, self._layers_for(self.theme)["bg"][0])
+        room = self.w - 2 * m
+        for pt in range(96, 39, -8):
+            font = self._font(pt, bold=True)
+            if font.size(name)[0] <= room:
+                break
+        title = self._shadowed(name, font, TEXT)
+        word = self._tracked(tr("loading.label"), 22, self.theme.label, tracking=0.3)
+        title_y = self.h - int(m * 1.4) - title.get_height()
+        word_y = title_y - word.get_height() + int(4 * s)
+        pygame.draw.rect(surf, self.theme.accent, (m, word_y - int(24 * s), int(56 * s), max(2, int(3 * s))))
+        surf.blit(word, (m, word_y))
+        surf.blit(title, (m - int(4 * s), title_y))
+        result = surf, (m + word.get_width() + int(4 * s), word_y)
+        self._loading_cache = (key, result)
+        return result
 
     def _draw_loading(self, name: str, elapsed: float) -> None:
         """The wipe's end frame, kept alive with a ticking ellipsis while the engine starts."""
-        self.screen.fill(self.theme.accent)
-        label, word_y = self._loading_label(name)
-        y = self.h // 2 - label.get_height() // 2
-        self.screen.blit(label, (self.margin, y))
+        surf, dots_at = self._loading_screen(name)
+        self.screen.blit(surf, (0, 0))
         dots = "." * (int(elapsed * 2) % 4)
         if dots:
-            word = self._tracked(tr("loading.label"), 22, self.theme.bg_top, tracking=0.3)
-            self.screen.blit(self._tracked(dots, 22, self.theme.bg_top, tracking=0.3),
-                             (self.margin + word.get_width() + int(4 * self.s), y + word_y))
+            self.screen.blit(self._tracked(dots, 22, self.theme.label, tracking=0.3), dots_at)
         self._flip()
 
     # ---------- text helpers ----------
