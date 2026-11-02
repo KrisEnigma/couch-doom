@@ -34,8 +34,20 @@ class StagedUpdate:
     archive_path: Path
 
 
+STAGING_PREFIX = "couchdoom-update-"
+
+
 def discard_staged(staged: StagedUpdate) -> None:
     shutil.rmtree(staged.root, ignore_errors=True)
+
+
+def purge_stale_update_dirs(staging_root: Path) -> None:
+    """Remove leftover couchdoom-update-* folders from interrupted downloads or failed applies."""
+    if not staging_root.is_dir():
+        return
+    for path in staging_root.iterdir():
+        if path.is_dir() and path.name.startswith(STAGING_PREFIX):
+            shutil.rmtree(path, ignore_errors=True)
 
 
 def _request(url: str):
@@ -61,7 +73,8 @@ def download_and_stage(asset: ReleaseAsset, version: str, *, staging_root: Path,
     if not asset.name.startswith(f"CouchDoom-v{version}-"):
         raise UpdateError("The release archive name did not match its version.")
     staging_root.mkdir(parents=True, exist_ok=True)
-    root = Path(tempfile.mkdtemp(prefix="couchdoom-update-", dir=staging_root))
+    purge_stale_update_dirs(staging_root)
+    root = Path(tempfile.mkdtemp(prefix=STAGING_PREFIX, dir=staging_root))
     archive_path = root / asset.name
     partial = archive_path.with_suffix(archive_path.suffix + ".part")
     try:

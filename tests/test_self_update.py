@@ -273,6 +273,100 @@ class DownloadTests(unittest.TestCase):
                 self_update.download_and_stage(asset, "1.2.0", staging_root=Path(temp), platform="windows-x64")
             self.assertEqual(list(Path(temp).iterdir()), [])
 
+    def test_cancel_mid_download_removes_staging_dir(self):
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w") as zf:
+            zf.writestr("CouchDoom/CouchDoom.exe", b"app")
+        archive = payload.getvalue()
+        digest = hashlib.sha256(archive).hexdigest()
+        cancel = __import__("threading").Event()
+
+        class Response(io.BytesIO):
+            headers = {"Content-Length": str(len(archive))}
+            def __enter__(self): return self
+            def __exit__(self, *args): self.close()
+            def read(self, size=-1):
+                cancel.set()
+                return super().read(size)
+
+        def open_url(request, timeout):
+            body = archive if request.full_url.endswith(".zip") else f"{digest}  CouchDoom-v1.2.0-windows-x64.zip\n".encode()
+            return Response(body)
+
+        asset = update.ReleaseAsset(
+            name="CouchDoom-v1.2.0-windows-x64.zip",
+            url="https://github.com/KrisEnigma/couch-doom/releases/download/v1.2.0/archive.zip",
+            sha256_url="https://github.com/KrisEnigma/couch-doom/releases/download/v1.2.0/archive.zip.sha256",
+            target="windows-x64",
+        )
+        with tempfile.TemporaryDirectory() as temp, patch.object(self_update.urllib.request, "urlopen", side_effect=open_url):
+            with self.assertRaises(self_update.UpdateError):
+                self_update.download_and_stage(
+                    asset, "1.2.0", staging_root=Path(temp), platform="windows-x64", cancel=cancel)
+            leftover = [p for p in Path(temp).iterdir() if p.name.startswith("couchdoom-update-")]
+            self.assertEqual(leftover, [])
+
+    def test_apply_removes_cleanup_root_staging_dir(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            staging = Path(tempfile.mkdtemp(prefix="couchdoom-update-", dir=base))
+            install, staged = base / "CouchDoom", staging / "extracted" / "CouchDoom"
+            install.mkdir()
+            (install / "CouchDoom.exe").write_text("old")
+            staged.mkdir(parents=True)
+            (staged / "CouchDoom.exe").write_text("new")
+            with patch.object(self_update, "_wait_for_exit"):
+                self_update.apply_staged_update(
+                    staged, install, pid=80, platform="windows-x64", relaunch=False, cleanup_root=staging)
+            self.assertFalse(staging.exists())
+            self.assertEqual([p.name for p in base.iterdir() if p.name.startswith("couchdoom-update-")], [])
+
+    def test_orphan_staging_dirs_are_removed_by_purge(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            orphan = Path(tempfile.mkdtemp(prefix="couchdoom-update-", dir=root))
+            (orphan / "partial.zip.part").write_text("leftover")
+            keep = root / "CouchDoom"
+            keep.mkdir()
+            (keep / "CouchDoom.exe").write_text("app")
+
+            self_update.purge_stale_update_dirs(root)
+
+            self.assertFalse(orphan.exists())
+            self.assertTrue(keep.exists())
+
+    def test_new_download_purges_prior_orphan_staging_dirs(self):
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w") as zf:
+            zf.writestr("CouchDoom/CouchDoom.exe", b"app")
+        archive = payload.getvalue()
+        digest = hashlib.sha256(archive).hexdigest()
+
+        class Response(io.BytesIO):
+            headers = {"Content-Length": str(len(archive))}
+            def __enter__(self): return self
+            def __exit__(self, *args): self.close()
+
+        def open_url(request, timeout):
+            body = archive if request.full_url.endswith(".zip") else f"{digest}  CouchDoom-v1.2.0-windows-x64.zip\n".encode()
+            return Response(body)
+
+        asset = update.ReleaseAsset(
+            name="CouchDoom-v1.2.0-windows-x64.zip",
+            url="https://github.com/KrisEnigma/couch-doom/releases/download/v1.2.0/archive.zip",
+            sha256_url="https://github.com/KrisEnigma/couch-doom/releases/download/v1.2.0/archive.zip.sha256",
+            target="windows-x64",
+        )
+        with tempfile.TemporaryDirectory() as temp, patch.object(self_update.urllib.request, "urlopen", side_effect=open_url):
+            root = Path(temp)
+            orphan = Path(tempfile.mkdtemp(prefix="couchdoom-update-", dir=root))
+            (orphan / "stuck.part").write_text("old")
+            staged = self_update.download_and_stage(asset, "1.2.0", staging_root=root, platform="windows-x64")
+            self.assertFalse(orphan.exists())
+            self.assertTrue(staged.root.exists())
+            self.assertTrue(staged.root.name.startswith("couchdoom-update-"))
+            self_update.discard_staged(staged)
+
 
 if __name__ == "__main__":
     unittest.main()

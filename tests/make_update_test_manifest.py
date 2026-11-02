@@ -17,12 +17,15 @@ def write_manifest(archive_path: Path, output_dir: Path, *, target: str | None =
                    version: str = "99.0.0") -> Path:
     archive_path, output_dir = Path(archive_path), Path(output_dir)
     target = target or asset_for_platform(sys.platform, platform.machine())
-    if not target or not target.startswith("macos-"):
-        raise ValueError("The local app update test manifest is for macOS builds.")
-    if not archive_path.is_file() or not archive_path.name.endswith(".zip"):
-        raise ValueError("Pass the macOS arm64 ZIP artifact.")
+    if not target:
+        raise ValueError("Could not map this OS/arch to a CouchDoom release target.")
+    if not archive_path.is_file():
+        raise ValueError("Pass a CouchDoom release archive (.zip or .tar.gz).")
+    suffix = "".join(archive_path.suffixes)
+    if suffix not in (".zip", ".tar.gz"):
+        raise ValueError("Archive must be a .zip or .tar.gz.")
     output_dir.mkdir(parents=True, exist_ok=True)
-    name = f"CouchDoom-v{version}-{target}.zip"
+    name = f"CouchDoom-v{version}-{target}{suffix}"
     local_archive = output_dir / name
     shutil.copyfile(archive_path, local_archive)
     digest_path = output_dir / (name + ".sha256")
@@ -43,11 +46,14 @@ def write_manifest(archive_path: Path, output_dir: Path, *, target: str | None =
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("archive", type=Path, help="Downloaded CouchDoom-macos-arm64 ZIP artifact")
+    parser.add_argument("archive", type=Path, help="Downloaded CouchDoom release archive (.zip or .tar.gz)")
     parser.add_argument("--output", type=Path, default=Path.home() / "couchdoom-update-test",
                         help="Folder for the renamed test archive and local manifest")
+    parser.add_argument("--target", default=None,
+                        help="Release target override, e.g. windows-x64 (default: this machine)")
+    parser.add_argument("--version", default="99.0.0", help="Fake newer version tag without the leading v")
     args = parser.parse_args()
-    print(write_manifest(args.archive, args.output))
+    print(write_manifest(args.archive, args.output, target=args.target, version=args.version))
 
 
 if __name__ == "__main__":

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import platform
 import sys
 import traceback
 from pathlib import Path
 
 from . import log
-from .config import STATE_FILE
+from .config import FROZEN, STATE_FILE
 from .launch import build_command
 from .launchers import Launchers
 from .options import OptionsError, empty_options
@@ -81,6 +82,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {p}", file=sys.stderr)
             return 2
         return _dry_run(opts, args.preset)
+
+    if FROZEN:
+        from . import self_update, update
+        target = update.asset_for_platform(sys.platform, platform.machine())
+        if target and (install := self_update.installation_path(Path(sys.executable), target)):
+            self_update.purge_stale_update_dirs(install.parent)
 
     from .ui import App
 
