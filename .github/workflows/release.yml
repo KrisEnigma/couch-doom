@@ -155,9 +155,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Retagging turns a published release into a draft with untagged-… asset URLs
+          # that 404 for the in-app updater. Always leave the tag release published.
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" assets/* --clobber
-            gh release edit "$GITHUB_REF_NAME" --title "CouchDoom $GITHUB_REF_NAME" --notes-file notes.md
+            gh release edit "$GITHUB_REF_NAME" --draft=false --latest \
+              --title "CouchDoom $GITHUB_REF_NAME" --notes-file notes.md
           else
-            gh release create "$GITHUB_REF_NAME" assets/* --title "CouchDoom $GITHUB_REF_NAME" --notes-file notes.md
+            gh release create "$GITHUB_REF_NAME" assets/* --latest \
+              --title "CouchDoom $GITHUB_REF_NAME" --notes-file notes.md
           fi

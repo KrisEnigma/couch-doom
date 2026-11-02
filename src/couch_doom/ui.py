@@ -1735,7 +1735,6 @@ class App:
             return  # B has no other action on the main selector; Escape opens the menu.
 
     def _on_menu_action(self, action: Action, *, repeat: bool = False) -> None:
-        items = self._menu_items()
         if action in (Action.MENU, Action.BACK):
             self._close_overlay()
         elif action == Action.UP:
