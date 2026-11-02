@@ -61,7 +61,7 @@ OSK_ROWS = [
 OSK_LABELS = {"SPACE": "osk.space", "DELETE": "hint.delete", "CLEAR": "osk.clear", "DONE": "hint.done"}
 
 QUIT_CONFIRM_SECONDS = 2.0
-LAUNCH_WIPE_SECONDS = 0.5
+LAUNCH_WIPE_SECONDS = 0.6
 HANDOVER_TIMEOUT_SECONDS = handover.DEFAULT_TIMEOUT
 HANDOVER_GRACE_FRAMES = 4  # ~66 ms: cover the engine's first paint without lingering over the game
 WINDOW_RETRIES = 20  # half a second apart
@@ -184,6 +184,11 @@ def _surface_bytes(surface) -> int:
 def _ease_out(t: float) -> float:
     t = max(0.0, min(1.0, t))
     return 1 - (1 - t) ** 3
+
+
+def _ease_out_expo(t: float) -> float:
+    t = max(0.0, min(1.0, t))
+    return 1.0 if t >= 1 else (1 - 2 ** (-10 * t)) / (1 - 2 ** -10)
 
 
 def _smoothstep(t: float) -> float:
@@ -2342,7 +2347,9 @@ class App:
             t = (now - art_at) / LAUNCH_WIPE_SECONDS if art is not None else 0.0
             if t >= 1:
                 break
-            grow = _smoothstep(t / 0.7)
+            # The art fades in over the panel first, holding still where the two line up: a push already under
+            # way would show both. Then a quick push that settles long, like a camera, not a slide.
+            grow = _ease_out_expo((t - 0.12) / 0.68)
             dim = max(dim, grow, 0.6 * _smoothstep((now - start) / LAUNCH_WIPE_SECONDS))
             self.screen.blit(ui_shot, (0, 0))
             k = 255 - int(215 * dim)
@@ -2353,7 +2360,7 @@ class App:
                 clip = full if path else pygame.Rect(
                     round(_lerp(a.x, b.x, grow)), round(_lerp(a.y, b.y, grow)),
                     round(_lerp(a.w, b.w, grow)), round(_lerp(a.h, b.h, grow)))
-                self._blit_zoomed(art, path, grow, clip, _smoothstep(t / 0.2))
+                self._blit_zoomed(art, path, grow, clip, _smoothstep(t / 0.12))
             if final is not None and t > 0.7:
                 final.set_alpha(int(255 * _smoothstep((t - 0.7) / 0.3)))
                 self.screen.blit(final, (0, 0))
@@ -2379,9 +2386,17 @@ class App:
             k, x, y = 1.0, 0.0, 0.0
         else:
             (s0, x0, y0), (s1, x1, y1) = path
-            s = _lerp(s0, s1, grow)
+            # A camera move, not two lerps: zoom about the one point the panel view and the window view share,
+            # at a constant rate in scale (geometric), so nothing slides sideways and the push reads as even.
+            ratio = s1 / s0
+            s = s0 * ratio ** grow
+            if abs(ratio - 1) < 1e-6:
+                ox, oy = _lerp(x0, x1, grow), _lerp(y0, y1, grow)
+            else:
+                px, py = (x1 - ratio * x0) / (1 - ratio), (y1 - ratio * y0) / (1 - ratio)
+                ox, oy = px + (x0 - px) * s / s0, py + (y0 - py) * s / s0
             k = s / s1
-            x, y = _lerp(x0, x1, grow) - k * x1, _lerp(y0, y1, grow) - k * y1
+            x, y = ox - k * x1, oy - k * y1
         src = pygame.Rect(math.floor((clip.x - x) / k), math.floor((clip.y - y) / k),
                           math.ceil(clip.w / k) + 2, math.ceil(clip.h / k) + 2).clip(art.get_rect())
         if src.w <= 0 or src.h <= 0:
