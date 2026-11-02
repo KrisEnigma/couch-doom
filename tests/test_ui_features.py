@@ -23,11 +23,13 @@ def make_app(sections=("Section A", "Section B"), collapsed=(), filter_text=""):
         recent_group=False,
         launcher=("doomrunner", "/settings.ini"),
         color_palette="auto",
+        language="en",
     )
     app.state.set_music = lambda on: setattr(app.state, "music", on)
     app.state.set_menu_sounds = lambda on: setattr(app.state, "menu_sounds", on)
     app.state.set_recent_group = lambda on: setattr(app.state, "recent_group", on)
     app.state.set_color_palette = lambda key: setattr(app.state, "color_palette", "auto" if key in (None, "auto") else key)
+    app.state.set_language = lambda code: setattr(app.state, "language", code)
     app.quit_at = None
     app.launchers = None
     app.filter = filter_text
@@ -520,6 +522,28 @@ def test_menu_has_no_expand_or_collapse_all_rows():
     keys = [key for key, _ in app._menu_items()]
     assert "expand_all" not in keys
     assert "collapse_all" not in keys
+
+
+def test_menu_includes_language_row():
+    app = make_app()
+    keys = [key for key, _ in app._menu_items()]
+    assert "language" in keys
+    assert keys.index("language") == keys.index("colors") + 1
+
+
+def test_cycle_language_applies_catalog():
+    from couch_doom.i18n import current_language, set_language
+
+    app = make_app()
+    set_language("en")
+    app.state.language = "en"
+    applied = []
+    app.state.set_language = lambda code: (applied.append(code), setattr(app.state, "language", code))
+    app._rebuild_rows = lambda: None
+    app._cycle_language(1)
+    assert applied[0] == "es"
+    assert current_language() == "es"
+    assert app.state.language == "es"
 
 
 def test_footer_shows_bulk_fold_hint_on_category():
