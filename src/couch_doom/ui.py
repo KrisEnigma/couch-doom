@@ -2285,7 +2285,7 @@ class App:
     def _play_wipe(self, name: str) -> None:
         clock = pygame.time.Clock()
         start = time.monotonic()
-        label = self._loading_label(name)
+        label, _ = self._loading_label(name)
         while (t := (time.monotonic() - start) / LAUNCH_WIPE_SECONDS) < 1:
             pygame.event.pump()
             self._draw(time.monotonic())
@@ -2329,10 +2329,12 @@ class App:
         if reason == "timeout":
             log.write("handover timeout", f"{name}: no engine window after {HANDOVER_TIMEOUT_SECONDS:.0f} seconds")
 
-    def _loading_label(self, name: str) -> pygame.Surface:
-        """"LOADING" over the game's name, the name shrunk until it fits across the screen."""
+    def _loading_label(self, name: str) -> tuple[pygame.Surface, int]:
+        """The game's logo, "LOADING" and the name shrunk until it fits across the screen, plus where the
+        "LOADING" line starts so the ticking dots can follow it."""
         ink = self.theme.bg_top
-        key = ("loading", name, tuple(ink), self.s, self.w)
+        logo = self.logos.get(self.current)
+        key = ("loading", name, tuple(ink), tuple(self.theme.accent), self.s, self.w, id(logo))
         surf = self._text_cache.get(key)
         if surf is None:
             word = self._tracked(tr("loading.label"), 22, ink, tracking=0.3)
@@ -2342,23 +2344,38 @@ class App:
                 if title.get_width() <= room:
                     break
             gap = int(10 * self.s)
-            surf = pygame.Surface((max(word.get_width(), title.get_width()), word.get_height() + gap + title.get_height()), pygame.SRCALPHA)
-            surf.blit(word, (0, 0))
-            surf.blit(title, (0, word.get_height() + gap))
-            self._text_cache[key] = surf
+            stamp = self._ink_stamp(logo) if logo else None
+            stamp_h = stamp.get_height() + int(36 * self.s) if stamp else 0
+            width = max(word.get_width(), title.get_width(), stamp.get_width() if stamp else 0)
+            surf = pygame.Surface((width, stamp_h + word.get_height() + gap + title.get_height()), pygame.SRCALPHA)
+            if stamp:
+                surf.blit(stamp, (0, 0))
+            surf.blit(word, (0, stamp_h))
+            surf.blit(title, (0, stamp_h + word.get_height() + gap))
+            surf = self._text_cache[key] = (surf, stamp_h)
         return surf
+
+    def _ink_stamp(self, logo: pygame.Surface) -> pygame.Surface | None:
+        """The logo printed onto the wipe colour: greyscale multiplied by the accent, so its shading survives
+        but it reads as part of the red. Logos without transparency would print as a block, so those are left out."""
+        w, h = logo.get_size()
+        if not logo.get_flags() & pygame.SRCALPHA or min(logo.get_at(p)[3] for p in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1))) > 64:
+            return None
+        stamp = pygame.transform.grayscale(logo)
+        stamp.fill((*self.theme.accent[:3], 255), special_flags=pygame.BLEND_RGBA_MULT)
+        return stamp
 
     def _draw_loading(self, name: str, elapsed: float) -> None:
         """The wipe's end frame, kept alive with a ticking ellipsis while the engine starts."""
         self.screen.fill(self.theme.accent)
-        label = self._loading_label(name)
+        label, word_y = self._loading_label(name)
         y = self.h // 2 - label.get_height() // 2
         self.screen.blit(label, (self.margin, y))
         dots = "." * (int(elapsed * 2) % 4)
         if dots:
             word = self._tracked(tr("loading.label"), 22, self.theme.bg_top, tracking=0.3)
             self.screen.blit(self._tracked(dots, 22, self.theme.bg_top, tracking=0.3),
-                             (self.margin + word.get_width() + int(4 * self.s), y))
+                             (self.margin + word.get_width() + int(4 * self.s), y + word_y))
         self._flip()
 
     # ---------- text helpers ----------
