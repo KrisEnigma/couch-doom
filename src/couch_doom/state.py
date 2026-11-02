@@ -22,16 +22,22 @@ class State:
         self.added: list[tuple[str, str]] = []  # launchers dropped onto the window, kept for the picker
         self.color_palette = "auto"  # app-wide Colors choice; automatic keeps art-derived themes
         self.language = "en"
+        self.language_source = "auto"  # "auto" (detected from the OS) or "menu" (picked by the player)
         self.update_check = True  # set false in the file to never contact GitHub
         self.update_skip: str | None = None  # a release the player said not to be reminded about
         self._load()
 
     def _load(self) -> None:
         data: dict = {}
+        unreadable = False
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            pass
         except (OSError, ValueError):
-            data = {}
+            unreadable = True
+        if not isinstance(data, dict):
+            data, unreadable = {}, True
         if data:
             self.last_played = data.get("last_played")
             self.history = list(data.get("history") or [])
@@ -47,13 +53,26 @@ class State:
             self.update_check = bool(data.get("update_check", True))
             skip = data.get("update_skip")
             self.update_skip = skip if isinstance(skip, str) else None
-        if "language" in data:
-            lang = data.get("language")
-            self.language = lang if isinstance(lang, str) and lang in LANGUAGE_CODES else "en"
+        lang = data.get("language")
+        source = data.get("language_source")
+        if source in ("auto", "menu"):
+            self.language_source = source
+        # 1.2.0 saved its detection without a source, and its Windows detection always said "en";
+        # treat that one value as undecided so those players get detected properly once.
+        if isinstance(lang, str) and lang in LANGUAGE_CODES and (source in ("auto", "menu") or lang != "en"):
+            self.language = lang
+        elif "language" in data and lang != "en":
+            self.language = "en"  # an unknown code typed into the file; English until they pick one
         else:
-            # First run (or older state file): stick the OS locale so the menu starts there.
+            # First run, a pre-1.2 file, or 1.2.0's undecided "en": stick the OS locale so the menu starts there.
+            # A damaged file is left for the player to recover until they change a setting.
             self.language = detect_system_language()
-            self._save()
+            self.language_source = "auto"
+            if not unreadable:
+                try:
+                    self._save()
+                except OSError:
+                    pass  # read-only location: detection simply runs again next launch
 
     def skip_update(self, version: str) -> None:
         self.update_skip = version
@@ -82,6 +101,7 @@ class State:
 
     def set_language(self, code: str) -> None:
         self.language = code if code in LANGUAGE_CODES else "en"
+        self.language_source = "menu"
         self._save()
 
     def set_launcher(self, key: str, path: str, added: bool = False) -> None:
@@ -114,6 +134,7 @@ class State:
             "added_launchers": [{"source": k, "path": p} for k, p in self.added],
             "color_palette": self.color_palette,
             "language": self.language,
+            "language_source": self.language_source,
             "update_check": self.update_check,
             "update_skip": self.update_skip,
         }

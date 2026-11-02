@@ -124,6 +124,7 @@
   "tag.last": "Dernier",
   "tag.missing": "Manquant",
   "tag.problems": "Problèmes",
+  "tag.by": "par {author}",
 
   "picker.heading": "Lanceur",
   "picker.current": "Actuel",

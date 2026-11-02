@@ -56,6 +56,10 @@ def t(key: str, **kwargs) -> str:
     return template
 
 
+# Windows' getlocale() reports names like "Spanish_Chile" rather than "es_CL".
+_ENGLISH_NAMES = {"english": "en", "spanish": "es", "portuguese": "pt_BR", "french": "fr", "german": "de"}
+
+
 def normalize_language_tag(tag: str | None) -> str:
     if not tag:
         return "en"
@@ -63,6 +67,8 @@ def normalize_language_tag(tag: str | None) -> str:
     if raw in LANGUAGE_CODES:
         return raw
     primary = raw.split("_", 1)[0].lower()
+    if primary in _ENGLISH_NAMES:
+        return _ENGLISH_NAMES[primary]
     if primary == "pt":
         return "pt_BR"
     for code, _ in LANGUAGES:
@@ -71,15 +77,55 @@ def normalize_language_tag(tag: str | None) -> str:
     return "en"
 
 
+def _windows_ui_language() -> str | None:
+    """The display language chosen in Windows Settings, which can differ from the regional format."""
+    try:
+        import ctypes
+        langid = ctypes.windll.kernel32.GetUserDefaultUILanguage()
+    except (AttributeError, OSError):
+        return None
+    return locale.windows_locale.get(langid)
+
+
+def _macos_ui_language() -> str | None:
+    """First entry of the macOS preferred languages; Finder launches get no LANG to read instead."""
+    import subprocess
+    try:
+        out = subprocess.run(["defaults", "read", "-g", "AppleLanguages"], capture_output=True, text=True, timeout=2).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in out.splitlines():
+        entry = line.strip().strip(",").strip('"')
+        if entry and entry not in "()":
+            return entry
+    return None
+
+
+def _environment_language() -> str | None:
+    import os
+    for name in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+        value = os.environ.get(name, "").split(":")[0]
+        if value and value not in ("C", "POSIX") and not value.startswith("C."):
+            return value
+    return None
+
+
+def _locale_language() -> str | None:
+    try:
+        return locale.getlocale()[0]
+    except (TypeError, ValueError):
+        return None
+
+
 def detect_system_language() -> str:
-    getters = (locale.getlocale, getattr(locale, "getdefaultlocale", lambda: (None, None)))
+    getters = [_environment_language, _locale_language]
+    if sys.platform == "win32":
+        getters.insert(0, _windows_ui_language)
+    elif sys.platform == "darwin":
+        getters.insert(0, _macos_ui_language)
     for getter in getters:
-        try:
-            lang, _ = getter()
-        except (TypeError, ValueError):
-            lang = None
-        if lang:
-            return normalize_language_tag(lang)
+        if tag := getter():
+            return normalize_language_tag(tag)
     return "en"
 
 

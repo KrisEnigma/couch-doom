@@ -124,6 +124,7 @@
   "tag.last": "Último",
   "tag.missing": "Ausente",
   "tag.problems": "Problemas",
+  "tag.by": "por {author}",
 
   "picker.heading": "Launcher",
   "picker.current": "Atual",
