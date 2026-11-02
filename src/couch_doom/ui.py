@@ -3738,7 +3738,7 @@ class App:
         surf.blit(t, (pad_x + dot.get_width() + int(14 * s), self._text_top(self._font(26), h / 2)))
         surf.set_alpha(int(255 * alpha))
         slide = int(14 * s * (1 - _ease_out(age / 0.25)))
-        self.screen.blit(surf, (self.w - self.margin - w, self.margin + int(104 * s) - slide))
+        self.screen.blit(surf, (self.w - self.margin - w, self.margin - slide))
 
     # ---------- loop ----------
 
