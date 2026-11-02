@@ -14,11 +14,15 @@ Use it from the couch, at your desk or on a Steam Deck. CouchDoom reads your lau
 </p>
 <p>
   <img src="docs/screenshots/castlevania.jpg" width="49%" alt="Castlevania: Simon's Destiny with its own title art">
-  <img src="docs/screenshots/elementalism.jpg" width="49%" alt="Elementalism with its loading screen and logo">
+  <img src="docs/screenshots/elementalism.jpg" width="49%" alt="Elementalism with its art and logo">
 </p>
 <p>
   <img src="docs/screenshots/legacy-of-rust.jpg" width="49%" alt="Legacy of Rust with several files loaded">
   <img src="docs/screenshots/doom-2.jpg" width="49%" alt="Doom II with its title screen and description">
+</p>
+<p>
+  <img src="docs/screenshots/loading.jpg" width="49%" alt="Harmony's loading screen, its title art filling the window">
+  <img src="docs/screenshots/category.jpg" width="49%" alt="The Modern megawads category selected, listing the 20 games in it">
 </p>
 
 ## What it works with
@@ -37,7 +41,7 @@ If you use a launcher, CouchDoom uses its engine choices and settings. Without o
 
 CouchDoom checks common install locations and follows Windows shortcuts, including portable installs. If it finds one setup, it opens it. If it finds several, choose one; CouchDoom remembers your choice. Switch later from the menu.
 
-If nothing is found, choose **Find it myself…** and browse with a controller: D-pad or stick to move, **A** to open or choose, **B** to go up, and **X** to show all files. Select **../** to go up one folder; at a drive root, select **Drives & Home/** for the separate location list. On the keyboard, **Escape** closes the browser and Page Up/Down move by one visible page without wrapping. In an installed copy the browser starts in CouchDoom's own folder, so a launcher kept beside it is right there. You can also drag a file onto the window.
+If nothing is found, choose **Find it myself…** and browse with a controller: D-pad or stick to move, **A** to open or choose, **B** to go up, and **X** to show all files. Select **Parent folder** to go up one folder; at a drive root, select **Drives & home** for the separate location list. On the keyboard, **Escape** closes the browser and Page Up/Down move by one visible page without wrapping. In an installed copy the browser starts in CouchDoom's own folder, so a launcher kept beside it is right there. You can also drag a file onto the window.
 
 ![The launcher picker showing DoomRunner, ZDL, Doom Launcher and UZDoom](docs/screenshots/launcher-picker.jpg)
 
@@ -88,6 +92,11 @@ Escape or Start opens the menu. From there you can return to the list, refresh l
 
 Language follows the OS on first run when CouchDoom supports it (English, Spanish, Brazilian Portuguese, French, German). Change it anytime from the menu. Colors can follow each game's art or lock one look for the whole app.
 
+<p>
+  <img src="docs/screenshots/menu.jpg" width="49%" alt="The menu open over Chex Quest 3">
+  <img src="docs/screenshots/search.jpg" width="49%" alt="Searching for doom 2 with the on-screen keyboard, matches listed beside it">
+</p>
+
 Fold a group heading when you want that section out of the way. Search still finds games inside collapsed groups. Favorites stay near the top.
 
 B closes an open panel and does nothing on the main selector. Mouse and keyboard prompts are available too. CouchDoom hides while a game runs and returns when it closes.
@@ -98,6 +107,11 @@ B closes an open panel and does nothing on the main selector. Mouse and keyboard
 - Mods without their own title art can use their loading screen instead.
 - Menu sounds come from a Doom-family IWAD when available, or from bundled Freedoom sounds when they aren't.
 - WAD, PK3 and IPK3 files are supported; PK7 isn't.
+
+<p>
+  <img src="docs/screenshots/readme.jpg" width="49%" alt="Ancient Aliens' readme in the info sheet">
+  <img src="docs/screenshots/endoom.jpg" width="49%" alt="Ancient Aliens' ENDOOM screen in the info sheet">
+</p>
 
 ## A few extras
 
