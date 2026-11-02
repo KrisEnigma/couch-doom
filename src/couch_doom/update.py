@@ -39,14 +39,18 @@ def asset_for_platform(os_name: str, machine: str) -> str | None:
     return None
 
 
+def https_context() -> ssl.SSLContext:
+    """The bundled CA store. A frozen macOS build has no system certificates, so the default context fails verification."""
+    return ssl.create_default_context(cafile=certifi.where())
+
+
 def _fetch_latest() -> dict:
     test_manifest = os.environ.get("COUCHDOOM_UPDATE_TEST_MANIFEST")
     if test_manifest:
         with open(test_manifest, encoding="utf-8") as stream:
             return json.load(stream)
     req = urllib.request.Request(API, headers={"User-Agent": "CouchDoom", "Accept": "application/vnd.github+json"})
-    context = ssl.create_default_context(cafile=certifi.where())
-    with urllib.request.urlopen(req, timeout=TIMEOUT, context=context) as resp:
+    with urllib.request.urlopen(req, timeout=TIMEOUT, context=https_context()) as resp:
         return json.load(resp)
 
 

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from .update import ReleaseAsset
+from .update import ReleaseAsset, https_context
 
 CHUNK = 256 * 1024
 RESULT_FILE = "update-result.json"
@@ -65,7 +65,9 @@ def _request(url: str):
     if not allowed:
         raise UpdateError("The release download URL was invalid.")
     req = urllib.request.Request(url, headers={"User-Agent": "CouchDoom updater"})
-    return urllib.request.urlopen(req, timeout=30)
+    # file:// is the local test manifest. https uses the bundled CAs: see https_context.
+    context = https_context() if url.startswith("https://") else None
+    return urllib.request.urlopen(req, timeout=30, context=context)
 
 
 def _read(url: str) -> bytes:

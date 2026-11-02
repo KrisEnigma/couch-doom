@@ -34,6 +34,17 @@ class ReleaseTargetTests(unittest.TestCase):
         create_context.assert_called_once_with(cafile="bundle/cacert.pem")
         self.assertIs(urlopen.call_args.kwargs["context"], context)
 
+    def test_update_download_uses_bundled_ca_certificates(self):
+        context = object()
+        with patch.object(self_update, "https_context", return_value=context) as bundled, \
+                patch.object(self_update.urllib.request, "urlopen") as urlopen, \
+                patch.dict(os.environ, {"COUCHDOOM_UPDATE_TEST_MANIFEST": "1"}):
+            self_update._request("https://github.com/KrisEnigma/couch-doom/releases/download/v1.2.3/x.sha256")
+            self_update._request("file:///tmp/x.sha256")
+        self.assertIs(urlopen.call_args_list[0].kwargs["context"], context)
+        self.assertIsNone(urlopen.call_args_list[1].kwargs["context"])
+        bundled.assert_called_once()
+
     def test_current_release_check_records_success_in_local_log(self):
         data = {
             "tag_name": "v1.0.0",
@@ -130,7 +141,7 @@ class DownloadTests(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *args): self.close()
 
-        def open_url(request, timeout):
+        def open_url(request, timeout, context=None):
             return Response(archive if request.full_url.endswith(".zip") else f"{digest}  CouchDoom-v1.2.0-windows-x64.zip\n".encode())
 
         asset = update.ReleaseAsset(
@@ -263,7 +274,7 @@ class DownloadTests(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *args): self.close()
 
-        def open_url(request, timeout):
+        def open_url(request, timeout, context=None):
             return Response(b"wrong" if request.full_url.endswith(".zip") else b"0" * 64)
 
         asset = update.ReleaseAsset(
@@ -293,7 +304,7 @@ class DownloadTests(unittest.TestCase):
                 cancel.set()
                 return super().read(size)
 
-        def open_url(request, timeout):
+        def open_url(request, timeout, context=None):
             body = archive if request.full_url.endswith(".zip") else f"{digest}  CouchDoom-v1.2.0-windows-x64.zip\n".encode()
             return Response(body)
 
@@ -351,7 +362,7 @@ class DownloadTests(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *args): self.close()
 
-        def open_url(request, timeout):
+        def open_url(request, timeout, context=None):
             body = archive if request.full_url.endswith(".zip") else f"{digest}  CouchDoom-v1.2.0-windows-x64.zip\n".encode()
             return Response(body)
 
@@ -389,7 +400,7 @@ def _fake_release(files: dict[str, bytes]):
         def __enter__(self): return self
         def __exit__(self, *args): self.close()
 
-    def open_url(request, timeout):
+    def open_url(request, timeout, context=None):
         body = archive if request.full_url.endswith(".zip") else f"{digest}  CouchDoom-v1.2.0-windows-x64.zip\n".encode()
         return Response(body)
 
