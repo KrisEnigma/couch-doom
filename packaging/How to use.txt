@@ -7,8 +7,9 @@ Made by KrisEnigma: https://github.com/KrisEnigma/couch-doom
 GETTING STARTED
 ---------------
 
-1. Set up games in DoomRunner, ZDL or Doom Launcher. You can also use GZDoom,
-   UZDoom or VKDoom by itself; CouchDoom lists the IWADs it finds.
+1. Set up games in DoomRunner, ZDL, Doom Launcher or Doom Launcher 667. You can
+   also use GZDoom, UZDoom or VKDoom by itself; CouchDoom lists the IWADs it
+   finds.
 2. Start CouchDoom:
    Windows: Run CouchDoom.exe.
    macOS: Open the DMG, drag CouchDoom.app to Applications, then open it there.
@@ -30,20 +31,22 @@ FINDING YOUR GAMES
 
 CouchDoom finds launcher settings automatically, including portable installs
 with a Start Menu, Desktop or taskbar shortcut. You can also put the CouchDoom
-folder inside a portable launcher's folder.
+folder inside a portable launcher's folder. It never changes your launcher
+setups.
 
 If it finds more than one launcher, it asks which one to use and remembers your
-answer. Press L3 (click the left stick) or F4 any time to switch.
+answer. Open the menu (Start on a controller, Esc on a keyboard) and choose
+"Choose launcher" any time to switch.
 
-If it finds none, press L3 or F4 and choose "Find it myself..." to browse to the
-launcher's or port's program. You can also drag the program or its folder onto
-the CouchDoom window.
+If it finds none, open the menu, choose "Choose launcher", then "Find it
+myself..." to browse to the launcher's or port's program. You can also drag the
+program or its folder onto the CouchDoom window.
 
 In the browser, use the D-pad or stick to move, the confirm button to open or
 choose, and the back button to go up. Use the show-all-files control to reveal
-hidden items, LB/RB (L1/R1 on PlayStation, L/R on Switch) to switch roots, and
-the triggers to page. An installed copy starts in CouchDoom's own folder; the
-root-switch controls still let you reach other locations.
+hidden items. Select "Parent folder" to go up; at a drive root, select
+"Drives & home" for other locations. The triggers page through long lists. An
+installed copy starts in CouchDoom's own folder.
 
 CONTROLS
 --------
@@ -52,22 +55,33 @@ The app shows button prompts for your controller. These are the names used on
 Xbox, PlayStation and Switch controllers.
 
 Play or choose: A (Xbox/Switch); Cross (PlayStation)
-Quit or close: B (Xbox/Switch); Circle (PlayStation)
-Info sheet: X (Xbox/Switch); Square (PlayStation)
+Back or close a panel: B (Xbox/Switch); Circle (PlayStation)
+Info sheet (on a group heading, expand or collapse every group): X (Xbox/Switch);
+Square (PlayStation)
 Search: Y (Xbox/Switch); Triangle (PlayStation)
+Open the menu: Start (Xbox), Options (PlayStation), + (Switch)
+Quick help: View (Xbox), Create (PlayStation), - (Switch)
 Previous / next section: LB/RB (Xbox), L1/R1 (PlayStation), L/R (Switch)
 Add or remove favorite: R3 (press the right stick)
-Switch launcher: L3 (press the left stick)
-Toggle title music: Menu (Xbox), Options (PlayStation), + (Switch)
-Quick help: View (Xbox), Create (PlayStation), - (Switch)
 Page up / down: LT/RT (Xbox), L2/R2 (PlayStation), ZL/ZR (Switch)
 
-Keyboard: arrows to move, Enter to play, Esc to quit or close, Tab for info,
-F1 for help, F2 for music, F3 for favorite, F4 to switch launcher, Page Up and
-Page Down to page, or type to search.
+Keyboard: arrows to move, Enter to play, Esc for the menu, Tab for info, F1 for
+help, F3 for favorite, F5 for Help & Feedback, Page Up and Page Down to page,
+Home and End for the ends of the list or browser, or type to search.
 
 Mouse: click once to select a preset and again to play. The wheel scrolls,
 right-click goes back, and the button hints at the bottom are clickable.
+
+MENU
+----
+
+Start or Esc opens the menu: return to the list, refresh launcher data, choose a
+launcher, toggle title music or menu sounds, cycle Colors and Language, turn the
+optional Recently played group on or off, open Help, or quit.
+
+Language follows your system on first run when CouchDoom supports it (English,
+Spanish, Brazilian Portuguese, French, German). Colors can follow each game's
+art or lock one look for the whole app.
 
 FIRST LAUNCH
 ------------
@@ -103,6 +117,12 @@ Linux:  $XDG_CACHE_HOME/couch-doom/music (or ~/.cache/couch-doom/music)
 
 Close CouchDoom before clearing this folder; the cache is recreated as tracks
 are played.
+
+UPDATES
+-------
+
+Packaged builds check GitHub once after startup and can install an update from
+inside the app, then restart. Source builds open the release page instead.
 
 TROUBLESHOOTING AND LOGS
 ------------------------

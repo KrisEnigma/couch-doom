@@ -148,7 +148,7 @@ jobs:
           {\
             cat packaging/release-header.md
             printf '\n%s\n\n' "$section"
-            echo 'See `How to use.txt` in the matching ZIP for controls. Title music works out of the box (a SoundFont is already included).'
+            echo 'See `How to use.txt` in the matching ZIP for controls and setup details.'
           } > notes.md
 
       - name: Publish release
