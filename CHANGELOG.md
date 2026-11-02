@@ -7,9 +7,8 @@ Each release's notes on GitHub are its own section below, behind the download in
 - Starting a game zooms its title art out of the detail panel to fill the screen. The loading screen is that art (with the game's logo), not a flat red wipe.
 - Selecting a category shows its name as a typographic mural instead of one game's art, with the presets in that group listed below.
 - Text is easier to read from the couch, overlays use a plain title instead of tiny eyebrow labels, and the preset count sits beside the launcher name.
-- The file browser shows folder, drive and file icons, and search keeps the list visible while you type.
-- In-app updates keep drawing through unpacking (Cancel still works), show each install step, and report whether the restart succeeded.
-- Also: title music fades sooner when you move, Ctrl+Backspace deletes a whole word from the filter, and toasts sit at the top margin again.
+- The file browser shows folder, drive and file icons. Search keeps the list visible while you type, and Ctrl+Backspace deletes a whole word from the filter.
+- Also: in-app updates keep drawing through unpacking (Cancel still works), show each install step, and report whether the restart succeeded; title music fades sooner when you move; toasts sit at the top margin again.
 
 **New in 1.2.1**
 
