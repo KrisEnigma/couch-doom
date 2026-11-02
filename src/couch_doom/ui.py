@@ -68,7 +68,10 @@ WINDOW_RETRIES = 20  # half a second apart
 INPUT_COOLDOWN = 0.45
 ART_FADE_SECONDS = 0.45
 ART_CACHE_SIZE = 24
-THEME_CACHE_SIZE = 48
+ART_CACHE_BYTES = 96 * 1024 * 1024  # 24 panels at 1080p, but only ~8 at 4K
+# Each theme holds a full-screen background plus an art-panel veil (~11 MB at 1080p, ~45 MB at 4K).
+# Only the live and fading themes need to stay warm; rebuilding one takes a few milliseconds.
+THEME_CACHE_SIZE = 6
 ART_MIN_FILL = 0.62  # of the art panel's height
 ART_MAX_ZOOM = 1.25
 FAVORITES_ID = "favorites"
@@ -147,11 +150,22 @@ def _theme_cache(cache: OrderedDict, key: int, create: Callable):
     if key in cache:
         cache.move_to_end(key)
         return cache[key]
-    value = create()
+    return _theme_cache_put(cache, key, create())
+
+
+def _theme_cache_put(cache: OrderedDict, key: int, value):
     cache[key] = value
+    cache.move_to_end(key)
     while len(cache) > THEME_CACHE_SIZE:
         cache.popitem(last=False)
     return value
+
+
+def _surface_bytes(surface) -> int:
+    if not isinstance(surface, pygame.Surface):
+        return 0
+    w, h = surface.get_size()
+    return w * h * surface.get_bytesize()
 
 
 def _ease_out(t: float) -> float:
@@ -994,6 +1008,9 @@ class App:
         self.s = s = h / 1080
         self._fonts: dict = {}
         self._text_cache: dict = {}
+        # Both caches key on Font objects, which were just replaced; drop the old fonts with them.
+        App._fit.cache_clear()
+        App._wrap.cache_clear()
         self.glyphs = Glyphs(self._font, s)
 
         self.margin = int(72 * s)
@@ -1017,6 +1034,7 @@ class App:
         self._masks = self._make_masks()
         self.bar_surface = self._bar_for(self.theme)
         if resized:
+            self._drop_sized_renders()
             self.art_cache.clear()
             self.art_layers.clear()
             self.logos.clear()
@@ -1371,6 +1389,25 @@ class App:
             return
         self.art_jobs[idx] = self.art_pool.submit(_load_extras, self.opts.presets[idx])
 
+    def _drop_sized_renders(self) -> None:
+        """Forget renders sized for the old window; a running one can't be stopped, so its result is ignored."""
+        for jobs in (self.art_render_jobs, self.logo_render_jobs):
+            for job in jobs.values():
+                job.cancel()
+            jobs.clear()
+
+    def _trim_art_cache(self) -> None:
+        """Bound art by count and bytes; a preset's logo, readme, ENDOOM and theme leave with its art."""
+        total = sum(_surface_bytes(surface) for surface in self.art_cache.values())
+        while len(self.art_cache) > 1 and (len(self.art_cache) > ART_CACHE_SIZE or total > ART_CACHE_BYTES):
+            _, evicted = self.art_cache.popitem(last=False)
+            total -= _surface_bytes(evicted)
+        # Extras of presets whose render was cancelled mid-way never reach art_cache; drop them too.
+        keep = set(self.art_cache) | {self.current}
+        for extras in (self.logos, self.readmes, self.endooms, self.themes):
+            for idx in [idx for idx in extras if idx not in keep]:
+                del extras[idx]
+
     def _should_show_title_text(self, idx: int) -> bool:
         """Keep the fallback title hidden until async asset loading decides whether a logo exists."""
         if idx in self.logos:
@@ -1415,11 +1452,11 @@ class App:
         out.blit(img, (0, 0))
         return out
 
-    def _render_art(self, art: Art | None, logo: Art | None):
-        """Prepare selected art off-thread; return surfaces for the UI thread to adopt."""
+    def _render_art(self, art: Art | None):
+        """Prepare selected art off-thread; return (theme, art, background, layers) for the UI thread to adopt."""
         lower_current_thread_priority()
         if art is None:
-            return None, None, None, self._logo_surface(logo), None
+            return None, None, None, None
         try:
             if art.kind == "encoded":
                 img = pygame.image.load(io.BytesIO(art.data)).convert(_OPAQUE)
@@ -1428,7 +1465,7 @@ class App:
                 img.set_palette([tuple(art.palette[i * 3 : i * 3 + 3]) for i in range(256)])
                 img = img.convert(_OPAQUE)
         except (pygame.error, ValueError):
-            return None, None, None, self._logo_surface(logo), None
+            return None, None, None, None
         w, h = img.get_size()
         # Doom-era art is 200 (or 400) lines tall at any width (320, KEX's 426 widescreen, ...) and the
         # engine stretches those lines 1.2x, so the pixels aren't square.
@@ -1460,7 +1497,7 @@ class App:
             crop = crop.convert_alpha()
             crop.blit(self._alpha_mask(crop.get_size(), lambda u, v: 1 - _smoothstep((v - 0.55) / 0.45)), (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
         out.blit(crop, (0, 0))
-        return theme, out, background, self._logo_surface(logo), layers
+        return theme, out, background, layers
 
     def _update_art(self, now: float) -> None:
         if not self.rows or self._category_selected():
@@ -1491,7 +1528,7 @@ class App:
             self.readmes[selected] = readme
             self.endooms[selected] = endoom
             self.logo_render_jobs[selected] = self.art_pool.submit(self._logo_surface, logo)
-            self.art_render_jobs[selected] = self.art_pool.submit(self._render_art, art, None)
+            self.art_render_jobs[selected] = self.art_pool.submit(self._render_art, art)
 
         if selected in self.logo_render_jobs and self.logo_render_jobs[selected].done():
             job = self.logo_render_jobs.pop(selected)
@@ -1503,22 +1540,15 @@ class App:
         if selected in self.art_render_jobs and self.art_render_jobs[selected].done():
             job = self.art_render_jobs.pop(selected)
             try:
-                theme, surface, background, logo, layers = job.result()
+                theme, surface, background, layers = job.result()
             except Exception:
-                theme, surface, background, logo, layers = None, None, None, None, None
+                theme, surface, background, layers = None, None, None, None
             if theme is not None:
                 self.themes[selected] = theme
-                self._theme_bgs[theme.key] = background
-                self._theme_bgs.move_to_end(theme.key)
-                while len(self._theme_bgs) > THEME_CACHE_SIZE:
-                    self._theme_bgs.popitem(last=False)
-                self._theme_layers[theme.key] = layers
-                self._theme_layers.move_to_end(theme.key)
-                while len(self._theme_layers) > THEME_CACHE_SIZE:
-                    self._theme_layers.popitem(last=False)
+                _theme_cache_put(self._theme_bgs, theme.key, background)
+                _theme_cache_put(self._theme_layers, theme.key, layers)
             self.art_cache[selected] = surface
-            while len(self.art_cache) > ART_CACHE_SIZE:
-                self.art_cache.popitem(last=False)
+            self._trim_art_cache()
 
         self._request_art(selected)
 
@@ -2317,7 +2347,8 @@ class App:
 
     @staticmethod
     @lru_cache(maxsize=512)
-    def _wrap(text: str, font: pygame.font.Font, max_w: int, max_lines: int) -> list[str]:
+    def _wrap(text: str, font: pygame.font.Font, max_w: int, max_lines: int) -> tuple[str, ...]:
+        # A tuple, because lru_cache hands every caller the same object.
         lines, line = [], ""
         for word in text.split():
             trial = f"{line} {word}".strip()
@@ -2328,14 +2359,14 @@ class App:
                     lines.append(line)
                     if len(lines) == max_lines:
                         lines[-1] = App._fit(lines[-1] + " …", font, max_w)
-                        return lines
+                        return tuple(lines)
                 line = word
         if line:
             lines.append(line)
         if len(lines) > max_lines:
             lines = lines[:max_lines]
             lines[-1] = App._fit(lines[-1] + " …", font, max_w)
-        return lines
+        return tuple(lines)
 
     def _wrap_items(self, items: list[str], font: pygame.font.Font, max_w: int, max_lines: int) -> list[str]:
         """Join items with separators across lines; the last line reports what didn't fit."""
@@ -2601,7 +2632,7 @@ class App:
         title_font = self._font(64, bold=True)
         lines = self._wrap(preset.name, title_font, w, 3)
         readme = self.readmes.get(self.current)
-        byline = " · ".join(x for x in ((f"by {readme.author}" if readme.author else ""), readme.year) if x) if readme else ""
+        byline = " · ".join(x for x in ((tr("tag.by", author=readme.author) if readme.author else ""), readme.year) if x) if readme else ""
         blurb = readme.blurb if readme else ""
         title_gap = int(8 * s) if byline or blurb else int(26 * s)
         logo = self.logos.get(self.current)
@@ -3175,7 +3206,7 @@ class App:
         self.hits.append(Hit(box, lambda: None))
 
         fx, fy = box.x + pad, box.y + pad
-        self.screen.blit(self._tracked("Search", 16, self.theme.label, tracking=0.3), (fx, fy))
+        self.screen.blit(self._tracked(tr("hint.search"), 16, self.theme.label, tracking=0.3), (fx, fy))
         caret = "|" if int(now * 2) % 2 == 0 else " "
         field = self._text(self._fit(self.filter + caret, self._font(34), grid_w - int(160 * s)), self._font(34), TEXT)
         self.screen.blit(field, (fx, fy + int(22 * s)))
