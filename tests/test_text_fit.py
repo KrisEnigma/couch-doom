@@ -1,4 +1,4 @@
-from couch_doom.ui import App
+from couch_doom.ui import App, _wrap_mono
 
 
 class CountingFont:
@@ -41,3 +41,11 @@ def test_wrapping_a_long_readme_stops_after_the_visible_lines():
     assert len(lines) == 6
     assert lines[-1].endswith("…")
     assert font.size_calls < 50
+
+
+def test_readme_rules_are_cut_to_the_column_instead_of_wrapping():
+    text = "=" * 120 + "\n" + "  " + "-=" * 60 + "\n" + "word " * 30
+    lines = _wrap_mono(text, 40)
+    assert lines[0] == "=" * 40
+    assert lines[1] == "  " + "-=" * 19
+    assert len(lines) > 3  # prose still wraps

@@ -276,11 +276,19 @@ def _set_window_icon() -> None:
         pass
 
 
+def _is_rule(line: str) -> bool:
+    """A separator drawn with one or two punctuation characters: -----, =====, -=-=-=, *~*~*."""
+    ink = line.strip()
+    return len(ink) >= 4 and len(set(ink)) <= 2 and not any(c.isalnum() or c.isspace() for c in ink)
+
+
 def _wrap_mono(text: str, per_line: int) -> list[str]:
     """Hard-wrap preformatted text, breaking at a space when one is reasonably close."""
     out: list[str] = []
     for raw in text.split("\n"):
         raw = raw.rstrip()
+        if _is_rule(raw):
+            raw = raw[:per_line]  # a wrapped ----- or ===== reads as two separators
         while len(raw) > per_line:
             cut = raw.rfind(" ", 0, per_line + 1)
             if cut < per_line // 2:
@@ -2513,9 +2521,9 @@ class App:
         brand = self._shadowed("COUCH DOOM", brand_font, TEXT)  # brand stays English
         brand_pos = (m - int(4 * s), m - int(18 * s))
         self.screen.blit(brand, brand_pos)
-        ver = self._tracked(f"v{__version__}", 14, DIM, tracking=0.2)
+        ver = self._tracked(f"v{__version__}", 18, MUTED, tracking=0.16)
         baseline = brand_pos[1] + brand_font.get_ascent()
-        self.screen.blit(ver, (brand_pos[0] + brand.get_width() + int(10 * s), baseline - self._font(14, bold=True).get_ascent()))
+        self.screen.blit(ver, (brand_pos[0] + brand.get_width() + int(10 * s), baseline - self._font(18, bold=True).get_ascent()))
         stripe_y = m + brand.get_height() - int(14 * s)
         pygame.draw.rect(self.screen, self.theme.accent, (m, stripe_y, int(150 * s), int(7 * s)))
         tag = self._tracked(
@@ -2529,20 +2537,23 @@ class App:
         if self.blocked:
             return
         total = len(self.opts.presets)
-        shown = sum(1 for r in self.rows if r.kind == "preset" and not r.fav)
-        number = self._shadowed(str(shown) if not self.filter else f"{shown} / {total}", self._font(44, bold=True), TEXT)
-        label = self._tracked(tr("header.presets") if not self.filter else tr("header.matching"), 17, MUTED, tracking=0.3)
-        right = self.w - m
-        self.screen.blit(number, (right - number.get_width(), m - int(10 * s)))
-        self.screen.blit(label, (right - label.get_width(), m - int(10 * s) + number.get_height()))
-
+        count = tr("picker.n_presets", count=total) if total == 1 else tr("picker.n_presets_plural", count=total)
+        # Leading space and one tracking gap: the count reads as the same line, not a second label.
+        self.screen.blit(self._tracked(f" · {count}", 18, MUTED, tracking=0.3),
+                         (tag_pos[0] + tag.get_width() + round(18 * s * 0.3), tag_pos[1]))
         if self.filter or self.mode == "search":
             fy = self.list_rect.top - int(64 * s)
             lab = self._tracked(tr("header.filter"), 17, self.theme.label, tracking=0.3)
             self.screen.blit(lab, (m, fy + int(12 * s)))
             caret = "|" if int(time.monotonic() * 2) % 2 == 0 else ""
-            value = self._text((self.filter + caret) or " ", self._font(32), TEXT)
+            value_font = self._font(32)
+            value = self._text((self.filter + caret) or " ", value_font, TEXT)
             self.screen.blit(value, (m + lab.get_width() + int(20 * s), fy))
+            shown = sum(1 for r in self.rows if r.kind == "preset" and not r.fav)
+            count_font = self._font(22)
+            count = self._text(tr("header.n_matching", shown=shown, total=len(self.opts.presets)), count_font, MUTED)
+            cy = fy + value_font.get_ascent() - value_font.metrics("H")[0][3] / 2
+            self.screen.blit(count, (self.list_rect.right - count.get_width(), self._text_top(count_font, cy)))
 
     def _draw_notice(self) -> None:
         """Stands in for list and details when there's nothing to pick: say what's wrong and how to fix it."""
@@ -2601,17 +2612,9 @@ class App:
         stripe = tuple(int(c * pulse) for c in self.theme.accent)
         sel = self._sel_row()
         sel_row = self.rows[sel]
-        title_pad = int(8 * s)
-        if sel_row.kind == "header":
-            title_font = self._font(18, bold=True)
-            cap = title_font.metrics("H")[0][3]
-            title = self._tracked(sel_row.text, 18, TEXT, tracking=0.22)
-            band_h = min(cap + 2 * title_pad, self.preset_h)
-            # Center the band on the capital letters, not the whole line box (which includes descender space).
-            ink_cy = bar_top + self.header_h - title.get_height() - int(12 * s) + title_font.get_ascent() - cap / 2
-            band_y = round(ink_cy - band_h / 2)
-        else:
-            band_y, band_h = bar_top, self.preset_h
+        # A heading's selection is the same bar as a game's, filling the bottom of its taller row.
+        band_h = self.preset_h
+        band_y = bar_top + self.header_h - band_h if sel_row.kind == "header" else bar_top
         glow = pygame.Rect(0, 0, self.bar_surface.get_width(), band_h)
         self.screen.blit(self.bar_surface, (bar_x, band_y), glow)
 
@@ -2631,9 +2634,9 @@ class App:
                 self.hits.append(Hit(area, lambda i=i: self._click_row(i)))
                 selected = i == sel
                 t = self._tracked(row.text, 18, TEXT if selected else self.theme.label, tracking=0.22)
-                ty = y + h - t.get_height() - int(12 * s)
+                ty = self._text_top(self._font(18, bold=True), y + h - self.preset_h / 2)
                 self.screen.blit(t, (lr.x, ty))
-                cnt = self._text(str(row.count), self._font(18, bold=True), MUTED if selected else DIM)
+                cnt = self._text(str(row.count), self._font(18, bold=True), MUTED)
                 self.screen.blit(cnt, (lr.x + t.get_width() + int(14 * s), ty + (t.get_height() - cnt.get_height()) // 2))
                 marker_size = max(4, int(4 * s))
                 marker_x = lr.x - int(12 * s)
@@ -2660,12 +2663,12 @@ class App:
             color = TEXT if selected else (MUTED if ok else DIM)
             right_pad = 0
             if row.text == self.state.last_played:
-                tag = self._tracked(tr("tag.last"), 15, self.theme.label if selected else DIM, tracking=0.25)
-                self.screen.blit(tag, (lr.right - tag.get_width(), self._text_top(self._font(15, bold=True), y + h / 2)))
+                tag = self._tracked(tr("tag.last"), 18, self.theme.label if selected else MUTED, tracking=0.2)
+                self.screen.blit(tag, (lr.right - tag.get_width(), self._text_top(self._font(18, bold=True), y + h / 2)))
                 right_pad = tag.get_width() + int(16 * s)
             if not ok:
-                warn = self._tracked(tr("tag.missing"), 15, ERROR, tracking=0.25)
-                self.screen.blit(warn, (lr.right - right_pad - warn.get_width(), self._text_top(self._font(15, bold=True), y + h / 2)))
+                warn = self._tracked(tr("tag.missing"), 18, ERROR, tracking=0.2)
+                self.screen.blit(warn, (lr.right - right_pad - warn.get_width(), self._text_top(self._font(18, bold=True), y + h / 2)))
                 right_pad += warn.get_width() + int(16 * s)
             font = sel_font if selected else name_font
             starred = not row.fav and row.text in self.state.favorites
@@ -2764,12 +2767,12 @@ class App:
         items += [p.name for p in preset.mappacks] + [p.name for p in preset.mods]
         if preset.additional_args:
             items.append(_pretty_args(preset.additional_args))
-        font = self._font(17)
-        row_h = int(24 * s)
+        font = self._font(20)
+        row_h = int(28 * s)
         meta_lines = self._wrap_items(items, font, w, 2)
         meta = pygame.Surface((w, len(meta_lines) * row_h), pygame.SRCALPHA)
         for n, line in enumerate(meta_lines):
-            meta.blit(self._text(line, font, DIM), (0, n * row_h))
+            meta.blit(self._text(line, font, MUTED), (0, n * row_h))
         blocks.append((meta, int(22 * s)))
         label_gap = int(30 * s)
 
@@ -2820,7 +2823,7 @@ class App:
             state_text = tr("group.search_keeps")
         else:
             state_text = tr("group.state_collapsed") if row.collapsed else tr("group.state_open")
-        state = self._text(state_text, self._font(20), DIM)
+        state = self._text(state_text, self._font(20), MUTED)
         top = int(54 * s)
         row_h = preview_font.get_linesize() + int(9 * s)
         fixed_h = sum(surf.get_height() + gap for surf, gap in header)
@@ -2841,7 +2844,7 @@ class App:
         if visible:
             blocks.append((preview, int(8 * s)))
         if more:
-            blocks.append((self._text(tr("group.and_more", count=more), self._font(20), DIM), int(8 * s)))
+            blocks.append((self._text(tr("group.and_more", count=more), self._font(20), MUTED), int(8 * s)))
         blocks.append((state, 0))
         panel = pygame.Surface(dr.size, pygame.SRCALPHA)
         y = top
@@ -3007,27 +3010,19 @@ class App:
                 status = self._text(self.menu_status, self._font(16), self.theme.label)
                 status.set_alpha(int(255 * max(0.0, 1.0 - age / 2.0)))
                 self.screen.blit(status, (rect.right - status.get_width() - int(22 * s), rect.centery - status.get_height() // 2))
-            if key == "music":
-                value = tr("menu.on") if self.state.music else tr("menu.off")
-                badge = self._tracked(value, 14, self.theme.label if self.state.music else MUTED, tracking=0.2)
-                self.screen.blit(badge, (rect.right - badge.get_width() - int(22 * s), rect.centery - badge.get_height() // 2))
-            if key == "sounds":
-                value = tr("menu.on") if self.state.menu_sounds else tr("menu.off")
-                badge = self._tracked(value, 14, self.theme.label if self.state.menu_sounds else MUTED, tracking=0.2)
-                self.screen.blit(badge, (rect.right - badge.get_width() - int(22 * s), rect.centery - badge.get_height() // 2))
-            if key == "recent":
-                enabled = self.state.recent_group
-                value = tr("menu.on") if enabled else tr("menu.off")
-                badge = self._tracked(value, 14, self.theme.label if enabled else MUTED, tracking=0.2)
-                self.screen.blit(badge, (rect.right - badge.get_width() - int(22 * s), rect.centery - badge.get_height() // 2))
-            if key == "colors":
+            value, on = None, False
+            if key in ("music", "sounds", "recent"):
+                on = {"music": self.state.music, "sounds": self.state.menu_sounds, "recent": self.state.recent_group}[key]
+                value = tr("menu.on") if on else tr("menu.off")
+            elif key == "colors":
                 palette = self._current_palette_key()
-                current = tr(f"palette.{palette}") if palette else tr("palette.auto")
-                badge = self._tracked(current, 14, self.theme.label, tracking=0.2)
-                self.screen.blit(badge, (rect.right - badge.get_width() - int(22 * s), rect.centery - badge.get_height() // 2))
-            if key == "language":
-                badge = self._tracked(tr(f"lang.{current_language()}"), 14, self.theme.label, tracking=0.2)
-                self.screen.blit(badge, (rect.right - badge.get_width() - int(22 * s), rect.centery - badge.get_height() // 2))
+                value = tr(f"palette.{palette}") if palette else tr("palette.auto")
+            elif key == "language":
+                value = tr(f"lang.{current_language()}")
+            if value:
+                value_font = self._font(22)
+                badge = self._text(value, value_font, self.theme.label if on else TEXT if selected else MUTED)
+                self.screen.blit(badge, (rect.right - badge.get_width() - int(22 * s), self._text_top(value_font, rect.centery)))
             y += row_h
 
     def _draw_picker(self, now: float) -> None:
@@ -3087,12 +3082,12 @@ class App:
                 self.screen.blit(tag, (right - tag.get_width(), self._text_top(self._font(15, bold=True), rect.y + int(30 * s))))
             font = sel_font if selected else name_font
             self.screen.blit(self._text(name, font, TEXT if selected else MUTED), (x, self._text_top(font, rect.y + int(30 * s))))
-            self.screen.blit(self._text(self._fit(sub, mono, inner), mono, DIM), (x, rect.y + int(52 * s)))
+            self.screen.blit(self._text(self._fit(sub, mono, inner), mono, MUTED), (x, rect.y + int(52 * s)))
             y += row_h
 
         note = tr("picker.not_listed", program=PROGRAM)
         note_font = self._font(21)
-        self.screen.blit(self._text(self._fit(note, note_font, inner), note_font, DIM), (x, y + int(18 * s)))
+        self.screen.blit(self._text(self._fit(note, note_font, inner), note_font, MUTED), (x, y + int(18 * s)))
 
     def _browser_pick(self, index: int) -> None:
         if not self.file_browser or not 0 <= index < len(self.file_browser.entries):
@@ -3130,7 +3125,7 @@ class App:
         y += head_h
 
         if not shown:
-            self.screen.blit(self._text(tr("browser.empty"), self._font(24), DIM), (x, y + int(12 * s)))
+            self.screen.blit(self._text(tr("browser.empty"), self._font(24), MUTED), (x, y + int(12 * s)))
         for offset, entry in enumerate(shown):
             index = self.browser_scroll + offset
             scrollbar = len(browser.entries) > page
@@ -3146,7 +3141,7 @@ class App:
             font = self._font(25, bold=selected and not navigation)
             room = rect.right - x - int(16 * s)
             detail_font = self._font(20)
-            detail_color = self.theme.label if entry.launcher else DIM
+            detail_color = self.theme.label if entry.launcher else MUTED
             detail = self._text(self._fit(entry.detail, detail_font, room // 2), detail_font, detail_color) if entry.detail else None
             gap = int(18 * s)
             name_room = room - (detail.get_width() + gap if detail else 0)
@@ -3157,7 +3152,7 @@ class App:
                 self.screen.blit(detail, (x + name.get_width() + gap, self._text_top(detail_font, rect.centery)))
             y += row_h
         if browser.empty:
-            self.screen.blit(self._text(tr("browser.empty"), self._font(22), DIM), (x, self._text_top(self._font(22), y + row_h // 2)))
+            self.screen.blit(self._text(tr("browser.empty"), self._font(22), MUTED), (x, self._text_top(self._font(22), y + row_h // 2)))
 
         if len(browser.entries) > page:
             track_w = self.scroll_w
@@ -3273,7 +3268,7 @@ class App:
             color = DIM if installing_row and not cancellable else TEXT if selected else MUTED
             self.screen.blit(self._text(label, font, color), (x, self._text_top(font, rect.y + int(26 * s))))
             sub = sub.replace("{v}", str(info.get("version", "")))
-            self.screen.blit(self._text(self._fit(sub, sub_font, inner), sub_font, DIM), (x, rect.y + int(52 * s)))
+            self.screen.blit(self._text(self._fit(sub, sub_font, inner), sub_font, MUTED), (x, rect.y + int(52 * s)))
             y += row_h
 
     def _help_rows(self, width: int) -> list[tuple[str, bool]]:
@@ -3367,11 +3362,8 @@ class App:
         fx, fy = box.x + pad, box.y + pad
         self.screen.blit(self._tracked(tr("hint.search"), 16, self.theme.label, tracking=0.3), (fx, fy))
         caret = "|" if int(now * 2) % 2 == 0 else " "
-        field = self._text(self._fit(self.filter + caret, self._font(34), grid_w - int(160 * s)), self._font(34), TEXT)
+        field = self._text(self._fit(self.filter + caret, self._font(34), grid_w), self._font(34), TEXT)
         self.screen.blit(field, (fx, fy + int(22 * s)))
-        count = sum(1 for r in self.rows if r.kind == "preset" and not r.fav)
-        cnt = self._tracked(f"{count} match{'es' if count != 1 else ''}", 16, MUTED, tracking=0.25)
-        self.screen.blit(cnt, (fx + grid_w - cnt.get_width(), fy + int(34 * s)))
         pygame.draw.rect(self.screen, self.theme.accent, (fx, fy + field_h - int(12 * s), grid_w, max(2, int(3 * s))))
 
         gy = fy + field_h
