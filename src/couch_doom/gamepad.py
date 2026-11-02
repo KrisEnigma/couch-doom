@@ -1,6 +1,7 @@
 """Maps keyboard, SDL game controllers and raw joysticks onto abstract actions."""
 from __future__ import annotations
 
+import sys
 from enum import Enum, auto
 
 import pygame
@@ -26,9 +27,11 @@ class Action(Enum):
     HOME = auto()
     END = auto()
     FAVORITE = auto()  # R3: add/remove from Favorites
+    DELETE = auto()  # Backspace: edit the active filter
 
 
 DIRECTIONS = {Action.UP, Action.DOWN, Action.LEFT, Action.RIGHT, Action.PAGE_UP, Action.PAGE_DOWN}
+REPEATABLE = DIRECTIONS
 
 REPEAT_DELAY = 0.32
 REPEAT_INTERVAL = 0.07
@@ -82,7 +85,35 @@ _KEYS = {
     pygame.K_HOME: Action.HOME,
     pygame.K_END: Action.END,
     pygame.K_F3: Action.FAVORITE,
+    pygame.K_BACKSPACE: Action.DELETE,
 }
+
+
+SPI_GETKEYBOARDSPEED = 0x000A
+SPI_GETKEYBOARDDELAY = 0x0016
+
+
+def keyboard_repeat_timing() -> tuple[int, int]:
+    """Return the user's keyboard repeat delay and interval in milliseconds."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            spi = user32.SystemParametersInfoW
+            spi.argtypes = (wintypes.UINT, wintypes.UINT, wintypes.LPVOID, wintypes.UINT)
+            spi.restype = wintypes.BOOL
+            delay, speed = wintypes.UINT(), wintypes.UINT()
+            if spi(SPI_GETKEYBOARDDELAY, 0, ctypes.byref(delay), 0) and spi(
+                SPI_GETKEYBOARDSPEED, 0, ctypes.byref(speed), 0
+            ):
+                delay_ms = 250 * (delay.value + 1)
+                repeats_per_second = 2.5 + 27.5 * min(speed.value, 31) / 31
+                return delay_ms, max(1, round(1000 / repeats_per_second))
+        except (AttributeError, OSError, TypeError, ValueError):
+            pass
+    return 500, 30
 
 
 def _family(name: str) -> str:
@@ -198,10 +229,12 @@ class Input:
         self._left_y.clear()
 
     def _press(self, source: tuple, action: Action, now: float, out: list[Action]) -> None:
-        if action in DIRECTIONS:
-            if source in self._held and self._held[source][0] == action:
-                return
+        if source in self._held and self._held[source][0] == action:
+            return
+        if action in REPEATABLE:
             self._held[source] = (action, now + REPEAT_DELAY)
+        else:
+            self._held[source] = (action, float("inf"))
         out.append(action)
 
     def _release(self, source: tuple) -> None:
@@ -233,6 +266,13 @@ class Input:
             self._left_y.pop(event.instance_id, None)
             self._held = {k: v for k, v in self._held.items() if k[1] != event.instance_id}
 
+        elif t == pygame.KEYDOWN and event.key == pygame.K_BACKSPACE:
+            source = ("key", event.key)
+            if source in self._held:
+                out.append(Action.DELETE)
+            else:
+                self._held[source] = (Action.DELETE, float("inf"))
+                out.append(Action.DELETE)
         elif t == pygame.KEYDOWN and event.key in _KEYS:
             self._press(("key", event.key), _KEYS[event.key], now, out)
         elif t == pygame.KEYUP and event.key in _KEYS:
@@ -288,6 +328,8 @@ class Input:
     def update(self, now: float) -> list[Action]:
         out: list[Action] = []
         for src, (action, due) in list(self._held.items()):
+            if action == Action.DELETE:
+                continue  # Backspace repeats follow repeated KEYDOWN events, timed by pygame's keyboard settings.
             if now >= due:
                 out.append(action)
                 self._held[src] = (action, now + REPEAT_INTERVAL)

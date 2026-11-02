@@ -1,4 +1,4 @@
-"""Per-preset colour theme taken from the title art's dominant vivid hue, like media players tint to album art."""
+"""Colour themes from title-art hue, plus a small curated global palette override set."""
 from __future__ import annotations
 
 import colorsys
@@ -8,6 +8,20 @@ import pygame
 
 Color = tuple[int, int, int]
 HUE_STEPS = 72  # 5-degree bins group vivid title-art pixels by hue
+
+# App-wide Colors row. Automatic keeps art-derived themes; the rest lock one look.
+PALETTES: list[tuple[str, str]] = [
+    ("auto", "Automatic"),
+    ("red", "Red"),
+    ("orange", "Orange"),
+    ("gold", "Gold"),
+    ("green", "Green"),
+    ("teal", "Teal"),
+    ("blue", "Blue"),
+    ("violet", "Violet"),
+    ("magenta", "Magenta"),
+]
+MANUAL_PALETTE_KEYS = {key for key, _ in PALETTES if key != "auto"}
 
 
 @dataclass(frozen=True)
@@ -42,6 +56,29 @@ def for_hue(hue: float) -> Theme:
         bg_top=_hls(h, 0.08, 0.17),
         bg_bottom=_hls(h, 0.12, 0.60),
     )
+
+
+def theme_for_palette(key: str) -> Theme | None:
+    """Resolve a Colors key. Automatic returns None so the caller keeps the art theme."""
+    if key == "auto":
+        return None
+    if key == "red":
+        return HOUSE
+    if key == "orange":
+        return for_hue(28 / 360)
+    if key == "gold":
+        return for_hue(42 / 360)
+    if key == "green":
+        return for_hue(130 / 360)
+    if key == "teal":
+        return for_hue(175 / 360)
+    if key == "blue":
+        return for_hue(210 / 360)
+    if key == "violet":
+        return for_hue(285 / 360)
+    if key == "magenta":
+        return for_hue(320 / 360)
+    return None
 
 
 def from_art(surface: pygame.Surface) -> Theme:

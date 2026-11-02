@@ -27,7 +27,7 @@ from .config import ASSET_DIR
 from . import handover, asset_cache
 from .background import lower_current_thread_priority
 from .filebrowser import Browser as FileBrowser
-from .gamepad import Action, Input
+from .gamepad import Action, Input, keyboard_repeat_timing
 from .glyphs import BUTTON_NAMES, Glyphs
 from .launch import LaunchCommand, build_command, load_order, presented_files, split_args
 from . import log
@@ -40,7 +40,7 @@ from .readme import Readme, find_readme
 from .sfx import Sfx
 from .sources import SOURCES, Choice
 from .state import State
-from .theme import HOUSE, Theme, from_art
+from .theme import HOUSE, PALETTES, Theme, from_art, theme_for_palette
 from .titleart import Art, find_logo, find_startup, find_title_art
 
 TEXT = (240, 232, 218)
@@ -70,6 +70,7 @@ THEME_CACHE_SIZE = 48
 ART_MIN_FILL = 0.62  # of the art panel's height
 ART_MAX_ZOOM = 1.25
 FAVORITES = "Favorites"
+RECENTLY_PLAYED = "Recently Played"
 INFO_TABS = ("Readme", "ENDOOM")
 ENDOOM_TAB = 1
 ISSUE_URL = "https://github.com/KrisEnigma/couch-doom/issues"
@@ -422,6 +423,7 @@ class App:
             os.environ.setdefault("SDL_VIDEO_MAC_FULLSCREEN_SPACES", "0")
         pygame.mixer.pre_init(44100, 32, 2, 1024)
         pygame.init()
+        pygame.key.set_repeat(*keyboard_repeat_timing())
         pygame.display.set_caption("CouchDoom")
         self.input = Input()
 
@@ -897,8 +899,11 @@ class App:
             return
         sel = self._sel_row()
         was_fav, old_y = self.rows[sel].fav, self.row_y[sel]
+        next_below = next((row.preset for row in self.rows[sel + 1:] if row.kind == "preset"), None) if was_fav else None
         on = self.state.toggle_favorite(self.opts.presets[self.current].name)
         self._rebuild_rows()
+        if not on and next_below is not None:
+            self.current = next_below
         copies = [i for i, r in enumerate(self.rows) if r.kind == "preset" and r.preset == self.current]
         if copies:
             self.cur_row = next((i for i in copies if self.rows[i].fav == was_fav), copies[0])
@@ -1102,7 +1107,7 @@ class App:
         if not self.art_layers:
             return
         idx, surf, born = self.art_layers[-1]
-        target = self.themes.get(idx, HOUSE) if surf is not None else HOUSE
+        target = self._effective_theme(idx, surf is not None)
         if target != self.theme:
             # Changed again mid-fade: continue from whichever theme dominated the screen.
             if self.theme_from is None or self.theme_t >= 0.5:
@@ -1114,6 +1119,28 @@ class App:
             self.theme_t = _smoothstep((now - self.theme_born) / ART_FADE_SECONDS)
             if self.theme_t >= 1 or self.theme_from == self.theme:
                 self.theme_from = None
+
+    def _current_palette_key(self) -> str:
+        key = getattr(self.state, "color_palette", "auto")
+        return key if key in {palette for palette, _ in PALETTES} else "auto"
+
+    def _effective_theme(self, idx: int, has_art: bool) -> Theme:
+        override = theme_for_palette(self._current_palette_key())
+        if override is not None:
+            return override
+        if idx < 0 or not has_art:
+            return HOUSE
+        return self.themes.get(idx, HOUSE)
+
+    def _apply_palette(self, key: str) -> None:
+        self.state.set_color_palette(key)
+        idx, surf = (self.art_layers[-1][0], self.art_layers[-1][1]) if self.art_layers else (self.current, None)
+        has_art = surf is not None or (0 <= idx < len(self.opts.presets) and idx in self.themes)
+        target = self._effective_theme(idx, has_art)
+        self.theme_from = None
+        self.theme = target
+        self.theme_t = 1.0
+        self.bar_surface = self._bar_for(target)
 
     # ---------- rows / selection ----------
 
@@ -1132,6 +1159,13 @@ class App:
             rows.append(Row("header", FAVORITES, count=len(favs), collapsed=collapsed))
             if not collapsed:
                 rows += [Row("preset", self.opts.presets[i].name, i, fav=True) for i in favs]
+        if getattr(self.state, "recent_group", False):
+            recent = [names[name] for name in getattr(self.state, "history", []) if name in names and self._matches(names[name], terms)]
+            if recent:
+                collapsed = not terms and RECENTLY_PLAYED in self.collapsed_sections
+                rows.append(Row("header", RECENTLY_PLAYED, count=len(recent), collapsed=collapsed))
+                if not collapsed:
+                    rows += [Row("preset", self.opts.presets[i].name, i) for i in recent]
         for section in self.opts.sections:
             hits = [i for i, p in enumerate(self.opts.presets) if p.section == section and self._matches(i, terms)]
             if hits:
@@ -1232,6 +1266,9 @@ class App:
         if row.text == FAVORITES:
             names = {preset.name: i for i, preset in enumerate(self.opts.presets)}
             return [names[name] for name in self.state.favorites if name in names and self._matches(names[name], terms)]
+        if row.text == RECENTLY_PLAYED:
+            names = {preset.name: i for i, preset in enumerate(self.opts.presets)}
+            return [names[name] for name in getattr(self.state, "history", []) if name in names and self._matches(names[name], terms)]
         return [i for i, preset in enumerate(self.opts.presets) if preset.section == row.text and self._matches(i, terms)]
 
     def _category_preview_capacity(self, count: int, width: int, height: int, row_h: int) -> tuple[int, int, int]:
@@ -1368,7 +1405,7 @@ class App:
         return theme, out, background, self._logo_surface(logo), layers
 
     def _update_art(self, now: float) -> None:
-        if self._category_selected():
+        if not self.rows or self._category_selected():
             if not self.art_layers or self.art_layers[-1][0] != -1:
                 self.art_layers.append((-1, None, now))
                 self.art_layers = self.art_layers[-2:]
@@ -1596,6 +1633,8 @@ class App:
             self._move(-1, wrap=not repeat)
         elif action == Action.DOWN:
             self._move(1, wrap=not repeat)
+        elif action == Action.DELETE:
+            self._set_filter(self.filter[:-1])
         elif action == Action.PAGE_UP:
             self._move(-8, wrap=not repeat)
         elif action == Action.PAGE_DOWN:
@@ -1630,7 +1669,9 @@ class App:
         elif action == Action.SEARCH:
             self._open_search(now)
         elif action == Action.BACK:
-            return  # B has no action on the main selector; Escape opens the menu.
+            if self.filter:
+                self._set_filter("")
+            return  # B has no other action on the main selector; Escape opens the menu.
 
     def _on_menu_action(self, action: Action, *, repeat: bool = False) -> None:
         items = self._menu_items()
@@ -1641,9 +1682,9 @@ class App:
         elif action == Action.DOWN:
             self._move_menu(1, repeat=repeat)
         elif action == Action.LEFT:
-            self._set_menu_option()
+            self._set_menu_option(-1)
         elif action == Action.RIGHT:
-            self._set_menu_option()
+            self._set_menu_option(1)
         elif action == Action.HELP:
             self.mode = "help"
             self.help_scroll = self.help_view = 0.0
@@ -1664,19 +1705,34 @@ class App:
             ("refresh", "Refresh list"),
             ("music", "Title music"),
             ("sounds", "Menu sounds"),
+            ("recent", "Recently played group"),
         ]
+        items.append(("colors", "Colors"))
         if self.launchers:
             items.append(("launcher", "Choose launcher"))
         items.extend((("help", "Help"), ("quit", "Quit")))
         return items
 
-    def _set_menu_option(self) -> None:
+    def _cycle_color_palette(self, delta: int) -> None:
+        keys = [key for key, _ in PALETTES]
+        current = self._current_palette_key()
+        index = keys.index(current) if current in keys else 0
+        self._apply_palette(keys[(index + delta) % len(keys)])
+        self._sound("open")
+
+    def _set_menu_option(self, delta: int = 1) -> None:
         key = self._menu_items()[self.menu_sel][0]
         if key == "music":
             self._set_music(not self.state.music)
         elif key == "sounds":
             self.state.set_menu_sounds(not self.state.menu_sounds)
             self._sound("open")
+        elif key == "recent":
+            self.state.set_recent_group(not self.state.recent_group)
+            self._rebuild_rows()
+            self._sound("open")
+        elif key == "colors":
+            self._cycle_color_palette(delta)
 
     def _menu_pick(self, index: int) -> None:
         key = self._menu_items()[index][0]
@@ -1692,6 +1748,12 @@ class App:
         elif key == "sounds":
             self.state.set_menu_sounds(not self.state.menu_sounds)
             self._sound("open")
+        elif key == "recent":
+            self.state.set_recent_group(not self.state.recent_group)
+            self._rebuild_rows()
+            self._sound("open")
+        elif key == "colors":
+            self._cycle_color_palette(1)
         elif key == "launcher":
             self._open_picker()
         elif key == "help":
@@ -1927,6 +1989,8 @@ class App:
         elif action == Action.BACK:
             self._set_filter("")
             self._close_overlay()
+        elif action == Action.DELETE:
+            self._set_filter(self.filter[:-1])
 
     def _osk_press(self, key: str) -> None:
         if key == "SPACE":
@@ -1944,20 +2008,18 @@ class App:
 
     def _on_key(self, event: pygame.event.Event) -> bool:
         """Keyboard-only behaviour that does not map onto pad actions. Returns True if consumed."""
-        if self.mode == "menu" and event.key == pygame.K_BACKSPACE:
+        if event.key == pygame.K_ESCAPE and self.mode == "list" and self.filter and not self.blocked:
+            self._set_filter("")  # Escape clears the search before it reaches the menu.
             return True
-        if self.mode in ("info", "help"):
-            return False
         if event.key == pygame.K_BACKSPACE:
-            self._set_filter(self.filter[:-1])
-            return True
+            return self.mode not in ("list", "search", "info", "help")
         if self.mode == "search" and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
             self._close_overlay()
             return True
         return False
 
     def _on_text(self, text: str, now: float) -> None:
-        if self.mode in ("menu", "info", "help"):
+        if self.mode not in ("list", "search"):
             return
         if text == "/" and self.mode == "list":
             self._open_search(now)
@@ -2291,7 +2353,7 @@ class App:
             fy = self.list_rect.top - int(64 * s)
             lab = self._tracked("Filter", 17, self.theme.label, tracking=0.3)
             self.screen.blit(lab, (m, fy + int(12 * s)))
-            caret = "_" if self.mode == "search" and int(time.monotonic() * 2) % 2 == 0 else ""
+            caret = "|" if int(time.monotonic() * 2) % 2 == 0 else ""
             value = self._text((self.filter + caret) or " ", self._font(32), TEXT)
             self.screen.blit(value, (m + lab.get_width() + int(20 * s), fy))
 
@@ -2346,15 +2408,26 @@ class App:
         self.screen.set_clip(pygame.Rect(lr.x - int(28 * s), lr.y, self.list_edge - lr.x + int(28 * s), lr.height))
         bar_x = lr.x - int(28 * s)
         bar_top = lr.y + int(self.bar_y - self.scroll)
-        self.screen.blit(self.bar_surface, (bar_x, bar_top))
         pulse = 0.82 + 0.18 * math.sin(now * 3.2)
         stripe = tuple(int(c * pulse) for c in self.theme.accent)
-        selected_row_h = self.header_h if self.rows[self._sel_row()].kind == "header" else self.preset_h
-        pygame.draw.rect(self.screen, stripe, (bar_x, bar_top, int(6 * s), selected_row_h))
+        sel = self._sel_row()
+        sel_row = self.rows[sel]
+        title_pad = int(8 * s)
+        if sel_row.kind == "header":
+            title_font = self._font(18, bold=True)
+            cap = title_font.metrics("H")[0][3]
+            title = self._tracked(sel_row.text, 18, TEXT, tracking=0.22)
+            band_h = min(cap + 2 * title_pad, self.preset_h)
+            # Center the band on the capital letters, not the whole line box (which includes descender space).
+            ink_cy = bar_top + self.header_h - title.get_height() - int(12 * s) + title_font.get_ascent() - cap / 2
+            band_y = round(ink_cy - band_h / 2)
+        else:
+            band_y, band_h = bar_top, self.preset_h
+        glow = pygame.Rect(0, 0, self.bar_surface.get_width(), band_h)
+        self.screen.blit(self.bar_surface, (bar_x, band_y), glow)
 
         name_font = self._font(33)
         sel_font = self._font(33, bold=True)
-        sel = self._sel_row()
         k = min(1.0, (1 / 60) * 16)
         for i, row in enumerate(self.rows):
             y = lr.y + self.row_y[i] - int(self.scroll)
@@ -2368,8 +2441,6 @@ class App:
                 area = pygame.Rect(lr.x - int(28 * s), y, lr.width - self.scroll_w + int(28 * s), h).clip(lr.x - int(28 * s), lr.y, self.w, lr.height)
                 self.hits.append(Hit(area, lambda i=i: self._click_row(i)))
                 selected = i == sel
-                if selected:
-                    self.screen.blit(draw.rounded_rect(area.width, area.height, 8 * s, (255, 255, 255, 14)), area)
                 t = self._tracked(row.text, 18, TEXT if selected else self.theme.label, tracking=0.22)
                 ty = y + h - t.get_height() - int(12 * s)
                 self.screen.blit(t, (lr.x, ty))
@@ -2418,6 +2489,7 @@ class App:
             if star:
                 self.screen.blit(star, (tx + t.get_width() + int(12 * s), int(y + (h - star.get_height()) / 2)))
 
+        pygame.draw.rect(self.screen, stripe, (bar_x, band_y, int(6 * s), band_h))
         self.screen.set_clip(prev_clip)
         if self.scroll > 1:
             self._blit_layer("top")
@@ -2613,7 +2685,8 @@ class App:
             return [(("START",), "Menu", (A.MENU,)), (("A",), primary, (A.CONFIRM,)), (("BACK",), "Help", (A.HELP,)), *info_hint, (("Y",), "Search", (A.SEARCH,)),
                     (("LB", "RB"), "Section", section),
                     *favorite_hint]
-        return [(("KEY:ESC",), "Menu", (A.MENU,)), (("KEY:ENTER",), primary, (A.CONFIRM,)), (("KEY:F1",), "Help", (A.HELP,)), *info_hint,
+        clear = (("KEY:ESC",), "Clear", (A.BACK,)) if self.filter else (("KEY:ESC",), "Menu", (A.MENU,))
+        return [clear, (("KEY:ENTER",), primary, (A.CONFIRM,)), (("KEY:F1",), "Help", (A.HELP,)), *info_hint,
                 (("KEY:/",), "Search", (A.SEARCH,)), (("KEY:LEFT", "KEY:RIGHT"), "Section", section),
                 *([] if category_selected else [(("KEY:F3",), fav, (A.FAVORITE,))])]
 
@@ -2711,6 +2784,15 @@ class App:
             if key == "sounds":
                 value = "ON" if self.state.menu_sounds else "OFF"
                 badge = self._tracked(value, 14, self.theme.label if self.state.menu_sounds else MUTED, tracking=0.2)
+                self.screen.blit(badge, (rect.right - badge.get_width() - int(22 * s), rect.centery - badge.get_height() // 2))
+            if key == "recent":
+                enabled = self.state.recent_group
+                value = "ON" if enabled else "OFF"
+                badge = self._tracked(value, 14, self.theme.label if enabled else MUTED, tracking=0.2)
+                self.screen.blit(badge, (rect.right - badge.get_width() - int(22 * s), rect.centery - badge.get_height() // 2))
+            if key == "colors":
+                current = next((label for palette, label in PALETTES if palette == self._current_palette_key()), "Automatic")
+                badge = self._tracked(current, 14, self.theme.label, tracking=0.2)
                 self.screen.blit(badge, (rect.right - badge.get_width() - int(22 * s), rect.centery - badge.get_height() // 2))
             y += row_h
 
@@ -3006,7 +3088,7 @@ class App:
 
         fx, fy = box.x + pad, box.y + pad
         self.screen.blit(self._tracked("Search", 16, self.theme.label, tracking=0.3), (fx, fy))
-        caret = "_" if int(now * 2) % 2 == 0 else " "
+        caret = "|" if int(now * 2) % 2 == 0 else " "
         field = self._text(self._fit(self.filter + caret, self._font(34), grid_w - int(160 * s)), self._font(34), TEXT)
         self.screen.blit(field, (fx, fy + int(22 * s)))
         count = sum(1 for r in self.rows if r.kind == "preset" and not r.fav)

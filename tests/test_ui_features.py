@@ -4,6 +4,7 @@ import pygame
 
 from couch_doom import gamepad, ui
 from couch_doom.gamepad import Action
+from couch_doom.theme import theme_for_palette
 
 
 def make_app(sections=("Section A", "Section B"), collapsed=(), filter_text=""):
@@ -13,14 +14,26 @@ def make_app(sections=("Section A", "Section B"), collapsed=(), filter_text=""):
         SimpleNamespace(name="Gamma", section="Section B"),
     ]
     app = ui.App.__new__(ui.App)
-    app.opts = SimpleNamespace(presets=presets, sections=list(sections))
-    app.state = SimpleNamespace(favorites=[], music=False, menu_sounds=True)
+    app.opts = SimpleNamespace(presets=presets, sections=list(sections), path="/settings.ini")
+    app.state = SimpleNamespace(
+        favorites=[],
+        history=[],
+        music=False,
+        menu_sounds=True,
+        recent_group=False,
+        launcher=("doomrunner", "/settings.ini"),
+        color_palette="auto",
+    )
     app.state.set_music = lambda on: setattr(app.state, "music", on)
     app.state.set_menu_sounds = lambda on: setattr(app.state, "menu_sounds", on)
+    app.state.set_recent_group = lambda on: setattr(app.state, "recent_group", on)
+    app.state.set_color_palette = lambda key: setattr(app.state, "color_palette", "auto" if key in (None, "auto") else key)
     app.quit_at = None
     app.launchers = None
     app.filter = filter_text
     app.mode = "list"
+    app.menu_sel = 0
+    app.menu_opened = 0.0
     app.help_scroll = 0.0
     app.help_view = 0.0
     app.current = 0
@@ -40,6 +53,14 @@ def make_app(sections=("Section A", "Section B"), collapsed=(), filter_text=""):
     app.info_view = 0.0
     app.info_opened = 0.0
     app.info_lines = ((), [])
+    app.themes = {}
+    app.theme = ui.HOUSE
+    app.theme_from = None
+    app.theme_born = 0.0
+    app.theme_t = 1.0
+    app.bar_surface = None
+    app._bar_for = lambda theme: theme
+    app.art_layers = [(0, object(), 0.0)]
     app.input = SimpleNamespace(pad_mode=False, left_y=0.0)
     app._sound = lambda _name: None
     app._compute_row_y()
@@ -78,6 +99,142 @@ def test_typing_repeated_dashes_filters_without_triggering_an_action():
 
     assert app.filter == "---"
     assert app.rows == []
+
+
+def test_backspace_repeats_on_repeated_keydown_and_stops_on_keyup():
+    inp = gamepad.Input.__new__(gamepad.Input)
+    inp._pad_last = False
+    inp._held = {}
+    down = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_BACKSPACE)
+    up = pygame.event.Event(pygame.KEYUP, key=pygame.K_BACKSPACE)
+
+    assert inp.handle(down, 0.0) == [Action.DELETE]
+    assert inp.handle(down, 0.04) == [Action.DELETE]
+    assert inp.update(1.0) == []  # repeated keydowns own the timing; the hold timer must not add more
+
+    assert inp.handle(up, 1.1) == []
+    assert inp.update(1.2) == []
+    assert inp.handle(down, 1.3) == [Action.DELETE]
+
+
+def test_keyboard_repeat_does_not_double_fire_a_held_direction():
+    inp = gamepad.Input.__new__(gamepad.Input)
+    inp._pad_last = False
+    inp._held = {}
+    down = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_DOWN)
+
+    assert inp.handle(down, 0.0) == [Action.DOWN]
+    assert inp.handle(down, 0.05) == []
+    assert inp.update(0.4) == [Action.DOWN]
+
+    assert inp.handle(pygame.event.Event(pygame.KEYUP, key=pygame.K_DOWN), 0.5) == []
+    assert inp.update(0.6) == []
+
+
+def test_keyboard_repeat_timing_is_positive():
+    delay, interval = gamepad.keyboard_repeat_timing()
+
+    assert delay > 0
+    assert interval > 0
+
+
+def test_typing_only_edits_the_filter_in_list_and_search():
+    app = make_app(filter_text="abc")
+    for mode in ("menu", "launcher", "browse", "info", "help", "update"):
+        app.mode = mode
+        app._on_text("x", 0.0)
+        assert app.filter == "abc"
+
+    app.mode = "search"
+    app._on_text("x", 0.0)
+    assert app.filter == "abcx"
+
+
+def test_backspace_is_consumed_by_overlays_but_reaches_the_filter_in_list_mode():
+    app = make_app(filter_text="abc")
+    down = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_BACKSPACE)
+    for mode in ("menu", "launcher", "browse", "update"):
+        app.mode = mode
+        assert app._on_key(down) is True
+    for mode in ("list", "search", "info", "help"):
+        app.mode = mode
+        assert app._on_key(down) is False
+
+    app.mode = "list"
+    app._on_action(Action.DELETE, 0.0)
+    assert app.filter == "ab"
+
+
+def test_escape_clears_the_filter_before_opening_the_menu():
+    app = make_app(filter_text="beta")
+    esc = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE)
+
+    assert app._footer_hints()[0][1] == "Clear"
+    assert app._on_key(esc) is True
+    assert app.filter == ""
+    assert app.mode == "list"
+    assert app._footer_hints()[0][1] == "Menu"
+
+    assert app._on_key(esc) is False  # empty filter: Escape reaches the menu action
+
+    app.filter = "beta"
+    app._rebuild_rows()
+    app._on_action(Action.BACK, 0.0)  # clicking the Clear hint (or B) does the same
+    assert app.filter == ""
+
+
+def test_art_fades_out_when_the_filter_has_no_matching_presets():
+    app = make_app()
+    app.filter = "nothing matches this"
+    app._rebuild_rows()
+    app.art_layers = [(app.current, None, 0.0)]
+    app.art_cache = {}
+
+    app._update_art(0.7)
+
+    assert app.rows == []
+    assert app.art_layers[-1][0] == -1
+
+
+def test_recently_played_group_uses_history_and_skips_stale_names():
+    app = make_app()
+    app.state.history = ["Gamma", "Missing", "Alpha"]
+    app.state.recent_group = True
+
+    app._rebuild_rows()
+
+    headers = [row for row in app.rows if row.kind == "header"]
+    assert [row.text for row in headers] == [ui.RECENTLY_PLAYED, "Section A", "Section B"]
+    assert headers[0].count == 2
+    assert [row.text for row in app.rows if row.kind == "preset"][:2] == ["Gamma", "Alpha"]
+
+
+def test_menu_cycles_global_colors_with_left_right_and_enter():
+    app = make_app()
+    art_theme = theme_for_palette("green")
+    app.themes[0] = art_theme
+    app.themes[1] = art_theme
+    app.theme = art_theme
+    app.mode = "menu"
+    app.menu_sel = [key for key, _ in app._menu_items()].index("colors")
+    assert app.state.color_palette == "auto"
+
+    app._on_action(Action.RIGHT, 1.0)
+    assert app.state.color_palette == "red"
+    assert app.theme == theme_for_palette("red")
+    assert app.mode == "menu"
+
+    app._on_action(Action.LEFT, 2.0)
+    assert app.state.color_palette == "auto"
+    assert app.theme == art_theme
+
+    app._menu_pick(app.menu_sel)
+    assert app.state.color_palette == "red"
+
+    app.current = 1
+    app.art_layers = [(1, object(), 0.0)]
+    app._update_theme(3.0)
+    assert app.theme == theme_for_palette("red")
 
 
 def test_f1_opens_separate_help_and_info_button_keeps_readme_default():

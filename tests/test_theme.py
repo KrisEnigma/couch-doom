@@ -3,7 +3,8 @@ from collections import OrderedDict
 
 import pygame
 
-from couch_doom.theme import HOUSE, from_art
+from couch_doom.state import State
+from couch_doom.theme import HOUSE, PALETTES, from_art, theme_for_palette
 from couch_doom.ui import THEME_CACHE_SIZE, _theme_cache
 
 
@@ -52,3 +53,46 @@ def test_theme_render_cache_keeps_recent_entries_and_evicts_the_oldest():
     assert len(cache) == THEME_CACHE_SIZE
     assert 0 in cache
     assert 1 not in cache
+
+
+def test_manual_palette_registry_is_curated_dark_hues():
+    assert [key for key, _ in PALETTES] == [
+        "auto",
+        "red",
+        "orange",
+        "gold",
+        "green",
+        "teal",
+        "blue",
+        "violet",
+        "magenta",
+    ]
+    assert theme_for_palette("auto") is None
+    assert theme_for_palette("red") == HOUSE
+    assert theme_for_palette("gold") != HOUSE
+    assert theme_for_palette("warm") is None
+    keys = {theme_for_palette(key).key for key, _ in PALETTES if key != "auto"}
+    assert len(keys) == 8
+
+
+def test_global_color_palette_persists(tmp_path):
+    path = tmp_path / "state.json"
+    state = State(path)
+    assert state.color_palette == "auto"
+    state.set_color_palette("blue")
+
+    reloaded = State(path)
+    assert reloaded.color_palette == "blue"
+
+    reloaded.set_color_palette("auto")
+    assert State(path).color_palette == "auto"
+
+
+def test_invalid_global_color_palette_falls_back_to_automatic(tmp_path):
+    path = tmp_path / "state.json"
+    path.write_text('{"color_palette":"neon"}', encoding="utf-8")
+
+    assert State(path).color_palette == "auto"
+
+    path.write_text('{"color_palette":1}', encoding="utf-8")
+    assert State(path).color_palette == "auto"

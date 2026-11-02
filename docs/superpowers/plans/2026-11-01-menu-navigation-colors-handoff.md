@@ -4,35 +4,31 @@
 
 - Repository: `F:\Projects\Programming\Tools\couch-doom`
 - Branch: `main`
-- The menu/browser baseline is `7eadf9f` (`feat(ui): add menu and improve file browser navigation`). Follow-up performance fixes and regression tests are committed as `5acb810` (`perf(ui): reduce preset selection hitches`). This documentation update records that status.
-- The full test suite passes: **125 passed, 2 skipped**. `git diff --check` passes; Git only reports working-tree line-ending conversion warnings.
+- Menu/browser baseline: `7eadf9f`. Performance follow-up: `5acb810`.
+- Working tree contains uncommitted menu/list/color changes (recent group, category highlight, Colors submenu, related tests/docs).
+- Full suite should be run after the Colors work; last recorded before Colors: **133 passed, 2 skipped**.
 
 ## Completed Since the Baseline
 
-- Fixed ENDOOM byte serialization in the raw asset cache; theme selection uses 72 five-degree hue bins with the warm fallback narrowed to 8 degrees. Rendered theme caches are capped at 48 entries, and background gradients are expanded from a one-pixel strip.
-- Moved selected title-art preparation to background workers, bounded art processing per UI frame, and split logo rendering from background-art rendering. The title text fallback stays hidden while logo detection is pending, avoiding the text-then-logo flash.
-- Cached detail text layout and made long title/byline fitting bounded. This addressed the repeated Hell Revealed 2 detail-panel cost.
-- Delayed title music preparation until a preset remains selected for 0.65 seconds. Preset file identity and stream pruning run asynchronously; PCM stats yield between chunks and music workers use lower priority.
-- Added regression coverage for the above behavior and updated stale tests to match current app fixtures, menu/controller behavior, browser parent rows/start location, and optional bundled audio.
-- Ran the 105-preset local list down and back up at 0.5-second and 0.2-second intervals (231 presses per traversal). The dummy-display runs recorded zero frame intervals over 50 ms. The creator reports that interactive hitching is now essentially gone; a dummy display does not verify fullscreen hardware timing.
+- Performance, theme bins, ENDOOM cache, art/logo split, music dwell, and related regressions as previously recorded.
+- Optional **Recently played group**, overlay input isolation, Favorites removal selection, Backspace/caret, Escape-clears-filter.
+- Category heading selection uses the same fading glow as presets, clipped to a compact title band.
+- **Colors** is an app-wide menu row: Left/Right or Enter cycles Automatic / Red / Orange / Gold / Green / Teal / Blue / Violet / Magenta and applies instantly. Persisted as `State.color_palette`.
 
 ## Current Behavior
 
-- Escape/Start opens the in-app menu. It contains Back to list, Refresh, Title music, Menu sounds, Choose launcher (when available), Help, and Quit. Left and Right toggle the selected binary setting.
-- F1/Back/View opens Help. Help & Feedback is available inside Help. The browser has a separate drive/home chooser, parent-directory row, page-sized movement, Home/End, non-wrapping wheel scroll, and a draggable scrollbar.
-- Logos render independently from full-size title backgrounds and replace the fallback title text as soon as the logo is ready.
-- Music waits until selection settles for 0.65 seconds. A fast traversal at 0.2 seconds per press does not start title-music preparation for each item.
-- Automatic theme selection uses the 72-bin approach described in the plan. No recent-played group toggle has been added; `State.history` is available for that separate feature.
+- Escape/Start opens the menu. Binary settings toggle with Left/Right. Colors opens a submenu; Back returns to the menu; Escape/Start closes overlays to the list.
+- Manual palette choice is global for the app. Automatic keeps per-preset art-derived themes.
+- Automatic theme selection still uses 72 five-degree bins with the warm house fallback.
 
 ## Next Steps
 
-1. Manually verify browser behavior on Windows, especially drive-root versus “Drives & Home”, one-page Left/Right and Page Up/Down movement, scrollbar dragging, and stopping at both ends.
-2. Review the automatic colors on the creator's display. Keep the warm fallback and color controls aligned with the current code; do not add a broad manual palette without a concrete request.
-3. The optional recent-played group remains open. If requested, reuse `State.history`, filter it against the active launcher, and keep the toggle small and separate from unrelated work.
+1. Manually verify browser behavior on Windows.
+2. Review automatic colors and each manual palette on the creator's display; confirm Automatic restores art tint.
+3. Review category highlight, Recently Played, and Backspace repeat, then commit the working-tree changes.
 
 ## Collaboration Preferences
 
-- The creator wants work carried through to a concrete testable result and values truthful reporting of what was actually exercised.
-- Work one feature at a time and return to the creator for hands-on review where display-specific judgment matters.
-- Read current code before assuming a behavior or proposing duplicated metadata/settings.
-- Keep changes easy to review and roll back; avoid unrelated polish or broad settings frameworks.
+- Carry work to a concrete testable result; report only what was actually exercised.
+- One feature at a time; return for hands-on review where display judgment matters.
+- Read current code before assuming behavior; avoid unrelated polish or broad settings frameworks.

@@ -261,14 +261,14 @@ empty_dir.mkdir()
 app._open_browser(root)
 app.file_browser.directory = empty_dir
 app.file_browser.refresh()
-assert not app.file_browser.entries
+assert [entry for entry in app.file_browser.entries if not entry.parent_selector] == []
 app._draw(now)
 app._open_browser(root)
 app._on_action(Action.ALT, now)
 assert app.file_browser.show_all
 app.file_browser.directory = Path(root.anchor)
 app.file_browser.refresh()
-app._on_action(Action.BACK, now)
+app._on_action(Action.MENU, now)
 assert app.mode == "launcher"
 for _ in range(3):
     pygame.event.pump()

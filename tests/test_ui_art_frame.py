@@ -2,7 +2,7 @@ from collections import OrderedDict
 from concurrent.futures import Future
 
 from couch_doom.theme import HOUSE
-from couch_doom.ui import App
+from couch_doom.ui import App, Row
 
 
 class ManualPool:
@@ -40,6 +40,7 @@ def test_art_preparation_runs_in_worker_and_only_for_the_selected_preset():
     app.readmes = {}
     app.endooms = {}
     app.art_layers = []
+    app.rows = [Row("preset", "Anything", 0)]
     app._category_selected = lambda: False
     app._neighbors = lambda: [1, 2]
     app._request_art = lambda _index: None
@@ -84,6 +85,7 @@ def test_logo_preparation_runs_separately_from_full_art_rendering():
     app.readmes = {}
     app.endooms = {}
     app.art_layers = []
+    app.rows = [Row("preset", "Anything", 0)]
     app._category_selected = lambda: False
     app._neighbors = lambda: []
     app._request_art = lambda _index: None
