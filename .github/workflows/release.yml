@@ -148,7 +148,7 @@ jobs:
           {\
             cat packaging/release-header.md
             printf '\n%s\n\n' "$section"
-            echo 'See `How to use.txt` in the matching ZIP for controls and setup details.'
+            echo 'Controls and setup details are in `How to use.txt`, inside every ZIP and tar.gz download.'
           } > notes.md
 
       - name: Publish release

@@ -4,11 +4,12 @@ Each release's notes on GitHub are its own section below, behind the download in
 
 **New in 1.2.2**
 
-- Starting a game zooms its title art out of the detail panel to fill the screen. The loading screen is that art (with the game's logo), not a flat red wipe.
-- Selecting a category shows its name as a typographic mural instead of one game's art, with the presets in that group listed below.
-- Text is easier to read from the couch, overlays use a plain title instead of tiny eyebrow labels, and the preset count sits beside the launcher name.
-- The file browser shows folder, drive and file icons. Search keeps the list visible while you type, and Ctrl+Backspace deletes a whole word from the filter.
-- Also: in-app updates keep drawing through unpacking (Cancel still works), show each install step, and report whether the restart succeeded; title music fades sooner when you move; toasts sit at the top margin again.
+- Starting a game zooms its title art up to fill the screen, and the loading screen shows that art instead of a plain red one.
+- Selecting a category shows its name in large type, with the games in it listed below, instead of one game's art.
+- Larger, brighter text that's easier to read from the couch, and simpler titles on menus and dialogs.
+- Search keeps the list in view while you type. Ctrl+Backspace deletes a whole word, and the file browser shows folder and drive icons.
+- Title music fades as soon as you move to a game with different music.
+- Future in-app updates show each step, can be cancelled while unpacking, and tell you whether they installed.
 
 **New in 1.2.1**
 
