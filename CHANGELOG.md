@@ -2,6 +2,14 @@
 
 Each release's notes on GitHub are its own section below, behind the download instructions in `packaging/release-header.md`. Keep the `**New in X.Y.Z**` heading format: the release workflow and the in-app update notice both look for it.
 
+**New in 1.2.1**
+
+- The launcher browser lists launcher programs and settings files first, labeled with their launcher, shows your drives' names, and tells you when a folder has nothing to open.
+- Clearer help in every language: it covers the menu, uses the menu's real names, and tells you where to find the log when reporting a bug.
+- Problems with a game's setup, such as a missing IWAD or mod, now appear in your language.
+- Smoother browsing with less work per frame, and CouchDoom no longer draws while minimized.
+- More reliable: changing a setting can't crash CouchDoom when another program briefly holds the settings file, and artwork for games in collapsed groups stays cached between launches.
+
 **New in 1.2.0**
 
 - Escape or Start opens a menu for refresh, title music, menu sounds, Language, choosing a launcher, Help, and Quit. Colors can follow each game's art or lock one look for the whole app.
