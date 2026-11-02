@@ -50,3 +50,15 @@ def test_state_first_run_persists_detected_language(tmp_path, monkeypatch):
     s = State(path)
     assert s.language == "fr"
     assert State(path).language == "fr"
+
+
+def test_locale_key_parity():
+    en = i18n.load_catalog("en")
+    for code, _ in i18n.LANGUAGES:
+        if code == "en":
+            continue
+        cat = i18n.load_catalog(code)
+        missing = sorted(set(en) - set(cat))
+        assert missing == [], f"{code} missing {missing[:10]}..."
+        extra = sorted(set(cat) - set(en))
+        assert extra == [], f"{code} has extra {extra[:10]}..."
