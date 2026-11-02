@@ -27,6 +27,7 @@ def wipe_app(ready_after_polls: int | None, dims=None):
         return (backdrop, dims, None) if ready_after_polls is None or len(polls) > ready_after_polls else None
 
     app._start_loading_backdrop = lambda: poll
+    app._plain_backdrop = lambda: pygame.Surface((app.w, app.h))
     app._loading_screen = lambda name, art=None: (art, (0, 0))
     return app, frames
 
@@ -42,6 +43,7 @@ def test_transition_ends_on_the_loading_screen():
 
 def test_transition_shades_the_list_until_slow_art_is_ready(monkeypatch):
     monkeypatch.setattr(ui, "LAUNCH_WIPE_SECONDS", 0.05)
+    monkeypatch.setattr(ui, "LAUNCH_ART_WAIT_SECONDS", 60)  # slow, but it arrives: a slow runner mustn't give up
     app, frames = wipe_app(ready_after_polls=40)  # far more polls than the transition's own length
 
     app._play_wipe("Game")
