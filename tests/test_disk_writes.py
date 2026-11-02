@@ -42,6 +42,29 @@ def test_concurrent_log_writes_rotate_once(tmp_path, monkeypatch):
     assert path.read_text(encoding="utf-8").count("=== ") == 8
 
 
+def test_log_location_is_shown_without_the_account_name(tmp_path, monkeypatch):
+    home = tmp_path / "someone"
+    monkeypatch.setattr(log.Path, "home", lambda: home)
+    shown = log.display_path(home / ".local" / "share" / "couch-doom" / "state" / "couch-doom.log", windows=False)
+    assert shown == str(Path("~") / ".local" / "share" / "couch-doom" / "state" / "couch-doom.log")
+
+    monkeypatch.setenv("LOCALAPPDATA", str(home / "AppData" / "Local"))
+    shown = log.display_path(home / "AppData" / "Local" / "CouchDoom" / "state" / "couch-doom.log", windows=True)
+    assert shown == str(Path("%LOCALAPPDATA%") / "CouchDoom" / "state" / "couch-doom.log")
+    assert "someone" not in shown
+
+
+def test_problems_read_in_the_language_shown_not_the_one_they_were_found_in():
+    from couch_doom import i18n
+    from couch_doom.i18n import Message
+
+    problem = Message("problem.iwad_missing", name="DOOM2.WAD")
+    assert str(problem) == "IWAD missing: DOOM2.WAD"
+    i18n.set_language("es")
+    assert str(problem) == "Falta el IWAD: DOOM2.WAD"
+    assert f"{problem}" == "Falta el IWAD: DOOM2.WAD"
+
+
 def test_asset_cache_entries_are_swapped_in_whole(tmp_path, monkeypatch):
     monkeypatch.setattr(asset_cache, "cache_dir", lambda: tmp_path)
     asset_cache.put("key", CachedAssets(None, None, None, None))

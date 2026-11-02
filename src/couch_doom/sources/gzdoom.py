@@ -26,6 +26,8 @@ PORTS = {"gzdoom": "GZDoom", "uzdoom": "UZDoom", "vkdoom": "VKDoom"}
 FLATPAKS = {"org.zdoom.gzdoom": "gzdoom"}
 EXES = tuple(n for p in PORTS for n in (f"{p}.exe", p)) + tuple(FLATPAKS)
 SETTINGS_NAMES = EXES
+# The file browser names each port by itself rather than all as GZDoom.
+LABELS = {name: PORTS[FLATPAKS.get(name, name.removesuffix(".exe"))] for name in EXES}
 IWAD_EXTS = (".iwad", ".ipk3", ".ipk7")
 RECURSIVE_LIMIT = 5000
 

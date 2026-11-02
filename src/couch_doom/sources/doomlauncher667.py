@@ -12,6 +12,7 @@ import zipfile
 from pathlib import Path
 
 from ..config import FROZEN, PROJECT_ROOT
+from ..i18n import Message
 from ..known import ADDON_IWADS
 from ..options import Engine, Options, Preset
 from .doomlauncher import DB_NAME, LIBRARY, UNTAGGED, _connect, _int, _Library, _title, _unpack_dest, is_667
@@ -55,12 +56,12 @@ def _game_files(lib: _Library, name: str, exts: set[str], specific: list[str], u
     if path.is_dir() or path.suffix.lower() in exts or not path.exists():
         return [path]  # build_command reports it if missing
     if path.suffix.lower() != ".zip":
-        issues.append(f"{path.name} only plays from Doom Launcher 667")
+        issues.append(Message("problem.dl667_only", name=path.name))
         return []
     try:
         members = _zip_members(path)
     except (OSError, zipfile.BadZipFile):
-        issues.append(f"Not a valid zip: {path.name}")
+        issues.append(Message("problem.bad_zip", name=path.name))
         return []
     if specific:
         wanted = {s.lower() for s in specific} | {Path(s).name.lower() for s in specific}
@@ -68,7 +69,7 @@ def _game_files(lib: _Library, name: str, exts: set[str], specific: list[str], u
     else:
         members = [m for m in members if Path(m).suffix.lower() in exts]
     if not members:
-        issues.append(f"Nothing in {path.name} this port can load")
+        issues.append(Message("problem.nothing_loadable", name=path.name))
     out = []
     for m in members:
         dest = _unpack_dest(path, m)
@@ -91,15 +92,15 @@ def _iwad(lib: _Library, iwad, unpack: list, issues: list) -> Path | None:
     if path.name.lower() == inner.lower() or not path.is_file():
         return path
     if path.suffix.lower() != ".zip":
-        issues.append(f"{path.name} only plays from Doom Launcher 667")
+        issues.append(Message("problem.dl667_only", name=path.name))
         return None
     try:
         member = next((m for m in _zip_members(path) if Path(m).name.lower() == inner.lower()), None)
     except (OSError, zipfile.BadZipFile):
-        issues.append(f"Not a valid zip: {path.name}")
+        issues.append(Message("problem.bad_zip", name=path.name))
         return None
     if member is None:
-        issues.append(f"{inner} isn't inside {path.name}")
+        issues.append(Message("problem.not_inside", inner=inner, name=path.name))
         return None
     dest = _unpack_dest(path, member)
     unpack.append((path, member, dest))
@@ -136,7 +137,7 @@ def _preset(lib: _Library, game, section: str) -> Preset:
         if base_name := ADDON_IWADS.get(_iwad_name(iwad).lower()):
             base = next((i for i in lib.iwads.values() if _iwad_name(i).lower() == base_name), None)
             if base is None:
-                issues.append(f"{_iwad_name(iwad).upper()} needs {base_name.upper()} set up as an IWAD")
+                issues.append(Message("problem.addon_needs_base", addon=_iwad_name(iwad).upper(), base=base_name.upper()))
             elif addon := _iwad(lib, iwad, unpack, issues):
                 files.append(addon)
         if base is not None:

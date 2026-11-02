@@ -171,3 +171,38 @@ def test_browser_toggle_all_resets_selection_and_change_root_clamps(tmp_path):
     assert browser.directory == other
     browser.change_root(1)
     assert browser.directory == other
+
+
+def test_recognized_launchers_come_first_and_name_their_launcher(tmp_path):
+    for name in ("Alpha", "Beta"):
+        (tmp_path / name).mkdir()
+    (tmp_path / "DoomRunner.exe").write_bytes(b"")
+    (tmp_path / "games.zdl").write_text("")
+    entries = list_entries(tmp_path, names={"doomrunner.exe"}, labels={"doomrunner.exe": "DoomRunner", ".zdl": "ZDL"})
+    assert [(e.path.name, e.detail, e.launcher) for e in entries] == [
+        ("DoomRunner.exe", "DoomRunner", True), ("games.zdl", "ZDL", True), ("Alpha", "", False), ("Beta", "", False)]
+
+
+def test_a_folder_with_only_the_way_back_is_empty(tmp_path):
+    (tmp_path / "inner").mkdir()
+    browser = Browser(tmp_path, candidates=[tmp_path], start=tmp_path / "inner")
+    assert browser.empty
+    browser.back()
+    assert not browser.empty
+
+
+def test_drive_chooser_shows_volume_names_and_asks_once(tmp_path):
+    asked = []
+
+    def label(root):
+        asked.append(root)
+        return "Games"
+
+    drive = tmp_path / "drive"
+    drive.mkdir()
+    browser = Browser(tmp_path, candidates=[drive], volume_label=label)
+    browser.selecting_root = True
+    browser.refresh()
+    browser.refresh()
+    assert [e.detail for e in browser.entries] == ["Games", "Games"]
+    assert asked == [tmp_path, drive]

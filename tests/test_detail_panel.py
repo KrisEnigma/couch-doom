@@ -84,3 +84,11 @@ def test_minimized_window_ticks_without_drawing(monkeypatch):
     monkeypatch.setattr(pygame, "quit", lambda: None)
     app.run()
     assert len(ticks) == 3 and drawn == []
+
+
+def test_long_paths_keep_their_last_folders():
+    pygame.font.init()
+    font = pygame.font.Font(None, 20)
+    path = r"C:\Users\someone\Games\Doom\Launchers\DoomRunner"
+    fitted = App._fit_start(path, font, font.size("Launchers\\DoomRunner")[0] + font.size("…")[0] + 4)
+    assert fitted.startswith("…") and fitted.endswith(r"Launchers\DoomRunner")

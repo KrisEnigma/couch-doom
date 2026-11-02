@@ -56,6 +56,28 @@ def t(key: str, **kwargs) -> str:
     return template
 
 
+class Message:
+    """A catalog string made before it is shown (problems found while reading presets): str() reads it in
+    whatever language is current then, so switching language mid-session updates it too."""
+
+    __slots__ = ("key", "args")
+
+    def __init__(self, key: str, **kwargs) -> None:
+        self.key, self.args = key, kwargs
+
+    def __str__(self) -> str:
+        return t(self.key, **self.args)
+
+    def __repr__(self) -> str:
+        return f"Message({self.key!r}, {self.args!r})"
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, Message) and (self.key, self.args) == (other.key, other.args)
+
+    def __hash__(self) -> int:
+        return hash((self.key, tuple(sorted(self.args.items()))))
+
+
 # Windows' getlocale() reports names like "Spanish_Chile" rather than "es_CL".
 _ENGLISH_NAMES = {"english": "en", "spanish": "es", "portuguese": "pt_BR", "french": "fr", "german": "de"}
 

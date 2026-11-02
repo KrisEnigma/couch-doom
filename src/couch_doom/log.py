@@ -21,6 +21,21 @@ OUTPUT_TAIL = 16 * 1024  # engine output kept per launch: the end, because that'
 _write_lock = threading.Lock()  # art, music and cache workers log too; two rotations at once would empty .1
 
 
+def display_path(path: Path | None = None, windows: bool = os.name == "nt") -> str:
+    """The log's location for players: %LOCALAPPDATA% pastes into Explorer and ~ into Finder or a shell,
+    and neither puts the account name on screen."""
+    path = path or LOG_FILE
+    bases = [("%LOCALAPPDATA%", os.environ.get("LOCALAPPDATA"))] if windows else []
+    bases.append(("~", str(Path.home())))
+    for label, base in bases:
+        if base:
+            try:
+                return str(Path(label) / path.relative_to(base))
+            except ValueError:
+                continue
+    return str(path)
+
+
 def write(title: str, body: str = "", path: Path | None = None) -> None:
     """Append one entry. Never raises: a log that can't be written must not break the app."""
     path = path or LOG_FILE

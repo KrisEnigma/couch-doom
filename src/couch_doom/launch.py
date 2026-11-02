@@ -11,6 +11,7 @@ from pathlib import Path
 
 from . import log
 from .engine_traits import FAMILIES, Traits, compat_flag_args
+from .i18n import Message
 from .known import ADDON_IWADS
 from .options import Options, Preset
 
@@ -27,7 +28,7 @@ class LaunchCommand:
     argv: list[str]
     cwd: Path | None
     env: dict[str, str]
-    issues: list[str] = field(default_factory=list)
+    issues: list[Message] = field(default_factory=list)  # str() each one where it is shown
 
     @property
     def ok(self) -> bool:
@@ -233,14 +234,14 @@ def engine_environ(environ, frozen: bool | None = None) -> dict[str, str]:
     return env
 
 def build_command(opts: Options, preset: Preset) -> LaunchCommand:
-    issues: list[str] = list(preset.issues)
+    issues: list[Message] = list(preset.issues)
     engine = opts.engine_for(preset)
     env = {**engine_environ(os.environ), **opts.global_env, **preset.env_vars}
 
     if engine is None:
-        return LaunchCommand([], None, env, [f"Engine '{preset.engine_id}' not configured"])
+        return LaunchCommand([], None, env, [Message("problem.engine_unset", engine=preset.engine_id)])
     if not engine.path.exists():
-        issues.append(f"Engine missing: {engine.path}")
+        issues.append(Message("problem.engine_missing", path=str(engine.path)))
 
     argv = [*split_args(opts.cmd_prefix), str(engine.path)]
 
@@ -253,15 +254,15 @@ def build_command(opts: Options, preset: Preset) -> LaunchCommand:
 
     if preset.iwad:
         if not _present(preset, preset.iwad):
-            issues.append(f"IWAD missing: {preset.iwad.name}")
+            issues.append(Message("problem.iwad_missing", name=preset.iwad.name))
         argv += ["-iwad", str(preset.iwad)]
 
     for mp in preset.mappacks:
         if not mp.exists():
-            issues.append(f"Map pack missing: {mp.name}")
+            issues.append(Message("problem.mappack_missing", name=mp.name))
     for mod in preset.mods:
         if not _present(preset, mod):
-            issues.append(f"Mod missing: {mod.name}")
+            issues.append(Message("problem.mod_missing", name=mod.name))
     if engine.family in FAMILIES:
         traits = Traits(engine.family, engine.path)
         argv += _doomrunner_file_args(preset, traits)

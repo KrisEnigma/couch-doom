@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pygame
 
-from couch_doom import gamepad, ui
+from couch_doom import gamepad, i18n, ui
 from couch_doom.gamepad import Action
 from couch_doom.theme import theme_for_palette
 
@@ -324,12 +324,21 @@ def test_help_covers_the_usage_guide_without_hard_coded_buttons():
     headings = [heading for heading, _ in sections]
     text = " ".join(body for _, body in sections)
 
-    assert {"START PLAYING", "CAN'T FIND YOUR GAMES?", "MUSIC", "IF SOMETHING DOESN'T WORK"} <= set(headings)
+    assert {"START PLAYING", "CAN'T FIND YOUR GAMES?", "MENU AND MUSIC", "IF SOMETHING DOESN'T WORK"} <= set(headings)
     assert {"REPORT A BUG", "ABOUT"} <= set(headings)
     assert "controller" in text.lower()
     assert "KrisEnigma" in text
     assert "STEAM DECK" not in headings
     assert "F1" not in text and "Enter" not in text and "Tab" not in text
+
+
+def test_every_language_fills_in_the_version_and_log_location():
+    for code, _ in i18n.LANGUAGES:
+        i18n.set_language(code)
+        text = " ".join(body for _, body in ui.help_sections())
+        assert "{" not in text and "}" not in text, code
+        assert f"v{ui.__version__}" in text, code
+        assert "couch-doom.log" in text, code
 
 
 def test_help_scroll_actions_move_by_lines_and_keep_a_smooth_view_target():

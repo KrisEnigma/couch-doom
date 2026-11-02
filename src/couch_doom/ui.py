@@ -88,7 +88,13 @@ def info_tabs() -> tuple[str, str]:
 
 
 def help_sections() -> list[tuple[str, str]]:
-    return [(tr(f"help.{i}.title"), tr(f"help.{i}.body")) for i in range(HELP_SECTION_COUNT)]
+    facts = _help_facts()
+    return [(tr(f"help.{i}.title"), tr(f"help.{i}.body", **facts)) for i in range(HELP_SECTION_COUNT)]
+
+
+@lru_cache(maxsize=1)
+def _help_facts() -> dict[str, str]:
+    return {"version": __version__, "log": log.display_path()}
 
 
 def update_choices(info: dict | None, packaged: bool) -> tuple[tuple[str, str, str], ...]:
@@ -771,7 +777,12 @@ class App:
         if config.FROZEN:
             names.update(path.name for path in easter_eggs.self_paths())
         start = directory or config.self_location() or (config.PROJECT_ROOT if config.SOURCE_TREE else None)
-        self.file_browser = FileBrowser(start=start, names=names, include=easter_eggs.self_matcher())
+        labels = {".zdl": "ZDL"}
+        for source in SOURCES:
+            for name in (*source.module.EXES, *source.module.SETTINGS_NAMES):
+                # Both Doom Launchers share a database name; the first keeps it.
+                labels.setdefault(name, getattr(source.module, "LABELS", {}).get(name, source.module.NAME))
+        self.file_browser = FileBrowser(start=start, names=names, include=easter_eggs.self_matcher(), labels=labels)
         self.browser_scroll = 0
         self.mode = "browse"
         self._sound("open")
@@ -1018,6 +1029,7 @@ class App:
         self._text_cache: dict = {}
         # Both caches key on Font objects, which were just replaced; drop the old fonts with them.
         App._fit.cache_clear()
+        App._fit_start.cache_clear()
         App._wrap.cache_clear()
         self.glyphs = Glyphs(self._font, s)
 
@@ -2154,7 +2166,7 @@ class App:
         preset = self.opts.presets[self.current]
         cmd = self.commands[self.current]
         if not cmd.ok:
-            self._notify(cmd.issues[0], ERROR)
+            self._notify(str(cmd.issues[0]), ERROR)
             self._sound("error")
             return
         if error := unpack(preset):
@@ -2363,6 +2375,18 @@ class App:
                 return candidate
             shorter = int(length * max_w / candidate_width)
             length = min(length - 1, shorter)
+        return "…"
+
+    @staticmethod
+    @lru_cache(maxsize=64)
+    def _fit_start(text: str, font: pygame.font.Font, max_w: int) -> str:
+        """Like _fit, but drops the start: a path's last folders are the ones that say where you are."""
+        if font.size(text)[0] <= max_w:
+            return text
+        for start in range(1, len(text)):
+            candidate = "…" + text[start:]
+            if font.size(candidate)[0] <= max_w:
+                return candidate
         return "…"
 
     @staticmethod
@@ -2717,7 +2741,7 @@ class App:
             surf = pygame.Surface((w, label_gap + len(issues) * int(32 * s)), pygame.SRCALPHA)
             surf.blit(self._tracked(tr("tag.problems"), 16, ERROR, tracking=0.25), (0, 0))
             for n, issue in enumerate(issues):
-                surf.blit(self._text(self._fit(issue, font, w), font, ERROR), (0, label_gap + n * int(32 * s)))
+                surf.blit(self._text(self._fit(str(issue), font, w), font, ERROR), (0, label_gap + n * int(32 * s)))
             blocks.append((surf, int(26 * s)))
 
         total = sum(b.get_height() + gap for b, gap in blocks) - blocks[-1][1]
@@ -3045,7 +3069,8 @@ class App:
         shown = browser.entries[self.browser_scroll:self.browser_scroll + page]
         pad, row_h, head_h = int(28 * s), int(54 * s), int(118 * s)
         width = min(self.w - 2 * self.margin, int(1120 * s))
-        height = min(self.h - self.footer_h - int(32 * s), 2 * pad + head_h + max(1, len(shown)) * row_h)
+        rows = max(1, len(shown)) + (1 if browser.empty else 0)
+        height = min(self.h - self.footer_h - int(32 * s), 2 * pad + head_h + rows * row_h)
         box = pygame.Rect(0, 0, width, height)
         box.center = (self.w // 2, (self.h - self.footer_h) // 2)
         shade = self._dim_backdrop(155)
@@ -3058,9 +3083,10 @@ class App:
         self.screen.blit(self._tracked(tr("browser.title"), 16, self.theme.label, tracking=0.3), (x, y))
         subtitle = tr("browser.choose_root") if browser.selecting_root else tr("browser.choose_file")
         self.screen.blit(self._text(subtitle, self._font(35, bold=True), TEXT), (x, y + int(26 * s)))
-        path_font = self._font(17, mono=True)
-        path = self._fit(str(browser.directory), path_font, inner)
-        self.screen.blit(self._text(path, path_font, MUTED), (x, y + int(72 * s)))
+        if not browser.selecting_root:
+            path_font = self._font(17, mono=True)
+            path = self._fit_start(str(browser.directory), path_font, inner)
+            self.screen.blit(self._text(path, path_font, MUTED), (x, y + int(72 * s)))
         y += head_h
 
         if not shown:
@@ -3078,9 +3104,20 @@ class App:
             label = entry.display_name
             navigation = entry.root_selector or entry.parent_selector
             font = self._font(25, bold=selected and not navigation)
-            self.screen.blit(self._text(self._fit(label, font, rect.right - x - int(16 * s)), font, TEXT if selected else MUTED),
-                             (x, self._text_top(font, rect.centery)))
+            room = rect.right - x - int(16 * s)
+            detail_font = self._font(20)
+            detail_color = self.theme.label if entry.launcher else DIM
+            detail = self._text(self._fit(entry.detail, detail_font, room // 2), detail_font, detail_color) if entry.detail else None
+            gap = int(18 * s)
+            name_room = room - (detail.get_width() + gap if detail else 0)
+            color = TEXT if selected else self.theme.label if entry.launcher else MUTED
+            name = self._text(self._fit(label, font, name_room), font, color)
+            self.screen.blit(name, (x, self._text_top(font, rect.centery)))
+            if detail:
+                self.screen.blit(detail, (x + name.get_width() + gap, self._text_top(detail_font, rect.centery)))
             y += row_h
+        if browser.empty:
+            self.screen.blit(self._text(tr("browser.empty"), self._font(22), DIM), (x, self._text_top(self._font(22), y + row_h // 2)))
 
         if len(browser.entries) > page:
             track_w = self.scroll_w

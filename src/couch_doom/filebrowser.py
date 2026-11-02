@@ -6,7 +6,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Collection
+from typing import Callable, Collection, Mapping
 
 from .i18n import t as tr
 
@@ -18,6 +18,8 @@ class Entry:
     root_selector: bool = False
     parent_selector: bool = False
     location_selector: bool = False
+    detail: str = ""  # shown beside the name: the launcher a file belongs to, or a drive's volume name
+    launcher: bool = False  # a file CouchDoom recognizes as a launcher or its settings
 
     @property
     def display_name(self) -> str:
@@ -39,6 +41,30 @@ def _windows_roots() -> list[Path]:
 
 def _drive_roots(mask: int) -> list[Path]:
     return [Path(f"{chr(65 + i)}:/") for i in range(26) if mask & (1 << i)]
+
+
+DRIVE_REMOTE = 4
+SEM_FAILCRITICALERRORS = 0x0001
+
+
+def volume_label(root: Path) -> str:
+    """A Windows drive's name ("Games"), or "" when it has none or asking could stall. Network drives are
+    skipped because a disconnected share can block for seconds; empty card readers fail without a dialog."""
+    if os.name != "nt":
+        return ""
+    try:
+        kernel32 = ctypes.windll.kernel32
+        if kernel32.GetDriveTypeW(str(root)) == DRIVE_REMOTE:
+            return ""
+        previous = kernel32.SetErrorMode(SEM_FAILCRITICALERRORS)
+        try:
+            buffer = ctypes.create_unicode_buffer(261)
+            ok = kernel32.GetVolumeInformationW(str(root), buffer, len(buffer), None, None, None, None, 0)
+        finally:
+            kernel32.SetErrorMode(previous)
+        return buffer.value if ok else ""
+    except (AttributeError, OSError):
+        return ""
 
 
 def roots(home: Path | None = None, *, candidates: Collection[Path] | None = None) -> list[Path]:
@@ -68,14 +94,18 @@ def list_entries(
     suffixes: Collection[str] = (".zdl",),
     app_bundles: bool = sys.platform == "darwin",
     include: Callable[[os.DirEntry], bool] | None = None,
+    labels: Mapping[str, str] | None = None,
 ) -> list[Entry]:
     """List child directories and matching files without recursing.
 
     Directory symlinks count as directories so linked game folders can be entered; `.app` bundles stay files.
     Dot entries are hidden unless `show_all`, and `include` adds entries matched by something other than name.
+    `labels` maps file names or suffixes (casefolded) to the launcher they belong to; those files come first,
+    since finding one is the point of browsing.
     """
     wanted_names = {name.casefold() for name in names}
     wanted_suffixes = {suffix.casefold() for suffix in suffixes}
+    labels = {key.casefold(): value for key, value in (labels or {}).items()}
     if app_bundles:
         wanted_suffixes.add(".app")
     entries: list[Entry] = []
@@ -91,12 +121,13 @@ def list_entries(
                     extra = bool(include and include(item))
                     if is_dir or extra or (is_file and (show_all or item.name.casefold() in wanted_names
                                                         or Path(item.name).suffix.casefold() in wanted_suffixes)):
-                        entries.append(Entry(Path(item.path), is_dir))
+                        label = "" if is_dir else labels.get(item.name.casefold()) or labels.get(Path(item.name).suffix.casefold(), "")
+                        entries.append(Entry(Path(item.path), is_dir, detail=label, launcher=bool(label)))
                 except OSError:
                     continue
     except OSError:
         return []
-    return sorted(entries, key=lambda e: (not e.is_dir, e.path.name.casefold(), e.path.name))
+    return sorted(entries, key=lambda e: (not e.launcher, not e.is_dir, e.path.name.casefold(), e.path.name))
 
 
 class Browser:
@@ -106,8 +137,13 @@ class Browser:
                  names: Collection[str] = (), suffixes: Collection[str] = (".zdl",),
                  app_bundles: bool = sys.platform == "darwin",
                  include: Callable[[os.DirEntry], bool] | None = None,
-                 start: Path | None = None):
+                 start: Path | None = None,
+                 labels: Mapping[str, str] | None = None,
+                 volume_label: Callable[[Path], str] = volume_label):
         self.roots = roots(home, candidates=candidates)
+        self.labels = dict(labels or {})
+        self._volume_label = volume_label
+        self._volumes: dict[Path, str] = {}  # asked once per browser: a slow drive should only cost once
         if start is not None and Path(start).is_dir():
             start = Path(start)
             self.directory = start
@@ -126,17 +162,28 @@ class Browser:
 
     def refresh(self) -> None:
         if self.selecting_root:
-            roots = [Entry(root, True, root_selector=True) for root in self.roots]
-            self.entries = roots
+            self.entries = [Entry(root, True, root_selector=True, detail=self._volume(root)) for root in self.roots]
         else:
             self.entries = list_entries(self.directory, show_all=self.show_all, names=self.names, suffixes=self.suffixes,
-                                        app_bundles=self.app_bundles, include=self.include)
+                                        app_bundles=self.app_bundles, include=self.include, labels=self.labels)
             above = parent(self.directory)
             if above is None:
                 self.entries.insert(0, Entry(self.directory, True, parent_selector=True, location_selector=True))
             else:
                 self.entries.insert(0, Entry(above, True, parent_selector=True))
         self.selected = max(0, min(self.selected, len(self.entries) - 1))
+
+    def _volume(self, root: Path) -> str:
+        if root == Path.home():
+            return ""
+        if root not in self._volumes:
+            self._volumes[root] = self._volume_label(root)
+        return self._volumes[root]
+
+    @property
+    def empty(self) -> bool:
+        """Inside a folder with nothing to open but the way back up."""
+        return not self.selecting_root and all(entry.parent_selector for entry in self.entries)
 
     def move(self, amount: int, *, wrap: bool = True) -> None:
         if self.entries:

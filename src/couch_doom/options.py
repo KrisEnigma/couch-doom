@@ -7,6 +7,8 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .i18n import Message, t
+
 # The cache warmer and a launch can unpack the same preset at once; both would write the same .part file.
 _unpack_lock = threading.Lock()
 
@@ -39,7 +41,7 @@ class Preset:
     mod_entries: list[Path | str] = field(default_factory=list)
     # (archive, member, destination): files that only exist once unpacked, done lazily by unpack().
     unpack: list[tuple[Path, str, Path]] = field(default_factory=list)
-    issues: list[str] = field(default_factory=list)  # problems the source found while reading the preset
+    issues: list[Message] = field(default_factory=list)  # problems the source found while reading the preset
 
 
 def unpack(preset: Preset) -> str | None:
@@ -56,7 +58,7 @@ def unpack(preset: Preset) -> str | None:
                     shutil.copyfileobj(src, out, 1024 * 1024)
                 tmp.replace(dest)
             except (OSError, KeyError, zipfile.BadZipFile) as exc:
-                return f"Couldn't unpack {Path(member).name} from {archive.name}: {exc}"
+                return t("problem.unpack_failed", member=Path(member).name, archive=archive.name, error=exc)
         return None
 
 
