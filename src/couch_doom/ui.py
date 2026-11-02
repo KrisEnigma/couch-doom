@@ -218,6 +218,14 @@ def _load_extras(preset: Preset) -> tuple[Art | None, Readme | None, Endoom | No
     try:
         key = asset_cache.key_for(preset, iwad, files)
         if cached := asset_cache.get(key):
+            if cached.readme is None:
+                # The key ignores text files, so a readme dropped in after the first scan is only found by looking again.
+                try:
+                    if readme := find_readme(preset):
+                        cached.readme = readme
+                        asset_cache.put(key, cached)
+                except Exception:
+                    pass
             return cached.art, cached.readme, cached.endoom, cached.logo
     except Exception:
         key = None

@@ -15,7 +15,7 @@ from . import log
 from .archive import Zip, open_archive
 from .config import STATE_DIR
 from .known import lookup
-from .launch import _expand_mappack
+from .launch import _expand_dmb, _expand_mappack
 from .options import Preset
 
 MAX_BYTES = 256 * 1024
@@ -317,17 +317,30 @@ def _override_readme(files: list[Path], table: dict[str, dict]) -> Readme | None
     return None
 
 
+def _readme_files(preset: Preset) -> list[Path]:
+    """Maps, then mods. A DoomRunner bundle stays in the list ahead of the files it names: a text beside the
+    bundle speaks for the whole set, and otherwise its members' readmes are found as if they were added loose."""
+    out: list[Path] = []
+    for f in [*(f for mp in preset.mappacks if mp.exists() for f in _expand_mappack(mp)), *preset.mods]:
+        out.append(f)
+        if f.suffix.lower() == ".dmb":
+            out.extend(_expand_dmb(f))
+    return out
+
+
 def _find_readme(preset: Preset) -> Readme | None:
-    maps = [f for mp in preset.mappacks if mp.exists() for f in _expand_mappack(mp)]
+    files = _readme_files(preset)
     if table := _load_overrides():
-        if found := _override_readme([*maps, *preset.mods] or ([preset.iwad] if preset.iwad else []), table):
+        if found := _override_readme(files or ([preset.iwad] if preset.iwad else []), table):
             return found
     embedded = None
-    for path in [*maps, *preset.mods]:
+    for path in files:
         if not path.is_file():
             continue
         if (txt := _beside(path)) and (found := _read_beside(txt)):
             return found
+        if path.suffix.lower() == ".dmb":
+            continue  # a list of paths: its folder's other texts and metadata belong to other bundles
         inside = _inside(path)
         if inside and inside[2]:
             return Readme(f"{path.name} \u203a {inside[0]}", _decode(inside[1]), parse_fields(_decode(inside[1])))
@@ -341,7 +354,7 @@ def _find_readme(preset: Preset) -> Readme | None:
         if not embedded:
             embedded = _embedded(path)
     # The curated entries for the official games outrank a text a WAD happens to carry.
-    return _known_readme(preset, [*maps, *preset.mods]) or embedded
+    return _known_readme(preset, files) or embedded
 
 
 def _known_readme(preset: Preset, files: list[Path]) -> Readme | None:
@@ -362,8 +375,7 @@ def find_readme(preset: Preset) -> Readme | None:
     if found is None or found.source == "descriptions.json" or found.fields.get("description"):
         return found
     # A readme with no description (often just credits): a known entry supplies one, and the original text follows it.
-    maps = [f for mp in preset.mappacks if mp.exists() for f in _expand_mappack(mp)]
-    known = _known_readme(preset, [*maps, *preset.mods])
+    known = _known_readme(preset, _readme_files(preset))
     if known is None or not known.fields.get("description"):
         return found
     rule = "-" * 60
