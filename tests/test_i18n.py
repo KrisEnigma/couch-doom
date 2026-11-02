@@ -62,3 +62,11 @@ def test_locale_key_parity():
         assert missing == [], f"{code} missing {missing[:10]}..."
         extra = sorted(set(cat) - set(en))
         assert extra == [], f"{code} has extra {extra[:10]}..."
+
+
+def test_german_launcher_fallback_cases():
+    i18n.set_language("de")
+    assert i18n.t("empty.the_launcher_cap") == "Der Launcher"
+    assert i18n.t("empty.the_launcher_in") == "dem Launcher"
+    assert "dem Launcher" in i18n.t("empty.no_presets_hint", who=i18n.t("empty.the_launcher_in"))
+    assert "Der Launcher" in i18n.t("empty.no_presets_detail", who=i18n.t("empty.the_launcher_cap"))

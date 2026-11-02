@@ -69,8 +69,8 @@
   "toast.removed_favorite": "Removido dos Favoritos",
   "toast.quit_again": "Pressione {button} de novo para sair",
   "toast.still_same": "Continua igual: {detail}",
-  "toast.no_settings": "{name} ainda não salvou nenhuma configuração. Monte um jogo nele primeiro.",
-  "toast.not_launcher": "{name} não é um launcher de Doom, as configurações dele, nem GZDoom/UZDoom/VKDoom",
+  "toast.no_settings": "{name} ainda não salvou nenhuma configuração. Configure um jogo nele primeiro.",
+  "toast.not_launcher": "{name} não é um launcher de Doom, um arquivo de configurações nem GZDoom/UZDoom/VKDoom",
   "toast.could_not_start": "Não foi possível iniciar: {exc}",
   "toast.closed_log": "{name} fechou na hora (saída {code}). Detalhes em couch-doom.log",
   "toast.closed_why": "{name} fechou na hora (saída {code}): {why}",
@@ -86,12 +86,12 @@
 
   "picker.title": "Onde ficam seus presets?",
   "picker.find_myself": "Procurar eu mesmo…",
-  "picker.find_sub": "Escolha o {program} de um launcher ou o arquivo de configurações",
+  "picker.find_sub": "Escolha um launcher ({program}) ou o arquivo de configurações dele",
   "picker.cant_read": "Não dá para ler",
   "picker.no_presets": "Sem presets",
   "picker.n_presets": "{count} preset",
   "picker.n_presets_plural": "{count} presets",
-  "picker.not_listed": "Não está na lista? Arraste o {program} ou o arquivo de configurações para esta janela.",
+  "picker.not_listed": "Não está na lista? Arraste o launcher ({program}) ou o arquivo de configurações dele para esta janela.",
 
   "palette.auto": "Automático",
   "palette.red": "Vermelho",
@@ -105,12 +105,13 @@
 
   "empty.filter": "Nenhum preset corresponde a esse filtro.",
   "empty.no_presets_title": "Ainda sem presets",
-  "empty.no_presets_detail": "As configurações de {who} não têm presets:",
+  "empty.no_presets_detail": "{who} não tem presets nas configurações:",
   "empty.no_presets_hint": "Crie presets em {who} e recarregue.",
-  "empty.multi_hint": "Monte um jogo no DoomRunner, ZDL ou Doom Launcher para ele salvar as configurações, ou instale o GZDoom com um IWAD, e recarregue. Usa um portátil que não aparece? Pressione {pick} para apontar o CouchDoom até ele.",
+  "empty.multi_hint": "Configure um jogo no DoomRunner, ZDL ou Doom Launcher para ele salvar as configurações, ou instale o GZDoom com um IWAD, e recarregue. Está usando uma versão portátil que não aparece? Pressione {pick} para apontar o CouchDoom até ela.",
   "empty.single_hint": "Se {who} estava salvando, recarregue. Senão, abra {who} e confira as configurações.",
-  "empty.the_launcher": "o launcher",
-  "empty.the_launcher_cap": "O launcher",
+  "empty.the_launcher": "seu launcher",
+  "empty.the_launcher_cap": "Seu launcher",
+  "empty.the_launcher_in": "seu launcher",
 
   "header.filter": "Filtro",
   "header.from_launcher": "De {launcher}",
@@ -132,7 +133,7 @@
 
   "update.heading": "Atualização disponível",
   "update.out": "CouchDoom {version} já saiu",
-  "update.youre_on": "Você está em {current}",
+  "update.youre_on": "Você está usando {current}",
   "update.whats_new": "Novidades",
   "update.more_notes": "Mais mudanças na página da versão.",
   "update.downloading": "Baixando atualização: {done} KB",
@@ -143,10 +144,10 @@
   "update.later": "Lembrar depois",
   "update.later_cap": "Perguntar de novo na próxima vez que o CouchDoom iniciar",
   "update.skip": "Não lembrar de novo",
-  "update.skip_cap": "Ficar quieto sobre {v}; uma versão mais nova ainda aparece",
+  "update.skip_cap": "Não avisar sobre {v}; uma versão mais nova ainda aparecerá",
   "update.install": "Atualizar e reiniciar",
   "update.install_cap": "Baixar, instalar e reiniciar o CouchDoom",
-  "update.packaged_only": "A atualização automática só existe em builds empacotados.",
+  "update.packaged_only": "A atualização automática só existe em versões empacotadas.",
   "update.cancelled": "Atualização cancelada.",
 
   "help.guide": "GUIA DO COUCHDOOM",
@@ -168,7 +169,7 @@
   "help.6.title": "SE ALGO NÃO FUNCIONAR",
   "help.6.body": "Confira se o launcher ainda abre o jogo por conta própria. Se o CouchDoom não achar um launcher, use “Procurar eu mesmo…” no seletor. Se o sistema perguntar antes de abrir o CouchDoom pela primeira vez, permita só se você baixou da versão oficial.",
   "help.7.title": "REPORTAR UM BUG",
-  "help.7.body": "Escolha Ajuda e feedback acima para ver perguntas e relatos ou mandar um novo. Antes de postar, diga o que estava fazendo, o que esperava e o que aconteceu. Mencione a versão do CouchDoom e o jogo ou launcher. Uma captura ou um trecho curto do log ajuda; remova caminhos pessoais antes de compartilhar.",
+  "help.7.body": "Escolha Ajuda e feedback acima para ver perguntas e relatos ou enviar um novo. Antes de postar, diga o que estava fazendo, o que esperava e o que aconteceu. Mencione a versão do CouchDoom e o jogo ou launcher. Uma captura ou um trecho curto do log ajuda; remova caminhos pessoais antes de compartilhar.",
   "help.8.title": "SOBRE",
-  "help.8.body": "CouchDoom é feito por KrisEnigma. Obrigado por usar!"
+  "help.8.body": "CouchDoom é feito por KrisEnigma. Obrigado por usá-lo!"
 }

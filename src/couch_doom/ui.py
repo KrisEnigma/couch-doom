@@ -2446,9 +2446,12 @@ class App:
                 who = self.problem.launcher or tr("empty.the_launcher")
                 hint = tr("empty.single_hint", who=who)
         else:
-            who = self.opts.launcher or tr("empty.the_launcher_cap")
+            # Cap form is nominative (detail); _in is for "in {who}" so German can use dem Launcher.
+            named = self.opts.launcher
+            who = named or tr("empty.the_launcher_cap")
+            who_in = named or tr("empty.the_launcher_in")
             title, detail, paths = tr("empty.no_presets_title"), tr("empty.no_presets_detail", who=who), [self.opts.path]
-            hint = tr("empty.no_presets_hint", who=who)
+            hint = tr("empty.no_presets_hint", who=who_in)
         width = self.w - 2 * m
         y = self.list_rect.top
         for line in self._wrap(title, self._font(56, bold=True), width, 2):

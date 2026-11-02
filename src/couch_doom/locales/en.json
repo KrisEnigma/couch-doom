@@ -111,6 +111,7 @@
   "empty.single_hint": "If {who} was saving, reload. Otherwise open {who} and check its settings.",
   "empty.the_launcher": "the launcher",
   "empty.the_launcher_cap": "The launcher",
+  "empty.the_launcher_in": "the launcher",
 
   "header.filter": "Filter",
   "header.from_launcher": "From {launcher}",
