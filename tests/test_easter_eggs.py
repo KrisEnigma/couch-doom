@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -70,7 +71,13 @@ def test_couchdoom_executable_name_is_recognized_without_frozen_flag(monkeypatch
 
 
 def test_packaged_executable_is_found_from_the_install_root(monkeypatch, tmp_path):
-    executable = tmp_path / "CouchDoom.exe"
+    # Each platform packages differently; the browser should list whatever the player would pick.
+    if sys.platform == "darwin":
+        listed = tmp_path / "CouchDoom.app"
+        executable = listed / "Contents" / "MacOS" / "CouchDoom"
+        executable.parent.mkdir(parents=True)
+    else:
+        listed = executable = tmp_path / ("CouchDoom.exe" if os.name == "nt" else "CouchDoom")
     executable.touch()
     monkeypatch.setattr(easter_eggs, "FROZEN", True)
     monkeypatch.setattr(easter_eggs, "PROJECT_ROOT", tmp_path)
@@ -79,7 +86,7 @@ def test_packaged_executable_is_found_from_the_install_root(monkeypatch, tmp_pat
 
     browser = Browser(tmp_path, candidates=[tmp_path], include=easter_eggs.self_matcher())
 
-    assert executable in [entry.path for entry in browser.entries]
+    assert listed in [entry.path for entry in browser.entries]
 
 
 def test_browser_matcher_resolves_self_paths_once(monkeypatch, tmp_path):
