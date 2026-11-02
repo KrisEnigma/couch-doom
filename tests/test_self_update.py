@@ -376,7 +376,10 @@ def _fake_release(files: dict[str, bytes]):
     payload = io.BytesIO()
     with zipfile.ZipFile(payload, "w") as zf:
         for name, data in files.items():
-            zf.writestr(name, data)
+            # Unix mode bits, like the real packages: on Linux and macOS the helper must be executable.
+            info = zipfile.ZipInfo(name)
+            info.create_system, info.external_attr = 3, (0o100755 << 16)
+            zf.writestr(info, data)
     archive = payload.getvalue()
     digest = hashlib.sha256(archive).hexdigest()
 

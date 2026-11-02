@@ -53,6 +53,19 @@ def test_transition_shades_the_list_until_slow_art_is_ready(monkeypatch):
     assert frames[-1].get_at((app.w // 2, app.h // 2))[:3] == ART
 
 
+def test_transition_gives_up_on_art_that_never_arrives(monkeypatch):
+    monkeypatch.setattr(ui, "LAUNCH_WIPE_SECONDS", 0.05)
+    monkeypatch.setattr(ui, "LAUNCH_ART_WAIT_SECONDS", 0.1)
+    app, frames = wipe_app(ready_after_polls=10**9)  # a cold unpack on a slow drive
+    plain = pygame.Surface((app.w, app.h))
+    plain.fill(MARK)
+    app._plain_backdrop = lambda: plain
+
+    app._play_wipe("Game")
+
+    assert frames[-1].get_at((app.w // 2, app.h // 2))[:3] == MARK
+
+
 def test_zoom_starts_with_the_art_where_the_panel_shows_it():
     pygame.init()
     app = App.__new__(App)

@@ -23,12 +23,10 @@
   "group.favorites": "Favoris",
   "group.recent": "Joués récemment",
   "group.in_this": "DANS CE GROUPE",
-  "group.collapsed": "Replié",
-  "group.open": "Ouvert",
   "group.search_keeps": "La recherche garde les jeux correspondants visibles",
   "group.and_more": "et {count} autres",
-  "group.n_games": "{count} preset",
-  "group.n_games_plural": "{count} presets",
+  "group.n_presets": "{count} preset",
+  "group.n_presets_plural": "{count} presets",
   "group.state_collapsed": "Repliée — sélectionnez pour ouvrir",
   "group.state_open": "Ouverte — sélectionnez pour replier",
 
@@ -61,8 +59,6 @@
   "hint.all_files": "Tous les fichiers",
   "hint.doom_files": "Fichiers Doom",
 
-  "toast.music_on": "Musique du titre activée",
-  "toast.music_off": "Musique du titre désactivée",
   "toast.clear_search_fold": "Effacez la recherche avant de replier les groupes",
   "toast.loaded": "{count} presets chargés{source}",
   "toast.added_favorite": "Ajouté aux Favoris",

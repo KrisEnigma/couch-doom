@@ -487,7 +487,7 @@ def test_category_count_says_presets_not_games():
     row.count = 2
     label = app._category_count_label(row)
 
-    assert label == tr("group.n_games_plural", count=2)
+    assert label == tr("group.n_presets_plural", count=2)
     assert "preset" in label.lower()
     assert "game" not in label.lower()
 

@@ -62,6 +62,7 @@ OSK_LABELS = {"SPACE": "osk.space", "DELETE": "hint.delete", "CLEAR": "osk.clear
 
 QUIT_CONFIRM_SECONDS = 2.0
 LAUNCH_WIPE_SECONDS = 0.6
+LAUNCH_ART_WAIT_SECONDS = 1.2  # a cold unpack or a slow drive: open on the plain backdrop instead of waiting
 HANDOVER_TIMEOUT_SECONDS = handover.DEFAULT_TIMEOUT
 HANDOVER_GRACE_FRAMES = 4  # ~66 ms: cover the engine's first paint without lingering over the game
 WINDOW_RETRIES = 20  # half a second apart
@@ -1780,7 +1781,7 @@ class App:
             self._draw_category_mural(self.rows[self._sel_row()])
 
     def _category_count_label(self, row: Row) -> str:
-        key = "group.n_games" if row.count == 1 else "group.n_games_plural"
+        key = "group.n_presets" if row.count == 1 else "group.n_presets_plural"
         return tr(key, count=row.count)
 
     def _draw_category_mural(self, row: Row) -> None:
@@ -1806,7 +1807,7 @@ class App:
             font = self._font(size, bold=True)
             lines = self._wrap(row.text, font, max_w, 2)
             tall = len(lines) * font.get_height() + (len(lines) - 1) * int(2 * s)
-            wide = max(font.size(line)[0] for line in lines)
+            wide = max((font.size(line)[0] for line in lines), default=0)
             if tall <= budget and wide <= max_w:
                 break
             size -= 2
@@ -2390,8 +2391,8 @@ class App:
         while True:
             now = time.monotonic()
             pygame.event.pump()
-            if art is None and (ready := poll()) is not None:
-                backdrop, dims, soft = ready
+            if art is None and ((ready := poll()) is not None or now - start >= LAUNCH_ART_WAIT_SECONDS):
+                backdrop, dims, soft = ready or (self._plain_backdrop(), None, None)
                 # Zoom the feathered copy, so the art has no hard edge against the list; _loading_screen writes
                 # its text onto `backdrop`.
                 art, art_at = soft or backdrop.copy(), now
@@ -2518,6 +2519,9 @@ class App:
 
         surf.blit(self._bg_overlay(bg, pygame.Rect((0, 0), size), self._alpha_mask(size, scrim)), (0, 0))
         return surf, (w, h, aspect)
+
+    def _plain_backdrop(self) -> pygame.Surface:
+        return self._layers_for(self.theme)["bg"][0].copy()
 
     def _start_loading_backdrop(self) -> Callable[[], tuple[pygame.Surface, tuple | None, pygame.Surface | None] | None]:
         """Build the backdrop on a thread; the returned poll gives it, the art's dimensions and a copy feathered
