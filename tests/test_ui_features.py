@@ -50,7 +50,7 @@ def make_app(sections=("Section A", "Section B"), collapsed=(), filter_text=""):
     app.endooms = {}
     app.readmes = {}
     app.info_tab = 0
-    app.info_scrolls = [0] * len(ui.INFO_TABS)
+    app.info_scrolls = [0] * ui.INFO_TAB_COUNT
     app.info_scroll = 0.0
     app.info_view = 0.0
     app.info_opened = 0.0
@@ -165,13 +165,15 @@ def test_keyboard_slash_types_into_the_filter_instead_of_opening_search():
 
 
 def test_keyboard_list_footer_has_no_search_hint_but_pad_does():
+    from couch_doom.i18n import t as tr
+
     app = make_app()
     app._rebuild_rows()
     app.input = SimpleNamespace(pad_mode=False, left_y=0.0, family="xbox")
-    assert not any(label == "Search" for _, label, _ in app._footer_hints())
+    assert not any(label == tr("hint.search") for _, label, _ in app._footer_hints())
 
     app.input.pad_mode = True
-    assert any("Y" in glyphs and label == "Search" for glyphs, label, _ in app._footer_hints())
+    assert any("Y" in glyphs and label == tr("hint.search") for glyphs, label, _ in app._footer_hints())
 
 
 def test_backspace_is_consumed_by_overlays_but_reaches_the_filter_in_list_mode():
@@ -190,14 +192,16 @@ def test_backspace_is_consumed_by_overlays_but_reaches_the_filter_in_list_mode()
 
 
 def test_escape_clears_the_filter_before_opening_the_menu():
+    from couch_doom.i18n import t as tr
+
     app = make_app(filter_text="beta")
     esc = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE)
 
-    assert app._footer_hints()[0][1] == "Clear"
+    assert app._footer_hints()[0][1] == tr("hint.clear")
     assert app._on_key(esc) is True
     assert app.filter == ""
     assert app.mode == "list"
-    assert app._footer_hints()[0][1] == "Menu"
+    assert app._footer_hints()[0][1] == tr("hint.menu")
 
     assert app._on_key(esc) is False  # empty filter: Escape reaches the menu action
 
@@ -227,8 +231,11 @@ def test_recently_played_group_uses_history_and_skips_stale_names():
 
     app._rebuild_rows()
 
+    from couch_doom.i18n import t as tr
+
     headers = [row for row in app.rows if row.kind == "header"]
-    assert [row.text for row in headers] == [ui.RECENTLY_PLAYED, "Section A", "Section B"]
+    assert [row.group_id or row.text for row in headers] == [ui.RECENT_ID, "Section A", "Section B"]
+    assert headers[0].text == tr("group.recent")
     assert headers[0].count == 2
     assert [row.text for row in app.rows if row.kind == "preset"][:2] == ["Gamma", "Alpha"]
 
@@ -275,7 +282,7 @@ def test_f1_opens_separate_help_and_info_button_keeps_readme_default():
     app.mode = "list"
     app._rebuild_rows()
     app._on_action(Action.ALT, 2.0)
-    assert ui.INFO_TABS[app.info_tab] == "Readme"
+    assert ui.info_tabs()[app.info_tab] == "Readme"
 
 
 def test_back_opens_help_and_start_opens_menu_with_music_option():
@@ -301,18 +308,21 @@ def test_back_opens_help_and_start_opens_menu_with_music_option():
 
 
 def test_pad_footer_puts_help_on_back_and_menu_on_start():
+    from couch_doom.i18n import t as tr
+
     app = make_app()
     app.input.pad_mode = True
 
     hints = app._footer_hints()
 
-    assert any(glyphs == ("BACK",) and label == "Help" for glyphs, label, _ in hints)
-    assert any(glyphs == ("START",) and label == "Menu" for glyphs, label, _ in hints)
+    assert any(glyphs == ("BACK",) and label == tr("hint.help") for glyphs, label, _ in hints)
+    assert any(glyphs == ("START",) and label == tr("hint.menu") for glyphs, label, _ in hints)
 
 
 def test_help_covers_the_usage_guide_without_hard_coded_buttons():
-    headings = [heading for heading, _ in ui.HELP_SECTIONS]
-    text = " ".join(body for _, body in ui.HELP_SECTIONS)
+    sections = ui.help_sections()
+    headings = [heading for heading, _ in sections]
+    text = " ".join(body for _, body in sections)
 
     assert {"START PLAYING", "CAN'T FIND YOUR GAMES?", "MUSIC", "IF SOMETHING DOESN'T WORK"} <= set(headings)
     assert {"REPORT A BUG", "ABOUT"} <= set(headings)
@@ -341,10 +351,12 @@ def test_controller_y_opens_the_bug_report_and_footer_shows_it(monkeypatch):
     opened = []
     monkeypatch.setattr(ui.webbrowser, "open", opened.append)
 
+    from couch_doom.i18n import t as tr
+
     hints = app._footer_hints()
     app._on_action(Action.SEARCH, 0.0)
 
-    assert any("Y" in glyphs and label == "Help & Feedback" for glyphs, label, _ in hints)
+    assert any("Y" in glyphs and label == tr("hint.help_feedback") for glyphs, label, _ in hints)
     assert opened == [ui.ISSUE_URL]
     assert ui.ISSUE_URL.endswith("/issues")
 
@@ -371,19 +383,21 @@ def test_keyboard_f5_does_nothing_outside_help_modal(monkeypatch):
 
 
 def test_keyboard_footer_separates_help_and_info_and_has_feedback_shortcut():
+    from couch_doom.i18n import t as tr
+
     app = make_app()
     hints = app._footer_hints()
     labels = [label for _, label, _ in hints]
 
-    assert "Help" in labels and "Info" in labels
+    assert tr("hint.help") in labels and tr("hint.info") in labels
     assert "Help / Info" not in labels
     assert not any(label == "Fold group" for label in labels)
-    assert any("KEY:F3" in glyphs and label == "Favorite" for glyphs, label, _ in hints)
-    assert any("KEY:ESC" in glyphs and label == "Menu" for glyphs, label, _ in hints)
+    assert any("KEY:F3" in glyphs and label == tr("hint.favorite") for glyphs, label, _ in hints)
+    assert any("KEY:ESC" in glyphs and label == tr("hint.menu") for glyphs, label, _ in hints)
 
     app.mode = "help"
     hints = app._footer_hints()
-    assert any("KEY:F5" in glyphs and label == "Help & Feedback" for glyphs, label, _ in hints)
+    assert any("KEY:F5" in glyphs and label == tr("hint.help_feedback") for glyphs, label, _ in hints)
 
 
 def test_collapsed_sections_keep_their_header_and_hide_their_presets():
@@ -546,6 +560,24 @@ def test_cycle_language_applies_catalog():
     assert app.state.language == "es"
 
 
+def test_favorites_collapse_survives_language_change():
+    from couch_doom.i18n import set_language, t as tr
+
+    app = make_app()
+    app.state.favorites = ["Alpha"]
+    app.state.language = "en"
+    set_language("en")
+    app._rebuild_rows()
+    app.collapsed_sections.add(ui.FAVORITES_ID)
+    app.state.language = "es"
+    set_language("es")
+    app._rebuild_rows()
+    assert ui.FAVORITES_ID in app.collapsed_sections
+    fav = next(r for r in app.rows if getattr(r, "group_id", None) == ui.FAVORITES_ID)
+    assert fav.text == tr("group.favorites")
+    assert fav.collapsed is True
+
+
 def test_footer_shows_bulk_fold_hint_on_category():
     app = make_app()
     app._rebuild_rows()
@@ -554,7 +586,9 @@ def test_footer_shows_bulk_fold_hint_on_category():
 
     hints = app._footer_hints()
 
-    assert any(label == "Collapse all" and Action.ALT in actions for _, label, actions in hints)
+    from couch_doom.i18n import t as tr
+
+    assert any(label == tr("hint.collapse_all") and Action.ALT in actions for _, label, actions in hints)
 
 
 def test_up_down_navigation_can_select_category_without_changing_the_game():

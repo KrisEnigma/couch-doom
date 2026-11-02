@@ -71,35 +71,33 @@ ART_CACHE_SIZE = 24
 THEME_CACHE_SIZE = 48
 ART_MIN_FILL = 0.62  # of the art panel's height
 ART_MAX_ZOOM = 1.25
-FAVORITES = "Favorites"
-RECENTLY_PLAYED = "Recently Played"
-INFO_TABS = ("Readme", "ENDOOM")
+FAVORITES_ID = "favorites"
+RECENT_ID = "recent"
+INFO_TAB_COUNT = 2
 ENDOOM_TAB = 1
+HELP_SECTION_COUNT = 9
 ISSUE_URL = "https://github.com/KrisEnigma/couch-doom/issues"
-HELP_SECTIONS = (
-    ("START PLAYING", "CouchDoom reads the games you already have in DoomRunner, ZDL, or Doom Launcher, and leaves those setups as you made them. It can also show games found by GZDoom, UZDoom, or VKDoom. Pick a game and play."),
-    ("CAN'T FIND YOUR GAMES?", "CouchDoom usually finds your launcher automatically. If it finds more than one, choose the one you want. If your games still aren't listed, open the launcher picker and choose “Find it myself…” to browse for your launcher or game port. You can also drop its folder onto the CouchDoom window."),
-    ("BROWSE THE LIST", "The selected game stays highlighted while its artwork and details appear beside the list. Select a group heading to see its games and open or collapse it. You can also click the small marker beside a heading. Jumping to a folded group lets you open it again. On a group heading, the bottom hint expands or collapses every group."),
-    ("SEARCH AND FAVORITES", "Search by game or group name. Matching games stay visible even when their group is folded. Mark games as favorites to keep them together near the top of the list. The hints along the bottom show the controls for your keyboard or controller."),
-    ("GAME DETAILS", "A game may show its title art, music, description, or a readme. Some games include a colorful end screen called ENDOOM. Open the info sheet to see these extras when they're available."),
-    ("MUSIC", "CouchDoom plays menu music when the selected game provides it. If you don't hear any, that game may not include menu music."),
-    ("IF SOMETHING DOESN'T WORK", "Check that your launcher still opens the game on its own. If CouchDoom can't find a launcher, use “Find it myself…” in the launcher picker. If your system asks before opening CouchDoom for the first time, allow it only if you downloaded it from the official release."),
-    ("REPORT A BUG", "Choose Help & Feedback above to browse questions and bug reports or share a new one. Before posting, include what you were doing, what you expected, and what happened. Mention the CouchDoom version and game or launcher involved. A screenshot or short log excerpt can help; remove personal file paths before sharing."),
-    ("ABOUT", "CouchDoom is made by KrisEnigma. Thanks for using it!"),
-)
 UPDATE_DELAY_SECONDS = 1.0  # let the list settle briefly before a notice appears over it
-# (key, label, caption) for the update notice; "later" is index 1 because B and a click outside both mean it.
-UPDATE_CHOICES = (
-    ("open", "Open release page", "Opens GitHub in your browser"),
-    ("later", "Remind me later", "Ask again the next time CouchDoom starts"),
-    ("skip", "Don't remind me again", "Stay quiet about {v}; a newer release will still show"),
-)
+
+
+def info_tabs() -> tuple[str, str]:
+    return (tr("info.readme"), tr("info.endoom"))
+
+
+def help_sections() -> list[tuple[str, str]]:
+    return [(tr(f"help.{i}.title"), tr(f"help.{i}.body")) for i in range(HELP_SECTION_COUNT)]
 
 
 def update_choices(info: dict | None, packaged: bool) -> tuple[tuple[str, str, str], ...]:
-    choices = list(UPDATE_CHOICES)
+    # "later" stays index 1 among the base trio because B and a click outside both mean it;
+    # insert install at 0 when available so later shifts with the list.
+    choices = [
+        ("open", tr("update.open"), tr("update.open_cap")),
+        ("later", tr("update.later"), tr("update.later_cap")),
+        ("skip", tr("update.skip"), tr("update.skip_cap")),
+    ]
     if info and info.get("asset") and packaged:
-        choices.insert(0, ("install", "Update and restart", "Download, install and restart CouchDoom"))
+        choices.insert(0, ("install", tr("update.install"), tr("update.install_cap")))
     return tuple(choices)
 LOGO_MAX_H = 168  # design px; menu logos are compact, so they need more height than a text title to read as big
 INFO_SLIDE_SECONDS = 0.22
@@ -118,6 +116,11 @@ class Row:
     count: int = 0
     fav: bool = False  # the copy shown in the Favorites section
     collapsed: bool = False
+    group_id: str | None = None  # stable collapse key for Favorites / Recently Played
+
+
+def _header_key(row: Row) -> str:
+    return row.group_id or row.text
 
 
 @dataclass
@@ -448,7 +451,7 @@ class App:
         self.help_scroll = 0.0
         self.help_view = 0.0
         self.info_tab = 0
-        self.info_scrolls = [0.0] * len(INFO_TABS)  # per-tab position, kept while the sheet is open
+        self.info_scrolls = [0.0] * INFO_TAB_COUNT  # per-tab position, kept while the sheet is open
         self.info_scroll = 0.0
         self.info_view = 0.0
         self.info_opened = 0.0
@@ -525,12 +528,12 @@ class App:
                 self._open_picker()  # the second look found several: the player has to say which
                 return
             self._sound("error")
-            self._notify(f"Still the same: {exc.title[0].lower()}{exc.title[1:]}", ERROR)
+            self._notify(tr("toast.still_same", detail=f"{exc.title[0].lower()}{exc.title[1:]}"), ERROR)
             return
         in_menu = self.mode == "menu"
         self._apply(opts, announce=not in_menu)
         if in_menu:
-            self.menu_status = "Refreshed"
+            self.menu_status = tr("menu.refreshed")
             self.menu_status_at = time.monotonic()
 
     def _apply(self, opts: Options, *, announce: bool = True) -> None:
@@ -561,7 +564,7 @@ class App:
             self._sound("open")
             if announce:
                 source = f" from {opts.launcher}" if opts.launcher else ""
-                self._notify(f"Loaded {len(opts.presets)} presets{source}", MUTED)
+                self._notify(tr("toast.loaded", count=len(opts.presets), source=source), MUTED)
         else:
             self._sound("error")
 
@@ -674,7 +677,7 @@ class App:
             return
         install_path = self_update.installation_path(Path(sys.executable), asset.target)
         if install_path is None:
-            self.update_error = "Automatic updating is available in packaged builds only."
+            self.update_error = tr("update.packaged_only")
             return
         self.update_error = None
         self.update_progress = (0, None)
@@ -706,7 +709,7 @@ class App:
                 staged = install_job.result()
                 if self.update_cancel and self.update_cancel.is_set():
                     self_update.discard_staged(staged)
-                    self.update_error = "Update cancelled."
+                    self.update_error = tr("update.cancelled")
                     return
                 info = self.update or {}
                 install_path = self_update.installation_path(Path(sys.executable), info["asset"].target)
@@ -831,9 +834,9 @@ class App:
                 return
             exe = next((s for s in SOURCES if path.name.lower() in s.module.EXES), None)
             if exe:
-                self._notify(f"{exe.name} hasn't saved any settings yet. Set up a game in it first.", ERROR)
+                self._notify(tr("toast.no_settings", name=exe.name), ERROR)
             else:
-                self._notify(f"{path.name} isn't a Doom launcher, its settings, or GZDoom/UZDoom/VKDoom", ERROR)
+                self._notify(tr("toast.not_launcher", name=path.name), ERROR)
             self._sound("error")
             return
         self._choose(choice, added=True)
@@ -915,7 +918,7 @@ class App:
             self.scroll += shift
             self.bar_y += shift
         self._sound("open" if on else "close")
-        self._notify("Added to Favorites" if on else "Removed from Favorites", self.theme.label if on else MUTED)
+        self._notify(tr("toast.added_favorite") if on else tr("toast.removed_favorite"), self.theme.label if on else MUTED)
 
     # ---------- window / layout ----------
 
@@ -1158,15 +1161,15 @@ class App:
         names = {p.name: i for i, p in enumerate(self.opts.presets)}
         favs = [names[f] for f in self.state.favorites if f in names and self._matches(names[f], terms)]
         if favs:
-            collapsed = not terms and FAVORITES in self.collapsed_sections
-            rows.append(Row("header", FAVORITES, count=len(favs), collapsed=collapsed))
+            collapsed = not terms and FAVORITES_ID in self.collapsed_sections
+            rows.append(Row("header", tr("group.favorites"), count=len(favs), collapsed=collapsed, group_id=FAVORITES_ID))
             if not collapsed:
                 rows += [Row("preset", self.opts.presets[i].name, i, fav=True) for i in favs]
         if getattr(self.state, "recent_group", False):
             recent = [names[name] for name in getattr(self.state, "history", []) if name in names and self._matches(names[name], terms)]
             if recent:
-                collapsed = not terms and RECENTLY_PLAYED in self.collapsed_sections
-                rows.append(Row("header", RECENTLY_PLAYED, count=len(recent), collapsed=collapsed))
+                collapsed = not terms and RECENT_ID in self.collapsed_sections
+                rows.append(Row("header", tr("group.recent"), count=len(recent), collapsed=collapsed, group_id=RECENT_ID))
                 if not collapsed:
                     rows += [Row("preset", self.opts.presets[i].name, i) for i in recent]
         for section in self.opts.sections:
@@ -1250,35 +1253,35 @@ class App:
         if not 0 <= row < len(self.rows) or self.rows[row].kind != "header":
             return
         if self.filter:
-            self._notify("Clear search before folding groups", self.theme.label)
+            self._notify(tr("toast.clear_search_fold"), self.theme.label)
             return
-        name = self.rows[row].text
-        if name in self.collapsed_sections:
-            self.collapsed_sections.remove(name)
+        key = _header_key(self.rows[row])
+        if key in self.collapsed_sections:
+            self.collapsed_sections.remove(key)
         else:
-            self.collapsed_sections.add(name)
+            self.collapsed_sections.add(key)
         self._rebuild_rows()
-        self.cur_row = next((i for i, row in enumerate(self.rows) if row.kind == "header" and row.text == name), -1)
+        self.cur_row = next((i for i, row in enumerate(self.rows) if row.kind == "header" and _header_key(row) == key), -1)
         self.detail_changed = time.monotonic()
         self._sound("move")
 
     def _all_header_names(self) -> set[str]:
         names = set(self.opts.sections)
         if self.state.favorites:
-            names.add(FAVORITES)
+            names.add(FAVORITES_ID)
         if getattr(self.state, "recent_group", False) and getattr(self.state, "history", None):
-            names.add(RECENTLY_PLAYED)
+            names.add(RECENT_ID)
         return names
 
     def _bulk_fold_label(self) -> str:
         headers = self._all_header_names()
         if headers - self.collapsed_sections:
-            return "Collapse all"
-        return "Expand all"
+            return tr("hint.collapse_all")
+        return tr("hint.expand_all")
 
     def _focus_header_after_bulk(self, prefer: str | None = None) -> None:
         if prefer:
-            match = next((i for i, row in enumerate(self.rows) if row.kind == "header" and row.text == prefer), None)
+            match = next((i for i, row in enumerate(self.rows) if row.kind == "header" and _header_key(row) == prefer), None)
             if match is not None:
                 self.cur_row = match
                 self.detail_changed = time.monotonic()
@@ -1289,9 +1292,9 @@ class App:
 
     def _collapse_all_groups(self) -> None:
         if self.filter:
-            self._notify("Clear search before folding groups", self.theme.label)
+            self._notify(tr("toast.clear_search_fold"), self.theme.label)
             return
-        prefer = self.rows[self._sel_row()].text if self.rows and self.rows[self._sel_row()].kind == "header" else None
+        prefer = _header_key(self.rows[self._sel_row()]) if self.rows and self.rows[self._sel_row()].kind == "header" else None
         self.collapsed_sections = set(self._all_header_names())
         self._rebuild_rows()
         self._focus_header_after_bulk(prefer)
@@ -1299,9 +1302,9 @@ class App:
 
     def _expand_all_groups(self) -> None:
         if self.filter:
-            self._notify("Clear search before folding groups", self.theme.label)
+            self._notify(tr("toast.clear_search_fold"), self.theme.label)
             return
-        prefer = self.rows[self._sel_row()].text if self.rows and self.rows[self._sel_row()].kind == "header" else None
+        prefer = _header_key(self.rows[self._sel_row()]) if self.rows and self.rows[self._sel_row()].kind == "header" else None
         self.collapsed_sections.clear()
         self._rebuild_rows()
         self._focus_header_after_bulk(prefer)
@@ -1314,14 +1317,14 @@ class App:
         else:
             self._expand_all_groups()
 
-    def _category_presets(self, row: int) -> list[int]:
+    def _category_presets(self, row: Row) -> list[int]:
         if row.kind != "header":
             return []
         terms = self.filter.lower().split()
-        if row.text == FAVORITES:
+        if row.group_id == FAVORITES_ID:
             names = {preset.name: i for i, preset in enumerate(self.opts.presets)}
             return [names[name] for name in self.state.favorites if name in names and self._matches(names[name], terms)]
-        if row.text == RECENTLY_PLAYED:
+        if row.group_id == RECENT_ID:
             names = {preset.name: i for i, preset in enumerate(self.opts.presets)}
             return [names[name] for name in getattr(self.state, "history", []) if name in names and self._matches(names[name], terms)]
         return [i for i, preset in enumerate(self.opts.presets) if preset.section == row.text and self._matches(i, terms)]
@@ -1759,17 +1762,17 @@ class App:
 
     def _menu_items(self) -> list[tuple[str, str]]:
         items = [
-            ("back", "Back to list"),
-            ("refresh", "Refresh list"),
-            ("music", "Title music"),
-            ("sounds", "Menu sounds"),
-            ("recent", "Recently played group"),
+            ("back", tr("menu.back")),
+            ("refresh", tr("menu.refresh")),
+            ("music", tr("menu.music")),
+            ("sounds", tr("menu.sounds")),
+            ("recent", tr("menu.recent")),
         ]
-        items.append(("colors", "Colors"))
+        items.append(("colors", tr("menu.colors")))
         items.append(("language", tr("menu.language")))
         if self.launchers:
-            items.append(("launcher", "Choose launcher"))
-        items.extend((("help", "Help"), ("quit", "Quit")))
+            items.append(("launcher", tr("menu.launcher")))
+        items.extend((("help", tr("menu.help")), ("quit", tr("menu.quit"))))
         return items
 
     def _cycle_color_palette(self, delta: int) -> None:
@@ -1852,7 +1855,7 @@ class App:
     def _open_info(self, now: float) -> None:
         self.mode = "info"
         self.info_scroll = self.info_view = 0.0
-        self.info_scrolls = [0.0] * len(INFO_TABS)
+        self.info_scrolls = [0.0] * INFO_TAB_COUNT
         self.info_tab = 0
         self.info_opened = now
         self._sound("open")
@@ -1881,7 +1884,7 @@ class App:
             self.running = False
         else:
             self.quit_armed_until = now + QUIT_CONFIRM_SECONDS
-            self._notify(f"Press {button} again to quit", self.theme.label)
+            self._notify(tr("toast.quit_again", button=button), self.theme.label)
             self._sound("open")
 
     def _on_info_action(self, action: Action, now: float) -> None:
@@ -2121,7 +2124,7 @@ class App:
         try:
             proc = spawn(cmd.argv, cmd.cwd, cmd.env, preset.name, cmd.display())
         except OSError as exc:
-            self._notify(f"Could not start: {exc}", ERROR)
+            self._notify(tr("toast.could_not_start", exc=exc), ERROR)
             self._sound("error")
             return
         self.state.record(preset.name)
@@ -2159,15 +2162,15 @@ class App:
                 why_low = why.lower()
                 # Keep it short for the toast; full output is in couch-doom.log
                 if why_low.startswith("[mvk-") or "vkinstance" in why_low or "destroying" in why_low and "vulkan" in why_low:
-                    self._notify(f"{preset.name} closed right away (exit {code}). Details are in couch-doom.log", ERROR)
+                    self._notify(tr("toast.closed_log", name=preset.name, code=code), ERROR)
                 else:
                     if len(why) > 60:
                         why = why[:57] + "..."
-                    self._notify(f"{preset.name} closed right away (exit {code}): {why}", ERROR)
+                    self._notify(tr("toast.closed_why", name=preset.name, code=code, why=why), ERROR)
             else:
-                self._notify(f"{preset.name} closed right away (exit {code}). Details are in couch-doom.log", ERROR)
+                self._notify(tr("toast.closed_log", name=preset.name, code=code), ERROR)
         else:
-            self._notify(f"Back from {preset.name}", MUTED)
+            self._notify(tr("toast.back_from", name=preset.name), MUTED)
 
     def _play_wipe(self, name: str) -> None:
         clock = pygame.time.Clock()
@@ -2217,7 +2220,7 @@ class App:
             log.write("handover timeout", f"{name}: no engine window after {HANDOVER_TIMEOUT_SECONDS:.0f} seconds")
 
     def _loading_label(self, name: str) -> pygame.Surface:
-        return self._tracked(f"LOADING   {name}", 40, self.theme.bg_top, bold=True, tracking=0.08)
+        return self._tracked(tr("header.loading", name=name), 40, self.theme.bg_top, bold=True, tracking=0.08)
 
     def _draw_loading(self, name: str, elapsed: float) -> None:
         """The wipe's end frame, kept alive with a ticking ellipsis while the engine starts."""
@@ -2395,7 +2398,7 @@ class App:
     def _draw_header(self) -> None:
         s, m = self.s, self.margin
         brand_font = self._font(88, bold=True)
-        brand = self._shadowed("COUCH DOOM", brand_font, TEXT)
+        brand = self._shadowed("COUCH DOOM", brand_font, TEXT)  # brand stays English
         brand_pos = (m - int(4 * s), m - int(18 * s))
         self.screen.blit(brand, brand_pos)
         ver = self._tracked(f"v{__version__}", 14, DIM, tracking=0.2)
@@ -2403,7 +2406,9 @@ class App:
         self.screen.blit(ver, (brand_pos[0] + brand.get_width() + int(10 * s), baseline - self._font(14, bold=True).get_ascent()))
         stripe_y = m + brand.get_height() - int(14 * s)
         pygame.draw.rect(self.screen, self.theme.accent, (m, stripe_y, int(150 * s), int(7 * s)))
-        tag = self._tracked(f"From {self.opts.launcher}" if self.opts.launcher else "Couch launcher", 18, self.theme.accent, tracking=0.3)
+        tag = self._tracked(
+            tr("header.from_launcher", launcher=self.opts.launcher) if self.opts.launcher else tr("header.couch_launcher"),
+            18, self.theme.accent, tracking=0.3)
         tag_pos = (m + int(168 * s), stripe_y + int(4 * s) - tag.get_height() // 2)
         self.screen.blit(tag, tag_pos)
         if self.launchers and self.mode == "list":
@@ -2414,14 +2419,14 @@ class App:
         total = len(self.opts.presets)
         shown = sum(1 for r in self.rows if r.kind == "preset" and not r.fav)
         number = self._shadowed(str(shown) if not self.filter else f"{shown} / {total}", self._font(44, bold=True), TEXT)
-        label = self._tracked("presets" if not self.filter else "matching", 17, MUTED, tracking=0.3)
+        label = self._tracked(tr("header.presets") if not self.filter else tr("header.matching"), 17, MUTED, tracking=0.3)
         right = self.w - m
         self.screen.blit(number, (right - number.get_width(), m - int(10 * s)))
         self.screen.blit(label, (right - label.get_width(), m - int(10 * s) + number.get_height()))
 
         if self.filter or self.mode == "search":
             fy = self.list_rect.top - int(64 * s)
-            lab = self._tracked("Filter", 17, self.theme.label, tracking=0.3)
+            lab = self._tracked(tr("header.filter"), 17, self.theme.label, tracking=0.3)
             self.screen.blit(lab, (m, fy + int(12 * s)))
             caret = "|" if int(time.monotonic() * 2) % 2 == 0 else ""
             value = self._text((self.filter + caret) or " ", self._font(32), TEXT)
@@ -2436,15 +2441,14 @@ class App:
             if self.problem.hint:
                 hint = self.problem.hint.format(pick=pick)
             elif len(paths) > 1:
-                hint = ("Set up a game in DoomRunner, ZDL or Doom Launcher so it saves its settings, or install GZDoom "
-                        f"with an IWAD, then reload. Using a portable one that isn't listed? Press {pick} to point CouchDoom at it.")
+                hint = tr("empty.multi_hint", pick=pick)
             else:
-                who = self.problem.launcher or "the launcher"
-                hint = f"If {who} was saving, reload. Otherwise open {who} and check its settings."
+                who = self.problem.launcher or tr("empty.the_launcher")
+                hint = tr("empty.single_hint", who=who)
         else:
-            who = self.opts.launcher or "The launcher"
-            title, detail, paths = "No presets yet", f"{who}'s settings have no presets in them:", [self.opts.path]
-            hint = f"Create presets in {who}, then reload."
+            who = self.opts.launcher or tr("empty.the_launcher_cap")
+            title, detail, paths = tr("empty.no_presets_title"), tr("empty.no_presets_detail", who=who), [self.opts.path]
+            hint = tr("empty.no_presets_hint", who=who)
         width = self.w - 2 * m
         y = self.list_rect.top
         for line in self._wrap(title, self._font(56, bold=True), width, 2):
@@ -2470,7 +2474,7 @@ class App:
     def _draw_list(self, now: float) -> None:
         lr, s = self.list_rect, self.s
         if not self.rows:
-            msg = self._text("No presets match that filter.", self._font(32), MUTED)
+            msg = self._text(tr("empty.filter"), self._font(32), MUTED)
             self.screen.blit(msg, (lr.x, lr.y + int(20 * s)))
             return
 
@@ -2541,11 +2545,11 @@ class App:
             color = TEXT if selected else (MUTED if ok else DIM)
             right_pad = 0
             if row.text == self.state.last_played:
-                tag = self._tracked("Last", 15, self.theme.label if selected else DIM, tracking=0.25)
+                tag = self._tracked(tr("tag.last"), 15, self.theme.label if selected else DIM, tracking=0.25)
                 self.screen.blit(tag, (lr.right - tag.get_width(), self._text_top(self._font(15, bold=True), y + h / 2)))
                 right_pad = tag.get_width() + int(16 * s)
             if not ok:
-                warn = self._tracked("Missing", 15, ERROR, tracking=0.25)
+                warn = self._tracked(tr("tag.missing"), 15, ERROR, tracking=0.25)
                 self.screen.blit(warn, (lr.right - right_pad - warn.get_width(), self._text_top(self._font(15, bold=True), y + h / 2)))
                 right_pad += warn.get_width() + int(16 * s)
             font = sel_font if selected else name_font
@@ -2635,7 +2639,7 @@ class App:
             font = self._font(24)
             issues = cmd.issues[:3]
             surf = pygame.Surface((w, label_gap + len(issues) * int(32 * s)), pygame.SRCALPHA)
-            surf.blit(self._tracked("Problems", 16, ERROR, tracking=0.25), (0, 0))
+            surf.blit(self._tracked(tr("tag.problems"), 16, ERROR, tracking=0.25), (0, 0))
             for n, issue in enumerate(issues):
                 surf.blit(self._text(self._fit(issue, font, w), font, ERROR), (0, label_gap + n * int(32 * s)))
             blocks.append((surf, int(26 * s)))
@@ -2656,24 +2660,22 @@ class App:
         w = dr.width
         presets = self._category_presets(row)
         header: list[tuple[pygame.Surface, int]] = []
-        kind = "FAVORITES" if row.text == FAVORITES else "CATEGORY"
+        kind = tr("header.favorites_kind") if row.group_id == FAVORITES_ID else tr("header.category_kind")
         header.append((self._tracked(kind, 16, self.theme.label, tracking=0.28), int(16 * s)))
         title_font = self._font(60, bold=True)
         title_lines = self._wrap(row.text, title_font, w, 3)
         for n, line in enumerate(title_lines):
             header.append((self._shadowed(line, title_font, TEXT), int(10 * s) if n == len(title_lines) - 1 else int(2 * s)))
 
-        noun = "game" if row.count == 1 else "games"
-        header.append((self._text(f"{row.count} {noun}", self._font(24), MUTED), int(28 * s)))
-        preview_label = self._tracked("IN THIS GROUP", 15, self.theme.label, tracking=0.25)
+        count_label = tr("group.n_games", count=row.count) if row.count == 1 else tr("group.n_games_plural", count=row.count)
+        header.append((self._text(count_label, self._font(24), MUTED), int(28 * s)))
+        preview_label = self._tracked(tr("group.in_this"), 15, self.theme.label, tracking=0.25)
         preview_font = self._font(23)
 
         if self.filter:
-            state_text = "Search keeps matching games visible"
+            state_text = tr("group.search_keeps")
         else:
-            state = "Collapsed" if row.collapsed else "Open"
-            verb = "open" if row.collapsed else "collapse"
-            state_text = f"{state} · choose this category to {verb} it"
+            state_text = tr("group.state_collapsed") if row.collapsed else tr("group.state_open")
         state = self._text(state_text, self._font(20), DIM)
         top = int(54 * s)
         row_h = preview_font.get_linesize() + int(9 * s)
@@ -2695,7 +2697,7 @@ class App:
         if visible:
             blocks.append((preview, int(8 * s)))
         if more:
-            blocks.append((self._text(f"and {more} more", self._font(20), DIM), int(8 * s)))
+            blocks.append((self._text(tr("group.and_more", count=more), self._font(20), DIM), int(8 * s)))
         blocks.append((state, 0))
         panel = pygame.Surface(dr.size, pygame.SRCALPHA)
         y = top
@@ -2711,56 +2713,56 @@ class App:
         pad = self.input.pad_mode
         A = Action
         if self.mode == "browse":
-            toggle = "All files" if not self.file_browser or not self.file_browser.show_all else "Doom files"
+            toggle = tr("hint.all_files") if not self.file_browser or not self.file_browser.show_all else tr("hint.doom_files")
             if pad:
-                return [(("A",), "Open", (A.CONFIRM,)), (("B",), "Back", (A.BACK,)),
+                return [(("A",), tr("hint.open"), (A.CONFIRM,)), (("B",), tr("hint.back"), (A.BACK,)),
                         (("X",), toggle, (A.ALT,))]
-            return [(("KEY:ENTER",), "Open", (A.CONFIRM,)), (("KEY:ESC",), "Back", (A.BACK,)),
+            return [(("KEY:ENTER",), tr("hint.open"), (A.CONFIRM,)), (("KEY:ESC",), tr("hint.back"), (A.BACK,)),
                     (("KEY:TAB",), toggle, (A.ALT,))]
         if self.mode == "launcher":
-            return [(("A",) if pad else ("KEY:ENTER",), "Choose", (A.CONFIRM,)), (("B",) if pad else ("KEY:ESC",), "Close", (A.BACK,))]
+            return [(("A",) if pad else ("KEY:ENTER",), tr("hint.choose"), (A.CONFIRM,)), (("B",) if pad else ("KEY:ESC",), tr("hint.close"), (A.BACK,))]
         if self.mode == "update":
-            return [(("A",) if pad else ("KEY:ENTER",), "Choose", (A.CONFIRM,)), (("B",) if pad else ("KEY:ESC",), "Later", (A.BACK,))]
+            return [(("A",) if pad else ("KEY:ENTER",), tr("hint.choose"), (A.CONFIRM,)), (("B",) if pad else ("KEY:ESC",), tr("hint.later"), (A.BACK,))]
         if self.mode == "menu":
-            return [(("A",) if pad else ("KEY:ENTER",), "Choose", (A.CONFIRM,)),
-                    (("B",) if pad else ("KEY:ESC",), "Close", (A.BACK,))]
+            return [(("A",) if pad else ("KEY:ENTER",), tr("hint.choose"), (A.CONFIRM,)),
+                    (("B",) if pad else ("KEY:ESC",), tr("hint.close"), (A.BACK,))]
         if self.mode == "help":
             if pad:
-                return [(("RS",), "Scroll", ()), (("Y",), "Help & Feedback", (A.SEARCH,)), (("B",), "Close", (A.BACK,))]
-            return [(("KEY:UP", "KEY:DOWN"), "Scroll", (A.UP, A.DOWN)), (("KEY:F5",), "Help & Feedback", (A.ISSUES,)), (("KEY:ESC",), "Close", (A.BACK,))]
+                return [(("RS",), tr("hint.scroll"), ()), (("Y",), tr("hint.help_feedback"), (A.SEARCH,)), (("B",), tr("hint.close"), (A.BACK,))]
+            return [(("KEY:UP", "KEY:DOWN"), tr("hint.scroll"), (A.UP, A.DOWN)), (("KEY:F5",), tr("hint.help_feedback"), (A.ISSUES,)), (("KEY:ESC",), tr("hint.close"), (A.BACK,))]
         if self.blocked:
             picking = self.launchers is not None and self.launchers.must_pick
-            reload = [(("A",) if pad else ("KEY:ENTER",), "Choose" if picking else "Reload", (A.CONFIRM,))]
-            return [*(reload if self.reload else []), (("B",) if pad else ("KEY:ESC",), "Quit", (A.BACK,))]
+            reload = [(("A",) if pad else ("KEY:ENTER",), tr("hint.choose") if picking else tr("hint.reload"), (A.CONFIRM,))]
+            return [*(reload if self.reload else []), (("B",) if pad else ("KEY:ESC",), tr("hint.quit"), (A.BACK,))]
         if self.mode == "search":
             if pad:
-                return [(("A",), "Type", (A.CONFIRM,)), (("X",), "Delete", (A.ALT,)), (("Y",), "Done", (A.SEARCH,)), (("B",), "Cancel", (A.BACK,))]
-            return [(("KEY:A-Z",), "Type", ()), (("KEY:BKSP",), "Delete", (A.ALT,)), (("KEY:ENTER",), "Done", (A.SEARCH,)),
-                    (("KEY:ESC",), "Cancel", (A.BACK,))]
+                return [(("A",), tr("hint.type"), (A.CONFIRM,)), (("X",), tr("hint.delete"), (A.ALT,)), (("Y",), tr("hint.done"), (A.SEARCH,)), (("B",), tr("hint.cancel"), (A.BACK,))]
+            return [(("KEY:A-Z",), tr("hint.type"), ()), (("KEY:BKSP",), tr("hint.delete"), (A.ALT,)), (("KEY:ENTER",), tr("hint.done"), (A.SEARCH,)),
+                    (("KEY:ESC",), tr("hint.cancel"), (A.BACK,))]
         # A prompt shown elsewhere on screen (the sheet's tab glyphs) is not repeated here.
         if self.mode == "info":
             scrolls = self._info_max_scroll() > 0
             if pad:
-                scroll = [(("RS",), "Scroll", ()), (("LT", "RT"), "Page", (A.PAGE_UP, A.PAGE_DOWN))] if scrolls else []
-                return [(("A",), "Play", (A.CONFIRM,)), *scroll, (("B",), "Close", (A.BACK,))]
-            scroll = [(("KEY:UP", "KEY:DOWN"), "Scroll", (A.UP, A.DOWN))] if scrolls else []
-            return [(("KEY:ENTER",), "Play", (A.CONFIRM,)), *scroll, (("KEY:ESC",), "Close", (A.BACK,))]
+                scroll = [(("RS",), tr("hint.scroll"), ()), (("LT", "RT"), tr("hint.page"), (A.PAGE_UP, A.PAGE_DOWN))] if scrolls else []
+                return [(("A",), tr("hint.play"), (A.CONFIRM,)), *scroll, (("B",), tr("hint.close"), (A.BACK,))]
+            scroll = [(("KEY:UP", "KEY:DOWN"), tr("hint.scroll"), (A.UP, A.DOWN))] if scrolls else []
+            return [(("KEY:ENTER",), tr("hint.play"), (A.CONFIRM,)), *scroll, (("KEY:ESC",), tr("hint.close"), (A.BACK,))]
         category_selected = self._category_selected()
-        fav = "Unfavorite" if self.rows and self.opts.presets[self.current].name in self.state.favorites else "Favorite"
+        fav = tr("hint.unfavorite") if self.rows and self.opts.presets[self.current].name in self.state.favorites else tr("hint.favorite")
         section = (A.PREV_SECTION, A.NEXT_SECTION)
-        primary = "Open / Close" if category_selected else "Play"
+        primary = tr("hint.open_close") if category_selected else tr("hint.play")
         if category_selected:
             info_hint = [(('X',) if pad else ('KEY:TAB',), self._bulk_fold_label(), (A.ALT,))]
         else:
-            info_hint = [(('X',) if pad else ('KEY:TAB',), "Info", (A.ALT,))]
+            info_hint = [(('X',) if pad else ('KEY:TAB',), tr("hint.info"), (A.ALT,))]
         favorite_hint = [] if category_selected else [(('R3',) if pad else ('KEY:F3',), fav, (A.FAVORITE,))]
         if pad:
-            return [(("START",), "Menu", (A.MENU,)), (("A",), primary, (A.CONFIRM,)), (("BACK",), "Help", (A.HELP,)), *info_hint, (("Y",), "Search", (A.SEARCH,)),
-                    (("LB", "RB"), "Section", section),
+            return [(("START",), tr("hint.menu"), (A.MENU,)), (("A",), primary, (A.CONFIRM,)), (("BACK",), tr("hint.help"), (A.HELP,)), *info_hint, (("Y",), tr("hint.search"), (A.SEARCH,)),
+                    (("LB", "RB"), tr("hint.section"), section),
                     *favorite_hint]
-        clear = (("KEY:ESC",), "Clear", (A.BACK,)) if self.filter else (("KEY:ESC",), "Menu", (A.MENU,))
-        return [clear, (("KEY:ENTER",), primary, (A.CONFIRM,)), (("KEY:F1",), "Help", (A.HELP,)), *info_hint,
-                (("KEY:LEFT", "KEY:RIGHT"), "Section", section),
+        clear = (("KEY:ESC",), tr("hint.clear"), (A.BACK,)) if self.filter else (("KEY:ESC",), tr("hint.menu"), (A.MENU,))
+        return [clear, (("KEY:ENTER",), primary, (A.CONFIRM,)), (("KEY:F1",), tr("hint.help"), (A.HELP,)), *info_hint,
+                (("KEY:LEFT", "KEY:RIGHT"), tr("hint.section"), section),
                 *([] if category_selected else [(("KEY:F3",), fav, (A.FAVORITE,))])]
 
     def _draw_footer(self) -> None:
@@ -2827,7 +2829,7 @@ class App:
         self.hits.append(Hit(box, lambda: None))
 
         x, y = box.x + pad, box.y + pad
-        self.screen.blit(self._tracked("MENU", 16, self.theme.label, tracking=0.3), (x, y))
+        self.screen.blit(self._tracked(tr("menu.title"), 16, self.theme.label, tracking=0.3), (x, y))
         self.screen.blit(self._text("CouchDoom", self._font(36, bold=True), TEXT), (x, y + int(28 * s)))
         y += head_h
         font = self._font(27)
@@ -2851,20 +2853,21 @@ class App:
                 status.set_alpha(int(255 * max(0.0, 1.0 - age / 2.0)))
                 self.screen.blit(status, (rect.right - status.get_width() - int(22 * s), rect.centery - status.get_height() // 2))
             if key == "music":
-                value = "ON" if self.state.music else "OFF"
+                value = tr("menu.on") if self.state.music else tr("menu.off")
                 badge = self._tracked(value, 14, self.theme.label if self.state.music else MUTED, tracking=0.2)
                 self.screen.blit(badge, (rect.right - badge.get_width() - int(22 * s), rect.centery - badge.get_height() // 2))
             if key == "sounds":
-                value = "ON" if self.state.menu_sounds else "OFF"
+                value = tr("menu.on") if self.state.menu_sounds else tr("menu.off")
                 badge = self._tracked(value, 14, self.theme.label if self.state.menu_sounds else MUTED, tracking=0.2)
                 self.screen.blit(badge, (rect.right - badge.get_width() - int(22 * s), rect.centery - badge.get_height() // 2))
             if key == "recent":
                 enabled = self.state.recent_group
-                value = "ON" if enabled else "OFF"
+                value = tr("menu.on") if enabled else tr("menu.off")
                 badge = self._tracked(value, 14, self.theme.label if enabled else MUTED, tracking=0.2)
                 self.screen.blit(badge, (rect.right - badge.get_width() - int(22 * s), rect.centery - badge.get_height() // 2))
             if key == "colors":
-                current = next((label for palette, label in PALETTES if palette == self._current_palette_key()), "Automatic")
+                palette = self._current_palette_key()
+                current = tr(f"palette.{palette}") if palette else tr("palette.auto")
                 badge = self._tracked(current, 14, self.theme.label, tracking=0.2)
                 self.screen.blit(badge, (rect.right - badge.get_width() - int(22 * s), rect.centery - badge.get_height() // 2))
             if key == "language":
@@ -2889,9 +2892,9 @@ class App:
 
         x, y = box.x + pad, box.y + pad
         inner = box.width - 2 * pad
-        self.screen.blit(self._tracked("Launcher", 16, self.theme.label, tracking=0.3), (x, y))
+        self.screen.blit(self._tracked(tr("picker.heading"), 16, self.theme.label, tracking=0.3), (x, y))
         title_font = self._font(40, bold=True)
-        self.screen.blit(self._text("Where do your presets live?", title_font, TEXT), (x, y + int(28 * s)))
+        self.screen.blit(self._text(tr("picker.title"), title_font, TEXT), (x, y + int(28 * s)))
         y += head_h
 
         current = self.launchers.current if self.launchers else None
@@ -2904,31 +2907,37 @@ class App:
                 pygame.draw.rect(self.screen, self.theme.accent, (rect.x, rect.y + int(10 * s), int(5 * s), rect.height - int(20 * s)))
             self.hits.append(Hit(rect, lambda i=i: self._picker_pick(i), lambda i=i: self._picker_hover(i)))
             if choice is None:
-                name, sub, side, side_color = "Find it myself…", f"Pick a launcher's {PROGRAM} or its settings file", "", MUTED
+                name, sub, side, side_color = tr("picker.find_myself"), tr("picker.find_sub", program=PROGRAM), "", MUTED
             else:
                 result = self.launchers.cached_preview(choice)
                 name, sub = choice.name, str(choice.path)
                 if result is None:
                     side, side_color = "", DIM
                 elif isinstance(result, OptionsError):
-                    side, side_color = "Can't read", ERROR
+                    side, side_color = tr("picker.cant_read"), ERROR
                 else:
                     n = len(result.presets)
-                    side, side_color = (f"{n} preset{'s' if n != 1 else ''}" if n else "No presets"), (MUTED if n else DIM)
+                    if not n:
+                        side = tr("picker.no_presets")
+                    elif n == 1:
+                        side = tr("picker.n_presets", count=n)
+                    else:
+                        side = tr("picker.n_presets_plural", count=n)
+                    side_color = MUTED if n else DIM
             side_surf = self._text(side, side_font, side_color) if side else None
             right = rect.right - int(22 * s)
             if side_surf:
                 self.screen.blit(side_surf, (right - side_surf.get_width(), self._text_top(side_font, rect.y + int(30 * s))))
                 right -= side_surf.get_width() + int(18 * s)
             if current and choice is not None and choice.id == current.id:
-                tag = self._tracked("Current", 15, self.theme.label, tracking=0.25)
+                tag = self._tracked(tr("picker.current"), 15, self.theme.label, tracking=0.25)
                 self.screen.blit(tag, (right - tag.get_width(), self._text_top(self._font(15, bold=True), rect.y + int(30 * s))))
             font = sel_font if selected else name_font
             self.screen.blit(self._text(name, font, TEXT if selected else MUTED), (x, self._text_top(font, rect.y + int(30 * s))))
             self.screen.blit(self._text(self._fit(sub, mono, inner), mono, DIM), (x, rect.y + int(52 * s)))
             y += row_h
 
-        note = f"Not listed? Drag its {PROGRAM} or settings file onto this window."
+        note = tr("picker.not_listed", program=PROGRAM)
         note_font = self._font(21)
         self.screen.blit(self._text(self._fit(note, note_font, inner), note_font, DIM), (x, y + int(18 * s)))
 
@@ -2959,8 +2968,8 @@ class App:
 
         x, y = box.x + pad, box.y + pad
         inner = box.width - 2 * pad
-        self.screen.blit(self._tracked("Find your Doom launcher", 16, self.theme.label, tracking=0.3), (x, y))
-        subtitle = "Choose a drive or home location" if browser.selecting_root else "Choose a file or open a folder"
+        self.screen.blit(self._tracked(tr("browser.title"), 16, self.theme.label, tracking=0.3), (x, y))
+        subtitle = tr("browser.choose_root") if browser.selecting_root else tr("browser.choose_file")
         self.screen.blit(self._text(subtitle, self._font(35, bold=True), TEXT), (x, y + int(26 * s)))
         path_font = self._font(17, mono=True)
         path = self._fit(str(browser.directory), path_font, inner)
@@ -2968,7 +2977,7 @@ class App:
         y += head_h
 
         if not shown:
-            self.screen.blit(self._text("No matching files or folders here", self._font(24), DIM), (x, y + int(12 * s)))
+            self.screen.blit(self._text(tr("browser.empty"), self._font(24), DIM), (x, y + int(12 * s)))
         for offset, entry in enumerate(shown):
             index = self.browser_scroll + offset
             scrollbar = len(browser.entries) > page
@@ -3030,20 +3039,20 @@ class App:
         self.hits.append(Hit(box, lambda: None))
 
         x, y = box.x + pad, box.y + pad
-        self.screen.blit(self._tracked("Update available", 16, self.theme.label, tracking=0.3), (x, y))
-        self.screen.blit(self._text(f"CouchDoom {info.get('version', '')} is out", self._font(40, bold=True), TEXT), (x, y + int(28 * s)))
-        self.screen.blit(self._text(f"You're on {info.get('current', __version__)}", self._font(22), MUTED), (x, y + int(80 * s)))
+        self.screen.blit(self._tracked(tr("update.heading"), 16, self.theme.label, tracking=0.3), (x, y))
+        self.screen.blit(self._text(tr("update.out", version=info.get("version", "")), self._font(40, bold=True), TEXT), (x, y + int(28 * s)))
+        self.screen.blit(self._text(tr("update.youre_on", current=info.get("current", __version__)), self._font(22), MUTED), (x, y + int(80 * s)))
         y += head_h
 
         if notes:
-            self.screen.blit(self._tracked("What's new", 15, self.theme.label, tracking=0.25), (x, y))
+            self.screen.blit(self._tracked(tr("update.whats_new"), 15, self.theme.label, tracking=0.25), (x, y))
             y += int(34 * s)
             for line in notes:
                 self.screen.blit(self._text(line, notes_font, MUTED), (x, y))
                 y += int(32 * s)
             if info.get("more_notes"):
                 more_font = self._font(18)
-                self.screen.blit(self._text("More changes on the release page.", more_font, self.theme.label), (x, y))
+                self.screen.blit(self._text(tr("update.more_notes"), more_font, self.theme.label), (x, y))
                 y += int(28 * s)
 
         name_font, sel_font, sub_font = self._font(31), self._font(31, bold=True), self._font(21)
@@ -3052,7 +3061,8 @@ class App:
             y += int(28 * s)
         elif downloading:
             done, total = self.update_progress
-            progress = f"Downloading update: {done // 1024} KB" + (f" / {total // 1024} KB" if total else "")
+            kb = done // 1024
+            progress = tr("update.downloading_of", done=kb, total=total // 1024) if total else tr("update.downloading", done=kb)
             self.screen.blit(self._text(self._fit(progress, self._font(20), inner), self._font(20), MUTED), (x, y))
             y += int(28 * s)
         for i, (_, name, sub) in enumerate(choices):
@@ -3064,7 +3074,7 @@ class App:
             if not downloading or choices[i][0] == "install":
                 self.hits.append(Hit(rect, lambda i=i: self._update_pick(i), lambda i=i: self._update_hover(i)))
             font = sel_font if selected else name_font
-            label = ("Cancel download" if downloading and choices[i][0] == "install" else name)
+            label = (tr("update.cancel_download") if downloading and choices[i][0] == "install" else name)
             self.screen.blit(self._text(label, font, TEXT if selected else MUTED), (x, self._text_top(font, rect.y + int(26 * s))))
             sub = sub.replace("{v}", str(info.get("version", "")))
             self.screen.blit(self._text(self._fit(sub, sub_font, inner), sub_font, DIM), (x, rect.y + int(52 * s)))
@@ -3073,7 +3083,7 @@ class App:
     def _help_rows(self, width: int) -> list[tuple[str, bool]]:
         body_font = self._font(21)
         rows: list[tuple[str, bool]] = []
-        for heading, paragraph in HELP_SECTIONS:
+        for heading, paragraph in help_sections():
             rows.append((heading, True))
             rows.extend((line, False) for line in self._wrap(paragraph, body_font, width, 100))
             rows.append(("", False))
@@ -3114,10 +3124,10 @@ class App:
         self.hits.append(Hit(box, lambda: None))
 
         x, y = box.x + int(38 * s), box.y + int(28 * s)
-        self.screen.blit(self._tracked("COUCHDOOM GUIDE", 16, self.theme.label, tracking=0.3), (x, y))
-        self.screen.blit(self._text("How to use CouchDoom", self._font(40, bold=True), TEXT), (x, y + int(28 * s)))
-        self.screen.blit(self._text("Finding games, picking favorites, and more", self._font(21), MUTED), (x, y + int(80 * s)))
-        report = self._tracked("HELP & FEEDBACK", 15, TEXT, tracking=0.2)
+        self.screen.blit(self._tracked(tr("help.guide"), 16, self.theme.label, tracking=0.3), (x, y))
+        self.screen.blit(self._text(tr("help.how_to"), self._font(40, bold=True), TEXT), (x, y + int(28 * s)))
+        self.screen.blit(self._text(tr("help.subtitle"), self._font(21), MUTED), (x, y + int(80 * s)))
+        report = self._tracked(tr("help.feedback"), 15, TEXT, tracking=0.2)
         report_rect = pygame.Rect(box.right - int(38 * s) - report.get_width() - int(26 * s), y + int(78 * s), report.get_width() + int(26 * s), int(38 * s))
         pygame.draw.rect(self.screen, self.theme.accent, report_rect, border_radius=int(8 * s))
         self.screen.blit(report, (report_rect.centerx - report.get_width() // 2, report_rect.centery - report.get_height() // 2))
@@ -3313,7 +3323,7 @@ class App:
             x += left.get_width() + int(22 * s)
         tab_font = self._font(20, bold=True)
         for i in tabs:
-            name = INFO_TABS[i]
+            name = info_tabs()[i]
             active = i == self.info_tab
             label = self._tracked(name, 20, TEXT if active else DIM, tracking=0.22)
             sheet.blit(label, (x, self._text_top(tab_font, tab_cy)))

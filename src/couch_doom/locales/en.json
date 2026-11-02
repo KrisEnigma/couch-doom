@@ -27,6 +27,10 @@
   "group.open": "Open",
   "group.search_keeps": "Search keeps matching games visible",
   "group.and_more": "and {count} more",
+  "group.n_games": "{count} game",
+  "group.n_games_plural": "{count} games",
+  "group.state_collapsed": "Collapsed · choose this category to open it",
+  "group.state_open": "Open · choose this category to collapse it",
 
   "hint.play": "Play",
   "hint.menu": "Menu",
@@ -114,6 +118,14 @@
   "header.favorites_kind": "FAVORITES",
   "header.category_kind": "CATEGORY",
   "header.loading": "LOADING   {name}",
+  "header.presets": "presets",
+  "header.matching": "matching",
+  "tag.last": "Last",
+  "tag.missing": "Missing",
+  "tag.problems": "Problems",
+
+  "picker.heading": "Launcher",
+  "picker.current": "Current",
 
   "info.readme": "Readme",
   "info.endoom": "ENDOOM",

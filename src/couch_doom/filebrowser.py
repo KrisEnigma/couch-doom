@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Collection
 
+from .i18n import t as tr
+
 
 @dataclass(frozen=True)
 class Entry:
@@ -21,11 +23,11 @@ class Entry:
     def display_name(self) -> str:
         if self.parent_selector:
             if self.location_selector:
-                return "< Drives & Home >"
-            return "< Parent directory >"
+                return tr("browser.drives_home")
+            return tr("browser.parent")
         if self.root_selector:
             if self.path == Path.home():
-                return f"Home - {self.path}"
+                return tr("browser.home", path=self.path)
             return str(self.path)
         return self.path.name + ("/" if self.is_dir else "")
 
