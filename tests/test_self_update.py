@@ -4,6 +4,7 @@ import hashlib
 import io
 import os
 import json
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -451,7 +452,7 @@ class InstallFlowTests(unittest.TestCase):
         app = ui.App.__new__(ui.App)
         app.update_install_job, app.update_cancel, app.update_job = job, None, None
         app.update = {"version": "1.2.0", "asset": SimpleNamespace(target="windows-x64")}
-        app.restarting, app.quit_at = False, None
+        app.running, app.quit_at = True, None
         app.ignore_until = 0.0
         no_copy = AssertionError("file copying belongs on the worker thread")
         with patch.object(self_update.shutil, "copytree", side_effect=no_copy), \
@@ -462,8 +463,36 @@ class InstallFlowTests(unittest.TestCase):
         launch.assert_called_once()
         self.assertIs(launch.call_args.args[0], staged)
         self.assertEqual(launch.call_args.args[4].name, self_update.RESULT_FILE)
-        self.assertTrue(app.restarting)
-        self.assertGreater(app.quit_at, 100.0)
+        self.assertFalse(app.running)  # closes at once: the helper is waiting on this process
+
+    @unittest.skipUnless(os.name == "nt", "Windows process handles")
+    def test_waiting_for_exit_leaves_a_running_process_alone(self):
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            with self.assertRaises(self_update.UpdateError):
+                self_update._wait_for_exit(child.pid, timeout=0.3)
+            self.assertIsNone(child.poll())  # os.kill(pid, 0) would have terminated it here
+        finally:
+            child.kill()
+            child.wait()
+        self_update._wait_for_exit(child.pid, timeout=1)
+
+    def test_rename_retries_while_the_folder_is_busy(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source, destination = Path(temp) / "CouchDoom", Path(temp) / ".CouchDoom.old-1"
+            source.mkdir()
+            real, calls = Path.rename, []
+
+            def flaky(path, target):
+                calls.append(path)
+                if len(calls) < 3:
+                    raise PermissionError(32, "in use")
+                return real(path, target)
+
+            with patch.object(Path, "rename", flaky), patch.object(self_update.time, "sleep"):
+                self_update._rename_when_free(source, destination)
+            self.assertEqual(len(calls), 3)
+            self.assertTrue(destination.is_dir())
 
 
 class ResultFileTests(unittest.TestCase):

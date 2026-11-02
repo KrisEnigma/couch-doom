@@ -21,8 +21,8 @@ def write_manifest(archive_path: Path, output_dir: Path, *, target: str | None =
         raise ValueError("Could not map this OS/arch to a CouchDoom release target.")
     if not archive_path.is_file():
         raise ValueError("Pass a CouchDoom release archive (.zip or .tar.gz).")
-    suffix = "".join(archive_path.suffixes)
-    if suffix not in (".zip", ".tar.gz"):
+    suffix = next((s for s in (".zip", ".tar.gz") if archive_path.name.endswith(s)), None)  # names carry dotted versions
+    if suffix is None:
         raise ValueError("Archive must be a .zip or .tar.gz.")
     output_dir.mkdir(parents=True, exist_ok=True)
     name = f"CouchDoom-v{version}-{target}{suffix}"

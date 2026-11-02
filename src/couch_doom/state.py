@@ -26,6 +26,8 @@ class State:
         self.language_source = "auto"  # "auto" (detected from the OS) or "menu" (picked by the player)
         self.update_check = True  # set false in the file to never contact GitHub
         self.update_skip: str | None = None  # a release the player said not to be reminded about
+        self.seen_version: str | None = None  # the last CouchDoom version that ran with this file
+        self.returning = False  # a settings file already existed: not a first run
         self._load()
 
     def _load(self) -> None:
@@ -39,6 +41,7 @@ class State:
             unreadable = True
         if not isinstance(data, dict):
             data, unreadable = {}, True
+        self.returning = bool(data) or unreadable
         if data:
             self.last_played = data.get("last_played")
             self.history = list(data.get("history") or [])
@@ -54,6 +57,8 @@ class State:
             self.update_check = bool(data.get("update_check", True))
             skip = data.get("update_skip")
             self.update_skip = skip if isinstance(skip, str) else None
+            seen = data.get("seen_version")
+            self.seen_version = seen if isinstance(seen, str) else None
         lang = data.get("language")
         source = data.get("language_source")
         if source in ("auto", "menu"):
@@ -74,6 +79,10 @@ class State:
 
     def skip_update(self, version: str) -> None:
         self.update_skip = version
+        self._save()
+
+    def set_seen_version(self, version: str) -> None:
+        self.seen_version = version
         self._save()
 
     def record(self, preset_name: str) -> None:
@@ -136,6 +145,7 @@ class State:
             "language_source": self.language_source,
             "update_check": self.update_check,
             "update_skip": self.update_skip,
+            "seen_version": self.seen_version,
         }
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)

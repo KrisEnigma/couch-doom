@@ -21,6 +21,7 @@ import pygame
 from . import __version__, draw, easter_eggs
 from . import update as updates
 from . import self_update
+from . import whats_new
 from . import config
 from .config import ASSET_DIR
 from . import handover, asset_cache
@@ -84,7 +85,6 @@ HELP_SECTION_COUNT = 9
 ISSUE_URL = "https://github.com/KrisEnigma/couch-doom/issues"
 UPDATE_DELAY_SECONDS = 1.0  # let the list settle briefly before a notice appears over it
 UPDATE_VERIFY_HOLD_SECONDS = 0.4
-UPDATE_RESTART_HOLD_SECONDS = 0.6
 
 
 def info_tabs() -> tuple[str, str]:
@@ -467,7 +467,11 @@ class App:
         self.update_cancel: threading.Event | None = None
         self.update_progress: tuple[str, int, int | None] = ("checking", 0, None)  # see self_update.PHASES
         self.update_error: str | None = None
-        self.restarting = False  # the restart screen holds until quit_at
+        # After an update, the notes for every release since the last one that ran: {"version", "previous", "sections"}.
+        self.whats_new = whats_new.pending(state.seen_version, state.returning, __version__)
+        self.whats_new_opened = 0.0
+        if state.seen_version != __version__:
+            state.set_seen_version(__version__)
         self.soundfont_choice = soundfont
         self._engine_soundfonts: dict[tuple, Path | None] = {}
 
@@ -673,6 +677,22 @@ class App:
             return
         self._choose(choice)
 
+    # ---------- what's new after an update ----------
+
+    def _poll_whats_new(self, now: float) -> None:
+        """Open once the list is showing, so the launcher picker or a problem screen comes first."""
+        if not self.whats_new or self.mode != "list":
+            return
+        if self.blocked or now < self.ignore_until:
+            return
+        self.whats_new_opened = now
+        self.mode = "whatsnew"
+        self._sound("open")
+
+    def _close_whats_new(self) -> None:
+        self.whats_new = None
+        self._close_overlay()
+
     # ---------- update notice ----------
 
     def _open_update(self, info: dict) -> None:
@@ -784,7 +804,7 @@ class App:
                 install_path = self_update.installation_path(Path(sys.executable), info["asset"].target)
                 self_update.launch_apply_helper(staged, install_path, os.getpid(), info["asset"].target,
                                                 config.STATE_DIR / self_update.RESULT_FILE)
-                self._begin_restart(now)
+                self.running = False  # the helper waits for this window to close, then starts the new version
             except Exception as exc:
                 if staged:
                     self_update.discard_staged(staged)
@@ -806,16 +826,13 @@ class App:
         if info:
             self._open_update(info)
 
-    def _begin_restart(self, now: float) -> None:
-        """Say what's about to happen: the window closes and the desktop shows while the helper swaps folders."""
-        self.restarting = True
-        self.quit_at = self.ignore_until = now + UPDATE_RESTART_HOLD_SECONDS
-
     def _report_update_result(self) -> None:
         result = self_update.take_result(config.STATE_DIR / self_update.RESULT_FILE)
         if result is None:
             return
         if result["ok"]:
+            if self.whats_new:
+                return  # the What's new screen already says which version this is
             self.toast = Toast(tr("toast.updated", version=__version__), self.theme.label, time.monotonic(), ttl=6.0)
         else:
             log.write("update failed", str(result.get("error", "")))
@@ -1846,6 +1863,10 @@ class App:
         if self.mode == "launcher":
             self._on_picker_action(Action.BACK if action == Action.MENU else action, repeat=repeat)
             return
+        if self.mode == "whatsnew":
+            if action in (Action.CONFIRM, Action.BACK, Action.MENU):
+                self._close_whats_new()
+            return
         if self.mode == "update":
             self._on_update_action(Action.BACK if action == Action.MENU else action)
             return
@@ -2764,9 +2785,6 @@ class App:
     def _draw(self, now: float) -> None:
         self.hits = []
         self.scrollbars = {}
-        if self.restarting:
-            self._draw_restarting()
-            return
         self.glyphs.family = self.input.family
         self._update_theme(now)
         self._blit_layer("bg")
@@ -2793,6 +2811,8 @@ class App:
             self._draw_browser(now)
         elif self.mode == "update":
             self._draw_update(now)
+        elif self.mode == "whatsnew":
+            self._draw_whats_new(now)
         self._draw_toast(now)
 
     def _draw_header(self) -> None:
@@ -3147,6 +3167,8 @@ class App:
                     (("B",) if pad else ("KEY:ESC",), tr("hint.back"), (A.BACK,)), *toggle]
         if self.mode == "launcher":
             return [(("A",) if pad else ("KEY:ENTER",), tr("hint.choose"), (A.CONFIRM,)), (("B",) if pad else ("KEY:ESC",), tr("hint.close"), (A.BACK,))]
+        if self.mode == "whatsnew":
+            return [(("A",) if pad else ("KEY:ENTER",), tr("hint.continue"), (A.CONFIRM,))]
         if self.mode == "update":
             if self.update_install_job is not None:
                 return [(("B",) if pad else ("KEY:ESC",), tr("hint.cancel"), (A.BACK,))] if self._update_cancellable() else []
@@ -3476,18 +3498,6 @@ class App:
             return tr("update.unpacking", done=done, total=total), done / total
         return tr({"verifying": "update.verifying", "preparing": "update.preparing"}.get(phase, "update.checking")), None
 
-    def _draw_restarting(self) -> None:
-        s = self.s
-        self._blit_layer("bg")
-        cx, cy = self.w // 2, self.h // 2
-        title = self._text(tr("update.restarting"), self._font(52, bold=True), TEXT)
-        sub = self._text(tr("update.restarting_sub"), self._font(28), MUTED)
-        stripe = pygame.Rect(0, 0, int(150 * s), int(7 * s))
-        stripe.midbottom = (cx, cy - title.get_height() - int(18 * s))
-        pygame.draw.rect(self.screen, self.theme.accent, stripe)
-        self.screen.blit(title, title.get_rect(midbottom=(cx, cy)))
-        self.screen.blit(sub, sub.get_rect(midtop=(cx, cy + int(12 * s))))
-
     def _draw_update(self, now: float) -> None:
         s = self.s
         info = self.update or {}
@@ -3567,6 +3577,77 @@ class App:
             sub = sub.replace("{v}", str(info.get("version", "")))
             self.screen.blit(self._text(self._fit(sub, sub_font, inner), sub_font, MUTED), (x, rect.y + int(52 * s)))
             y += row_h
+
+    def _draw_whats_new(self, now: float) -> None:
+        s = self.s
+        info = self.whats_new or {}
+        sections = info.get("sections", [])
+        t = _ease_out((now - self.whats_new_opened) / 0.25)
+        pad, head_h, row_h = int(34 * s), int(112 * s), int(84 * s)
+        label_h, line_h, gap_h, more_h = int(34 * s), int(32 * s), int(14 * s), int(28 * s)
+        width = min(self.w - 2 * self.margin, int(980 * s))
+        inner = width - 2 * pad
+        notes_font = self._font(23)
+
+        # Newest release first; whatever doesn't fit the screen is left to CHANGELOG.txt rather than scrolled.
+        room = self.h - self.footer_h - 2 * self.margin - 2 * pad - head_h - row_h - more_h
+        labelled = len(sections) > 1
+        rows: list[tuple[str, str]] = []  # ("label" | "note" | "gap", text)
+        used = hidden = 0
+        for version, notes in sections:
+            block: list[tuple[str, str]] = [("label", tr("whats_new.version", version=version))] if labelled else []
+            block_h = label_h if labelled else 0
+            for note in notes:
+                wrapped = self._wrap(note, notes_font, inner - int(26 * s), 2)
+                lines = [("note", ("•  " if i == 0 else "    ") + line) for i, line in enumerate(wrapped)]
+                if hidden or used + block_h + len(lines) * line_h > room:
+                    hidden += 1
+                    continue
+                block += lines
+                block_h += len(lines) * line_h
+            if any(kind == "note" for kind, _ in block):
+                rows += [*block, ("gap", "")]
+                used += block_h + gap_h
+        if rows and rows[-1][0] == "gap":
+            rows.pop()
+            used -= gap_h
+
+        box_h = 2 * pad + head_h + used + (more_h if hidden else 0) + gap_h + row_h
+        box = pygame.Rect(0, 0, width, box_h)
+        box.center = (self.w // 2, (self.h - self.footer_h) // 2 + int(24 * s * (1 - t)))
+        shade = self._dim_backdrop(int(150 * t))
+        self.screen.blit(draw.rounded_rect(box.width, box.height, 18 * s, (*PANEL, 248), (78, 62, 55), 1.5 * s), box)
+        self.hits.append(Hit(shade, self._close_whats_new))
+        self.hits.append(Hit(box, lambda: None))
+
+        x, y = box.x + pad, box.y + pad
+        self.screen.blit(self._text(tr("whats_new.title", version=info.get("version", "")), self._font(40, bold=True), TEXT), (x, y))
+        previous = info.get("previous")
+        sub = tr("whats_new.from", previous=previous) if previous else tr("whats_new.updated")
+        self.screen.blit(self._text(sub, self._font(22), MUTED), (x, y + int(52 * s)))
+        y += head_h
+
+        for kind, text in rows:
+            if kind == "label":
+                self.screen.blit(self._tracked(text, 15, self.theme.label, tracking=0.25), (x, y))
+                y += label_h
+            elif kind == "note":
+                self.screen.blit(self._text(text, notes_font, MUTED), (x, y))
+                y += line_h
+            else:
+                y += gap_h
+        if hidden:
+            more_font = self._font(18)
+            self.screen.blit(self._text(tr("whats_new.more"), more_font, self.theme.label), (x, y + int(8 * s)))
+            y += more_h
+        y += gap_h
+
+        rect = pygame.Rect(box.x + int(12 * s), y, box.width - int(24 * s), row_h - int(6 * s))
+        self.screen.blit(draw.rounded_rect(rect.width, rect.height, 10 * s, (255, 255, 255, 16)), rect)
+        pygame.draw.rect(self.screen, self.theme.accent, (rect.x, rect.y + int(10 * s), int(5 * s), rect.height - int(20 * s)))
+        self.hits.append(Hit(rect, self._close_whats_new))
+        font = self._font(31, bold=True)
+        self.screen.blit(self._text(tr("whats_new.continue"), font, TEXT), (x, self._text_top(font, rect.centery)))
 
     def _help_rows(self, width: int) -> list[tuple[str, bool]]:
         body_font = self._font(21)
@@ -3945,6 +4026,7 @@ class App:
         return 0
 
     def tick(self, now: float, dt: float) -> None:
+        self._poll_whats_new(now)
         self._poll_update(now)
         self._update_art(now)
         self._update_music(now)

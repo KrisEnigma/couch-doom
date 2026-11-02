@@ -323,6 +323,21 @@ def take_result(path: Path) -> dict | None:
 
 
 def _wait_for_exit(pid: int, timeout: float = 120) -> None:
+    if os.name == "nt":
+        # os.kill(pid, 0) is TerminateProcess on Windows: it would end CouchDoom mid-exit, not check on it.
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+        if not handle:
+            return  # already gone
+        try:
+            if kernel32.WaitForSingleObject(ctypes.c_void_p(handle), int(timeout * 1000)) != 0:
+                raise UpdateError("CouchDoom did not exit in time to apply the update.")
+        finally:
+            kernel32.CloseHandle(ctypes.c_void_p(handle))
+        return
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
@@ -331,6 +346,19 @@ def _wait_for_exit(pid: int, timeout: float = 120) -> None:
             return
         time.sleep(0.2)
     raise UpdateError("CouchDoom did not exit in time to apply the update.")
+
+
+def _rename_when_free(source: Path, destination: Path, timeout: float = 10) -> None:
+    """Windows keeps a just-exited program's files busy for a moment, and antivirus may scan them; retry briefly."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            source.rename(destination)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.25)
 
 
 def _relaunch(install_path: Path, platform: str) -> None:
@@ -372,7 +400,7 @@ def apply_staged_update(staged_app: Path, install_path: Path, *, pid: int, platf
                     if destination.exists():
                         shutil.rmtree(destination) if destination.is_dir() else destination.unlink()
                     shutil.copytree(source, destination) if source.is_dir() else shutil.copy2(source, destination)
-        install_path.rename(backup)
+        _rename_when_free(install_path, backup)
         try:
             shutil.move(str(staged_app), str(install_path))
             moved_new = True

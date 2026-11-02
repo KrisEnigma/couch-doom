@@ -49,6 +49,8 @@ def _user_data_dir() -> Path:
 
 # The app bundle can't hold state: Gatekeeper may run a downloaded app from a read-only, randomized copy.
 DATA_DIR = PROJECT_ROOT if (FROZEN and not APP_BUNDLE) or SOURCE_TREE else _user_data_dir()
+if override := os.environ.get("COUCHDOOM_DATA_DIR"):
+    DATA_DIR = Path(override)  # a throwaway settings folder, for trying first-run and after-update screens
 # The author's own launcher folder, searched only when running from source; a release must not list it.
 DEV_LAUNCHERS = Path(r"D:\Standalone\UZDoom") if SOURCE_TREE and os.name == "nt" else None
 DEFAULT_OPTIONS = Path(r"D:\Standalone\UZDoom\DoomRunner\options.json")

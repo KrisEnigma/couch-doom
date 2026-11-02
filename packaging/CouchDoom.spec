@@ -19,6 +19,7 @@ mac = sys.platform == "darwin"
 datas = [
     (str(root / "src" / "couch_doom" / "assets"), "assets"),
     (str(root / "src" / "couch_doom" / "locales"), "locales"),
+    (str(root / "CHANGELOG.md"), "."),  # the after-update "What's new" screen reads every release's notes
     *tsf_datas,
     *certifi_datas,
 ]

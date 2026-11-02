@@ -5,6 +5,8 @@ Each release's notes on GitHub are its own section below, behind the download in
 **New in 1.2.3**
 
 - Games added through a DoomRunner .dmb bundle now show their readme, and a readme you add later shows up without clearing anything.
+- After an update, a What's new screen lists every change since the version you had, even if you skipped a few releases.
+- Updates on Windows install reliably, and CouchDoom closes straight away instead of showing a restart screen.
 - The first launch after updating rescans title art and music once, so it can take a little longer than usual.
 
 **New in 1.2.2**
