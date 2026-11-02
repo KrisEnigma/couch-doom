@@ -1,9 +1,14 @@
 """The launcher-neutral model every source (DoomRunner, ZDL, ...) is read into."""
 from __future__ import annotations
 
+import shutil
+import threading
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# The cache warmer and a launch can unpack the same preset at once; both would write the same .part file.
+_unpack_lock = threading.Lock()
 
 
 @dataclass
@@ -39,18 +44,20 @@ class Preset:
 
 def unpack(preset: Preset) -> str | None:
     """Extract the preset's archive members if they aren't already; returns an error message on failure."""
-    for archive, member, dest in preset.unpack:
-        try:
-            if dest.is_file() and dest.stat().st_mtime >= archive.stat().st_mtime:
-                continue
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            with zipfile.ZipFile(archive) as zf, zf.open(member) as src:
+    with _unpack_lock:
+        for archive, member, dest in preset.unpack:
+            try:
+                if dest.is_file() and dest.stat().st_mtime >= archive.stat().st_mtime:
+                    continue
+                dest.parent.mkdir(parents=True, exist_ok=True)
                 tmp = dest.with_suffix(dest.suffix + ".part")
-                tmp.write_bytes(src.read())
+                # Stream: members can be hundreds of MB, and reading one whole would hold it all in memory.
+                with zipfile.ZipFile(archive) as zf, zf.open(member) as src, tmp.open("wb") as out:
+                    shutil.copyfileobj(src, out, 1024 * 1024)
                 tmp.replace(dest)
-        except (OSError, KeyError, zipfile.BadZipFile) as exc:
-            return f"Couldn't unpack {Path(member).name} from {archive.name}: {exc}"
-    return None
+            except (OSError, KeyError, zipfile.BadZipFile) as exc:
+                return f"Couldn't unpack {Path(member).name} from {archive.name}: {exc}"
+        return None
 
 
 @dataclass

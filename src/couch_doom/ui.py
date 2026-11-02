@@ -503,6 +503,10 @@ class App:
         self._theme_bgs: OrderedDict[int, pygame.Surface] = OrderedDict()
         self._theme_bars: OrderedDict[int, pygame.Surface] = OrderedDict()
         self._theme_layers: OrderedDict[int, dict] = OrderedDict()
+        self._footer_band: pygame.Surface | None = None
+        self._warm_generation = 0  # bumped per cache-warming pass; older workers stop when it moves on
+        self._warm_allowed = threading.Event()  # cleared while a game runs
+        self._warm_allowed.set()
 
         self.rows: list[Row] = []
         self.collapsed_sections: set[str] = set()
@@ -1566,9 +1570,9 @@ class App:
         return [self.rows[rows[p]].preset for p in (pos - 1, pos + 1) if 0 <= p < len(rows)]
 
     def _warm_cache(self) -> None:
+        self._warm_generation += 1
+        generation = self._warm_generation
         try:
-            import threading
-
             def worker():
                 try:
                     lower_current_thread_priority()
@@ -1595,15 +1599,20 @@ class App:
                             if 0 <= np < len(rows) and np not in seen:
                                 seen.add(np)
                                 q.append(np)
-                    for p in order:
+                    # Snapshot now: rows are rebuilt by search and folding, and a reload swaps opts underneath us.
+                    # Visible presets go first; folded or filtered ones still count, or their caches look stale.
+                    opts = self.opts
+                    targets = list(dict.fromkeys(self.rows[rows[p]].preset for p in order))
+                    visible = set(targets)
+                    targets += [i for i in range(len(opts.presets)) if i not in visible]
+                    completed = True
+                    for idx in targets:
+                        self._warm_allowed.wait()  # paused while a game runs, so it can have the disk and CPU
+                        if not self.running or self._warm_generation != generation:
+                            completed = False
+                            break
                         try:
-                            if getattr(self, "running", True) is False:
-                                break
-                        except Exception:
-                            pass
-                        idx = self.rows[rows[p]].preset
-                        try:
-                            preset = self.opts.presets[idx]
+                            preset = opts.presets[idx]
                             unpack(preset)
                             files = load_order(preset)
                             iwad, shown = presented_files(preset)
@@ -1619,7 +1628,10 @@ class App:
                             _load_extras(preset)
                         except Exception:
                             continue
+                    if not completed:
+                        return  # a partial pass would mistake every unvisited preset for a removed one
                     try:
+                        from . import music_cache
                         asset_cache.prune()
                         asset_cache.invalidate_missing(set(present_keys))
                         music_cache.invalidate_selections(set(music_keys))
@@ -2150,9 +2162,11 @@ class App:
         if self.music:
             self.music.stop(int(LAUNCH_WIPE_SECONDS * 1000))
         self._play_wipe(preset.name)
+        self._warm_allowed.clear()
         try:
             proc = spawn(cmd.argv, cmd.cwd, cmd.env, preset.name, cmd.display())
         except OSError as exc:
+            self._warm_allowed.set()
             self._notify(tr("toast.could_not_start", exc=exc), ERROR)
             self._sound("error")
             return
@@ -2172,6 +2186,7 @@ class App:
                 code, elapsed = proc.wait()
             except OSError:
                 pass
+        self._warm_allowed.set()
 
         # Recreate our window first: audio and pads can take a moment, and every one of those milliseconds is
         # desktop showing through after the engine has already torn its own window down.
@@ -2798,12 +2813,25 @@ class App:
                 (("KEY:LEFT", "KEY:RIGHT"), tr("hint.section"), section),
                 *([] if category_selected else [(("KEY:F3",), fav, (A.FAVORITE,))])]
 
+    def _dim_backdrop(self, alpha: int) -> pygame.Rect:
+        """Darken everything above the footer as black at `alpha` would, in place.
+
+        Multiplying by (255 - alpha) gives the same pixels as blending a black overlay, without allocating
+        and blending a full-screen alpha surface every frame (about 8 ms per frame at 4K).
+        """
+        area = pygame.Rect(0, 0, self.w, self.h - self.footer_h)
+        k = 255 - max(0, min(255, alpha))
+        self.screen.fill((k, k, k), area, special_flags=pygame.BLEND_MULT)
+        return area
+
     def _draw_footer(self) -> None:
         s = self.s
         top = self.h - self.footer_h
-        band = pygame.Surface((self.w, self.footer_h), pygame.SRCALPHA)
-        band.fill((8, 6, 5, 150))
-        pygame.draw.line(band, (255, 255, 255, 14), (0, 0), (self.w, 0))
+        band = self._footer_band
+        if band is None or band.get_size() != (self.w, self.footer_h):
+            band = self._footer_band = pygame.Surface((self.w, self.footer_h), pygame.SRCALPHA)
+            band.fill((8, 6, 5, 150))
+            pygame.draw.line(band, (255, 255, 255, 14), (0, 0), (self.w, 0))
         self.screen.blit(band, (0, top))
 
         cy = top + self.footer_h // 2
@@ -2854,11 +2882,9 @@ class App:
         box = pygame.Rect(0, 0, width, height)
         box.center = (self.w // 2, (self.h - self.footer_h) // 2 + int(18 * s * (1 - t)))
 
-        shade = pygame.Surface((self.w, self.h - self.footer_h), pygame.SRCALPHA)
-        shade.fill((0, 0, 0, int(155 * t)))
-        self.screen.blit(shade, (0, 0))
+        shade = self._dim_backdrop(int(155 * t))
         self.screen.blit(draw.rounded_rect(box.width, box.height, 18 * s, (*PANEL, 250), (78, 62, 55), 1.5 * s), box)
-        self.hits.append(Hit(shade.get_rect(), self._act(Action.BACK)))
+        self.hits.append(Hit(shade, self._act(Action.BACK)))
         self.hits.append(Hit(box, lambda: None))
 
         x, y = box.x + pad, box.y + pad
@@ -2916,11 +2942,9 @@ class App:
         box = pygame.Rect(0, 0, width, 2 * pad + head_h + len(self.picker) * row_h + note_h)
         box.center = (self.w // 2, (self.h - self.footer_h) // 2 + int(24 * s * (1 - t)))
 
-        shade = pygame.Surface((self.w, self.h - self.footer_h), pygame.SRCALPHA)
-        shade.fill((0, 0, 0, int(150 * t)))
-        self.screen.blit(shade, (0, 0))
+        shade = self._dim_backdrop(int(150 * t))
         self.screen.blit(draw.rounded_rect(box.width, box.height, 18 * s, (*PANEL, 248), (78, 62, 55), 1.5 * s), box)
-        self.hits.append(Hit(shade.get_rect(), self._act(Action.BACK)))
+        self.hits.append(Hit(shade, self._act(Action.BACK)))
         self.hits.append(Hit(box, lambda: None))
 
         x, y = box.x + pad, box.y + pad
@@ -2992,11 +3016,9 @@ class App:
         height = min(self.h - self.footer_h - int(32 * s), 2 * pad + head_h + max(1, len(shown)) * row_h)
         box = pygame.Rect(0, 0, width, height)
         box.center = (self.w // 2, (self.h - self.footer_h) // 2)
-        shade = pygame.Surface((self.w, self.h - self.footer_h), pygame.SRCALPHA)
-        shade.fill((0, 0, 0, 155))
-        self.screen.blit(shade, (0, 0))
+        shade = self._dim_backdrop(155)
         self.screen.blit(draw.rounded_rect(box.width, box.height, 18 * s, (*PANEL, 250), (78, 62, 55), 1.5 * s), box)
-        self.hits.append(Hit(shade.get_rect(), self._act(Action.BACK)))
+        self.hits.append(Hit(shade, self._act(Action.BACK)))
         self.hits.append(Hit(box, lambda: None))
 
         x, y = box.x + pad, box.y + pad
@@ -3063,12 +3085,10 @@ class App:
         box = pygame.Rect(0, 0, width, 2 * pad + head_h + notes_h + status_h + len(choices) * row_h)
         box.center = (self.w // 2, (self.h - self.footer_h) // 2 + int(24 * s * (1 - t)))
 
-        shade = pygame.Surface((self.w, self.h - self.footer_h), pygame.SRCALPHA)
-        shade.fill((0, 0, 0, int(150 * t)))
-        self.screen.blit(shade, (0, 0))
+        shade = self._dim_backdrop(int(150 * t))
         self.screen.blit(draw.rounded_rect(box.width, box.height, 18 * s, (*PANEL, 248), (78, 62, 55), 1.5 * s), box)
         later = next(i for i, item in enumerate(choices) if item[0] == "later")
-        self.hits.append(Hit(shade.get_rect(), lambda: self._update_pick(later)))
+        self.hits.append(Hit(shade, lambda: self._update_pick(later)))
         self.hits.append(Hit(box, lambda: None))
 
         x, y = box.x + pad, box.y + pad
@@ -3148,12 +3168,10 @@ class App:
         s = self.s
         box, body, rows, heights, total = self._help_metrics()
         t = _ease_out((now - self.info_opened) / 0.25) if self.info_opened else 1.0
-        shade = pygame.Surface((self.w, self.h - self.footer_h), pygame.SRCALPHA)
-        shade.fill((0, 0, 0, int(155 * t)))
-        self.screen.blit(shade, (0, 0))
+        shade = self._dim_backdrop(int(155 * t))
         panel = draw.rounded_rect(box.width, box.height, 18 * s, (*PANEL, 250), (78, 62, 55), 1.5 * s)
         self.screen.blit(panel, box)
-        self.hits.append(Hit(shade.get_rect(), self._close_overlay))
+        self.hits.append(Hit(shade, self._close_overlay))
         self.hits.append(Hit(box, lambda: None))
 
         x, y = box.x + int(38 * s), box.y + int(28 * s)
@@ -3198,11 +3216,9 @@ class App:
         box = pygame.Rect(0, 0, grid_w + 2 * pad, field_h + grid_h + 2 * pad)
         box.midbottom = (self.w // 2, self.h - self.footer_h - int(24 * s))
 
-        shade = pygame.Surface((self.w, self.h - self.footer_h), pygame.SRCALPHA)
-        shade.fill((0, 0, 0, 130))
-        self.screen.blit(shade, (0, 0))
+        shade = self._dim_backdrop(130)
         self.screen.blit(draw.rounded_rect(box.width, box.height, 18 * s, (*PANEL, 248), (78, 62, 55), 1.5 * s), box)
-        self.hits.append(Hit(shade.get_rect(), self._act(Action.SEARCH)))  # click outside: done, keep the filter
+        self.hits.append(Hit(shade, self._act(Action.SEARCH)))  # click outside: done, keep the filter
         self.hits.append(Hit(box, lambda: None))
 
         fx, fy = box.x + pad, box.y + pad
@@ -3331,9 +3347,7 @@ class App:
         rect, body = self._info_layout()
         t = _ease_out((now - self.info_opened) / INFO_SLIDE_SECONDS)
 
-        shade = pygame.Surface((self.w, self.h - self.footer_h), pygame.SRCALPHA)
-        shade.fill((0, 0, 0, int(150 * t)))
-        self.screen.blit(shade, (0, 0))
+        shade = self._dim_backdrop(int(150 * t))
 
         sheet = draw.rounded_rect(rect.width, rect.height, 18 * s, (*PANEL, 250), (78, 62, 55), 1.5 * s).copy()
         pad = int(36 * s)
@@ -3341,7 +3355,7 @@ class App:
         pad_mode = self.input.pad_mode
         left = self.glyphs.get("LB" if pad_mode else "KEY:LEFT")
         right = self.glyphs.get("RB" if pad_mode else "KEY:RIGHT")
-        self.hits.append(Hit(shade.get_rect(), self._close_overlay))  # click outside the sheet closes it
+        self.hits.append(Hit(shade, self._close_overlay))  # click outside the sheet closes it
         self.hits.append(Hit(rect, lambda: None))
         band = int(36 * s)
 
