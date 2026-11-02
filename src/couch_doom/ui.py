@@ -3034,12 +3034,16 @@ class App:
         t = _ease_out((now - self.menu_opened) / 0.2)
         items = self._menu_items()
         pad, row_h, head_h = int(30 * s), int(68 * s), int(72 * s)
-        width = min(self.w - 2 * self.margin, int(760 * s))
+        # Docked over the list column, sliding in from the left; the art beside it stays in view.
+        column = pygame.Rect(0, 0, self.list_edge, self.h - self.footer_h)
+        width = min(column.width - 2 * self.margin, int(760 * s))
         height = 2 * pad + head_h + len(items) * row_h
         box = pygame.Rect(0, 0, width, height)
-        box.center = (self.w // 2, (self.h - self.footer_h) // 2 + int(18 * s * (1 - t)))
+        box.midleft = (self.margin - int(40 * s * (1 - t)), column.centery)
 
-        shade = self._dim_backdrop(int(155 * t))
+        k = 255 - int(155 * t)
+        self.screen.fill((k, k, k), column, special_flags=pygame.BLEND_MULT)
+        shade = pygame.Rect(0, 0, self.w, self.h - self.footer_h)
         self.screen.blit(draw.rounded_rect(box.width, box.height, 18 * s, (*PANEL, 250), (78, 62, 55), 1.5 * s), box)
         self.hits.append(Hit(shade, self._act(Action.BACK)))
         self.hits.append(Hit(box, lambda: None))
