@@ -77,7 +77,7 @@ ISSUE_URL = "https://github.com/KrisEnigma/couch-doom/issues"
 HELP_SECTIONS = (
     ("START PLAYING", "CouchDoom reads the games you already have in DoomRunner, ZDL, or Doom Launcher, and leaves those setups as you made them. It can also show games found by GZDoom, UZDoom, or VKDoom. Pick a game and play."),
     ("CAN'T FIND YOUR GAMES?", "CouchDoom usually finds your launcher automatically. If it finds more than one, choose the one you want. If your games still aren't listed, open the launcher picker and choose “Find it myself…” to browse for your launcher or game port. You can also drop its folder onto the CouchDoom window."),
-    ("BROWSE THE LIST", "The selected game stays highlighted while its artwork and details appear beside the list. Select a group heading to see its games and open or collapse it. You can also click the small marker beside a heading. Jumping to a folded group lets you open it again."),
+    ("BROWSE THE LIST", "The selected game stays highlighted while its artwork and details appear beside the list. Select a group heading to see its games and open or collapse it. You can also click the small marker beside a heading. Jumping to a folded group lets you open it again. On a group heading, the bottom hint expands or collapses every group. The menu can do the same."),
     ("SEARCH AND FAVORITES", "Search by game or group name. Matching games stay visible even when their group is folded. Mark games as favorites to keep them together near the top of the list. The hints along the bottom show the controls for your keyboard or controller."),
     ("GAME DETAILS", "A game may show its title art, music, description, or a readme. Some games include a colorful end screen called ENDOOM. Open the info sheet to see these extras when they're available."),
     ("MUSIC", "CouchDoom plays menu music when the selected game provides it. If you don't hear any, that game may not include menu music."),
@@ -1259,6 +1259,58 @@ class App:
         self.detail_changed = time.monotonic()
         self._sound("move")
 
+    def _all_header_names(self) -> set[str]:
+        names = set(self.opts.sections)
+        if self.state.favorites:
+            names.add(FAVORITES)
+        if getattr(self.state, "recent_group", False) and getattr(self.state, "history", None):
+            names.add(RECENTLY_PLAYED)
+        return names
+
+    def _bulk_fold_label(self) -> str:
+        headers = self._all_header_names()
+        if headers - self.collapsed_sections:
+            return "Collapse all"
+        return "Expand all"
+
+    def _focus_header_after_bulk(self, prefer: str | None = None) -> None:
+        if prefer:
+            match = next((i for i, row in enumerate(self.rows) if row.kind == "header" and row.text == prefer), None)
+            if match is not None:
+                self.cur_row = match
+                self.detail_changed = time.monotonic()
+                return
+        header = next((i for i, row in enumerate(self.rows) if row.kind == "header"), -1)
+        self.cur_row = header
+        self.detail_changed = time.monotonic()
+
+    def _collapse_all_groups(self) -> None:
+        if self.filter:
+            self._notify("Clear search before folding groups", self.theme.label)
+            return
+        prefer = self.rows[self._sel_row()].text if self.rows and self.rows[self._sel_row()].kind == "header" else None
+        self.collapsed_sections = set(self._all_header_names())
+        self._rebuild_rows()
+        self._focus_header_after_bulk(prefer)
+        self._sound("move")
+
+    def _expand_all_groups(self) -> None:
+        if self.filter:
+            self._notify("Clear search before folding groups", self.theme.label)
+            return
+        prefer = self.rows[self._sel_row()].text if self.rows and self.rows[self._sel_row()].kind == "header" else None
+        self.collapsed_sections.clear()
+        self._rebuild_rows()
+        self._focus_header_after_bulk(prefer)
+        self._sound("move")
+
+    def _bulk_fold_from_alt(self) -> None:
+        headers = self._all_header_names()
+        if headers - self.collapsed_sections:
+            self._collapse_all_groups()
+        else:
+            self._expand_all_groups()
+
     def _category_presets(self, row: int) -> list[int]:
         if row.kind != "header":
             return []
@@ -1664,7 +1716,10 @@ class App:
             else:
                 self._launch_selected()
         elif action == Action.ALT:
-            if self.rows and self.rows[self._sel_row()].kind == "preset":
+            row = self._sel_row()
+            if self.rows and self.rows[row].kind == "header":
+                self._bulk_fold_from_alt()
+            elif self.rows and self.rows[row].kind == "preset":
                 self._open_info(now)
         elif action == Action.SEARCH:
             self._open_search(now)
@@ -1706,6 +1761,8 @@ class App:
             ("music", "Title music"),
             ("sounds", "Menu sounds"),
             ("recent", "Recently played group"),
+            ("expand_all", "Expand all groups"),
+            ("collapse_all", "Collapse all groups"),
         ]
         items.append(("colors", "Colors"))
         if self.launchers:
@@ -1752,6 +1809,10 @@ class App:
             self.state.set_recent_group(not self.state.recent_group)
             self._rebuild_rows()
             self._sound("open")
+        elif key == "expand_all":
+            self._expand_all_groups()
+        elif key == "collapse_all":
+            self._collapse_all_groups()
         elif key == "colors":
             self._cycle_color_palette(1)
         elif key == "launcher":
@@ -2679,7 +2740,10 @@ class App:
         fav = "Unfavorite" if self.rows and self.opts.presets[self.current].name in self.state.favorites else "Favorite"
         section = (A.PREV_SECTION, A.NEXT_SECTION)
         primary = "Open / Close" if category_selected else "Play"
-        info_hint = [] if category_selected else [(('X',) if pad else ('KEY:TAB',), "Info", (A.ALT,))]
+        if category_selected:
+            info_hint = [(('X',) if pad else ('KEY:TAB',), self._bulk_fold_label(), (A.ALT,))]
+        else:
+            info_hint = [(('X',) if pad else ('KEY:TAB',), "Info", (A.ALT,))]
         favorite_hint = [] if category_selected else [(('R3',) if pad else ('KEY:F3',), fav, (A.FAVORITE,))]
         if pad:
             return [(("START",), "Menu", (A.MENU,)), (("A",), primary, (A.CONFIRM,)), (("BACK",), "Help", (A.HELP,)), *info_hint, (("Y",), "Search", (A.SEARCH,)),

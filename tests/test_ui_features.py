@@ -443,6 +443,81 @@ def test_confirm_on_a_selected_header_toggles_it_and_keeps_category_focus():
     assert app.rows[app._sel_row()].kind == "header"
 
 
+def test_alt_on_header_collapses_all_groups():
+    app = make_app()
+    app._rebuild_rows()
+    app._select_row(0)
+    opened = []
+    app._open_info = lambda now: opened.append(now)
+
+    app._on_action(Action.ALT, 0.0)
+
+    assert app.collapsed_sections == {"Section A", "Section B"}
+    assert not opened
+    assert all(row.kind == "header" for row in app.rows)
+
+
+def test_alt_on_header_expands_when_everything_is_collapsed():
+    app = make_app(collapsed={"Section A", "Section B"})
+    app._rebuild_rows()
+    app._select_row(0)
+
+    app._on_action(Action.ALT, 0.0)
+
+    assert app.collapsed_sections == set()
+
+
+def test_alt_on_preset_still_opens_info():
+    app = make_app()
+    app._rebuild_rows()
+    app._select_row(1)
+    opened = []
+    app._open_info = lambda now: opened.append(now)
+
+    app._on_action(Action.ALT, 1.0)
+
+    assert opened == [1.0]
+    assert app.collapsed_sections == set()
+
+
+def test_bulk_fold_blocked_while_filter_active():
+    app = make_app(filter_text="Alpha")
+    app._rebuild_rows()
+    notes = []
+    app._notify = lambda msg, color: notes.append(msg)
+    app.collapsed_sections = set()
+
+    app._collapse_all_groups()
+
+    assert notes
+    assert app.collapsed_sections == set()
+
+
+def test_menu_collapse_all_and_expand_all():
+    app = make_app()
+    app._rebuild_rows()
+    app.mode = "menu"
+    app._sound = lambda _n: None
+    items = app._menu_items()
+    collapse_i = next(i for i, (key, _) in enumerate(items) if key == "collapse_all")
+    app._menu_pick(collapse_i)
+    assert app.collapsed_sections == {"Section A", "Section B"}
+    expand_i = next(i for i, (key, _) in enumerate(app._menu_items()) if key == "expand_all")
+    app._menu_pick(expand_i)
+    assert app.collapsed_sections == set()
+
+
+def test_footer_shows_bulk_fold_hint_on_category():
+    app = make_app()
+    app._rebuild_rows()
+    app._select_row(0)
+    app.input = SimpleNamespace(pad_mode=False, left_y=0.0, family="xbox")
+
+    hints = app._footer_hints()
+
+    assert any(label == "Collapse all" and Action.ALT in actions for _, label, actions in hints)
+
+
 def test_up_down_navigation_can_select_category_without_changing_the_game():
     app = make_app()
     app._rebuild_rows()
