@@ -31,7 +31,7 @@ class Entry:
             if self.path == Path.home():
                 return tr("browser.home", path=self.path)
             return str(self.path)
-        return self.path.name + ("/" if self.is_dir else "")
+        return self.path.name
 
 
 def _windows_roots() -> list[Path]:

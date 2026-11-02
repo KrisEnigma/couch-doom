@@ -9,7 +9,7 @@
   "menu.launcher": "Choose launcher",
   "menu.help": "Help",
   "menu.quit": "Quit",
-  "menu.title": "MENU",
+  "menu.title": "Menu",
   "menu.refreshed": "Refreshed",
   "menu.on": "On",
   "menu.off": "Off",
@@ -78,11 +78,9 @@
   "toast.updated": "Updated to {version}",
   "toast.update_failed": "The update didn't install. Details are in couch-doom.log",
 
-  "browser.parent": "< Parent directory >",
-  "browser.drives_home": "< Drives & Home >",
-  "browser.title": "Find your Doom launcher",
+  "browser.parent": "Parent folder",
+  "browser.drives_home": "Drives & home",
   "browser.choose_root": "Choose a drive or home location",
-  "browser.choose_file": "Choose a file or open a folder",
   "browser.empty": "No matching files or folders here",
   "browser.home": "Home - {path}",
 
@@ -120,7 +118,6 @@
   "header.couch_launcher": "Couch launcher",
   "header.favorites_kind": "FAVORITES",
   "header.category_kind": "CATEGORY",
-  "header.loading": "LOADING   {name}",
   "header.n_matching": "{shown} of {total}",
   "tag.last": "Last",
   "tag.missing": "Missing",
@@ -139,13 +136,11 @@
   "problem.addon_needs_base": "{addon} needs {base} set up as an IWAD",
   "problem.unpack_failed": "Couldn't unpack {member} from {archive}: {error}",
 
-  "picker.heading": "Launcher",
   "picker.current": "Current",
 
   "info.readme": "Readme",
   "info.endoom": "ENDOOM",
 
-  "update.heading": "Update available",
   "update.out": "CouchDoom {version} is out",
   "update.youre_on": "You're on {current}",
   "update.whats_new": "What's new",
@@ -171,9 +166,7 @@
   "update.packaged_only": "Automatic updating is available in packaged builds only.",
   "update.cancelled": "Update cancelled.",
 
-  "help.guide": "COUCHDOOM GUIDE",
   "help.how_to": "How to use CouchDoom",
-  "help.subtitle": "Finding games, picking favorites, and more",
   "help.feedback": "HELP & FEEDBACK",
   "help.0.title": "START PLAYING",
   "help.0.body": "CouchDoom reads the games you already have in DoomRunner, ZDL, or Doom Launcher, and leaves those setups as you made them. It can also show games found by GZDoom, UZDoom, or VKDoom. Pick a game and play.",
@@ -192,5 +185,10 @@
   "help.7.title": "REPORT A BUG",
   "help.7.body": "Choose Help & Feedback at the top of this guide, or its hint below, to open CouchDoom's GitHub issues. Search there first; someone may have reported it already. In a new report, say what you were doing, what you expected, and what happened, and include your version (v{version}) and the game or launcher involved. A screenshot helps, and so does an excerpt from the log at {log}. Remove personal file paths before sharing.",
   "help.8.title": "ABOUT",
-  "help.8.body": "CouchDoom is made by KrisEnigma. Thanks for playing!"
+  "help.8.body": "CouchDoom is made by KrisEnigma. Thanks for playing!",
+  "loading.label": "Loading",
+  "info.looking": "Looking for a readme…",
+  "info.no_readme": "No readme beside or inside this preset's files.",
+  "osk.space": "Space",
+  "osk.clear": "Clear"
 }

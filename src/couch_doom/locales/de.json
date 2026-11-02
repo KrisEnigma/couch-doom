@@ -9,7 +9,7 @@
   "menu.launcher": "Launcher wählen",
   "menu.help": "Hilfe",
   "menu.quit": "Beenden",
-  "menu.title": "MENÜ",
+  "menu.title": "Menü",
   "menu.refreshed": "Aktualisiert",
   "menu.on": "An",
   "menu.off": "Aus",
@@ -78,11 +78,9 @@
   "toast.updated": "Auf {version} aktualisiert",
   "toast.update_failed": "Das Update wurde nicht installiert. Details stehen in couch-doom.log",
 
-  "browser.parent": "< Übergeordnetes Verzeichnis >",
-  "browser.drives_home": "< Laufwerke & Home >",
-  "browser.title": "Doom-Launcher finden",
+  "browser.parent": "Übergeordneter Ordner",
+  "browser.drives_home": "Laufwerke & Home",
   "browser.choose_root": "Laufwerk oder Home wählen",
-  "browser.choose_file": "Datei wählen oder Ordner öffnen",
   "browser.empty": "Keine passenden Dateien oder Ordner hier",
   "browser.home": "Home - {path}",
 
@@ -120,7 +118,6 @@
   "header.couch_launcher": "Couch-Launcher",
   "header.favorites_kind": "FAVORITEN",
   "header.category_kind": "KATEGORIE",
-  "header.loading": "LADEN   {name}",
   "header.n_matching": "{shown} von {total}",
   "tag.last": "Zuletzt",
   "tag.missing": "Fehlt",
@@ -139,13 +136,11 @@
   "problem.addon_needs_base": "{addon} braucht {base} als eingerichtetes IWAD",
   "problem.unpack_failed": "{member} konnte nicht aus {archive} entpackt werden: {error}",
 
-  "picker.heading": "Launcher",
   "picker.current": "Aktuell",
 
   "info.readme": "Readme",
   "info.endoom": "ENDOOM",
 
-  "update.heading": "Update verfügbar",
   "update.out": "CouchDoom {version} ist erschienen",
   "update.youre_on": "Du verwendest {current}",
   "update.whats_new": "Neuigkeiten",
@@ -171,9 +166,7 @@
   "update.packaged_only": "Automatische Updates gibt es nur in paketierten Builds.",
   "update.cancelled": "Update abgebrochen.",
 
-  "help.guide": "COUCHDOOM-ANLEITUNG",
   "help.how_to": "CouchDoom bedienen",
-  "help.subtitle": "Spiele finden, Favoriten setzen und mehr",
   "help.feedback": "HILFE & FEEDBACK",
   "help.0.title": "LOSLEGEN",
   "help.0.body": "CouchDoom liest die Spiele, die du schon in DoomRunner, ZDL oder Doom Launcher hast, und lässt diese Setups so, wie du sie angelegt hast. Es kann auch Spiele zeigen, die GZDoom, UZDoom oder VKDoom finden. Spiel wählen und spielen.",
@@ -192,5 +185,10 @@
   "help.7.title": "FEHLER MELDEN",
   "help.7.body": "Wähle oben in dieser Anleitung Hilfe & Feedback oder den Hinweis unten, um die CouchDoom-Meldungen auf GitHub zu öffnen. Suche dort zuerst; vielleicht hat es schon jemand gemeldet. Schreibe in einer neuen Meldung, was du getan hast, was du erwartet hast und was passiert ist, und nenne deine Version (v{version}) und das beteiligte Spiel oder den Launcher. Ein Screenshot hilft, ebenso ein Auszug aus dem Log unter {log}. Entferne persönliche Pfade vor dem Teilen.",
   "help.8.title": "ÜBER",
-  "help.8.body": "CouchDoom ist ein Projekt von KrisEnigma. Danke fürs Spielen!"
+  "help.8.body": "CouchDoom ist ein Projekt von KrisEnigma. Danke fürs Spielen!",
+  "loading.label": "Laden",
+  "info.looking": "Suche nach einer Readme…",
+  "info.no_readme": "Keine Readme neben oder in den Dateien dieses Presets.",
+  "osk.space": "Leertaste",
+  "osk.clear": "Leeren"
 }

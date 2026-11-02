@@ -58,6 +58,7 @@ OSK_ROWS = [
     list("ZXCVBNM-:!"),
     ["SPACE", "DELETE", "CLEAR", "DONE"],
 ]
+OSK_LABELS = {"SPACE": "osk.space", "DELETE": "hint.delete", "CLEAR": "osk.clear", "DONE": "hint.done"}
 
 QUIT_CONFIRM_SECONDS = 2.0
 LAUNCH_WIPE_SECONDS = 0.38
@@ -543,6 +544,7 @@ class App:
         self._open_window()
         self.scroll = self._target_scroll()
         self.bar_y = self.row_y[self._sel_row()] if self.rows else 0
+        self.thumb_scroll, self.thumb_moved = self.scroll, -math.inf
         self.detail_changed = time.monotonic()
         self._warm_cache()
         self._report_update_result()
@@ -890,7 +892,7 @@ class App:
             self._sound("move")
 
     def _browser_page_size(self) -> int:
-        pad, row_h, head_h = int(28 * self.s), int(54 * self.s), int(118 * self.s)
+        pad, row_h, head_h = int(28 * self.s), int(54 * self.s), int(92 * self.s)
         max_height = self.h - self.footer_h - int(32 * self.s)
         return max(1, min(16, (max_height - 2 * pad - head_h) // row_h))
 
@@ -2324,7 +2326,23 @@ class App:
             log.write("handover timeout", f"{name}: no engine window after {HANDOVER_TIMEOUT_SECONDS:.0f} seconds")
 
     def _loading_label(self, name: str) -> pygame.Surface:
-        return self._tracked(tr("header.loading", name=name), 40, self.theme.bg_top, bold=True, tracking=0.08)
+        """"LOADING" over the game's name, the name shrunk until it fits across the screen."""
+        ink = self.theme.bg_top
+        key = ("loading", name, tuple(ink), self.s, self.w)
+        surf = self._text_cache.get(key)
+        if surf is None:
+            word = self._tracked(tr("loading.label"), 22, ink, tracking=0.3)
+            room = self.w - 2 * self.margin
+            for size in range(68, 31, -4):
+                title = self._tracked(name, size, ink, tracking=0.04)
+                if title.get_width() <= room:
+                    break
+            gap = int(10 * self.s)
+            surf = pygame.Surface((max(word.get_width(), title.get_width()), word.get_height() + gap + title.get_height()), pygame.SRCALPHA)
+            surf.blit(word, (0, 0))
+            surf.blit(title, (0, word.get_height() + gap))
+            self._text_cache[key] = surf
+        return surf
 
     def _draw_loading(self, name: str, elapsed: float) -> None:
         """The wipe's end frame, kept alive with a ticking ellipsis while the engine starts."""
@@ -2334,8 +2352,9 @@ class App:
         self.screen.blit(label, (self.margin, y))
         dots = "." * (int(elapsed * 2) % 4)
         if dots:
-            self.screen.blit(self._tracked(dots, 40, self.theme.bg_top, bold=True, tracking=0.08),
-                             (self.margin + label.get_width() + int(8 * self.s), y))
+            word = self._tracked(tr("loading.label"), 22, self.theme.bg_top, tracking=0.3)
+            self.screen.blit(self._tracked(dots, 22, self.theme.bg_top, tracking=0.3),
+                             (self.margin + word.get_width() + int(4 * self.s), y))
         self._flip()
 
     # ---------- text helpers ----------
@@ -2691,12 +2710,17 @@ class App:
 
         if max_scroll > 0:
             tw = self.scroll_w
-            track_x = self.list_edge - tw
+            track_x = self.list_edge - tw - int(12 * s)
             thumb_h = max(int(48 * s), int(lr.height * lr.height / self.content_h))
             thumb_y = lr.y + int((lr.height - thumb_h) * (self.scroll / max_scroll))
             grabbed = self.drag is not None and self.drag[0] == "list"
-            self.screen.blit(draw.rounded_rect(tw, lr.height, tw / 2, (255, 255, 255, 18)), (track_x, lr.y))
-            self.screen.blit(draw.rounded_rect(tw, thumb_h, tw / 2, TEXT if grabbed else MUTED), (track_x, thumb_y))
+            if abs(self.scroll - self.thumb_scroll) > 0.5 or grabbed:
+                self.thumb_scroll, self.thumb_moved = self.scroll, now
+            # Quiet at rest, lit while the list moves. Alpha in steps so the cached surfaces stay few.
+            lit = 1.0 - _ease_out(max(0.0, now - self.thumb_moved - 0.6) / 0.4)
+            alpha = 95 + 32 * round(lit * 5)
+            self.screen.blit(draw.rounded_rect(tw, lr.height, tw / 2, (255, 255, 255, 14)), (track_x, lr.y))
+            self.screen.blit(draw.rounded_rect(tw, thumb_h, tw / 2, TEXT if grabbed else (*MUTED, alpha)), (track_x, thumb_y))
             self._scrollbar("list", pygame.Rect(track_x, lr.y, tw, lr.height), thumb_h, max_scroll)
 
     def _draw_detail(self, now: float) -> None:
@@ -2858,12 +2882,13 @@ class App:
         pad = self.input.pad_mode
         A = Action
         if self.mode == "browse":
-            toggle = tr("hint.all_files") if not self.file_browser or not self.file_browser.show_all else tr("hint.doom_files")
-            if pad:
-                return [(("A",), tr("hint.open"), (A.CONFIRM,)), (("B",), tr("hint.back"), (A.BACK,)),
-                        (("X",), toggle, (A.ALT,))]
-            return [(("KEY:ENTER",), tr("hint.open"), (A.CONFIRM,)), (("KEY:ESC",), tr("hint.back"), (A.BACK,)),
-                    (("KEY:TAB",), toggle, (A.ALT,))]
+            browser = self.file_browser
+            label = tr("hint.doom_files") if browser and browser.show_all else tr("hint.all_files")
+            toggle = [] if browser is None or browser.selecting_root else [(("X",) if pad else ("KEY:TAB",), label, (A.ALT,))]
+            pages = browser is not None and len(browser.entries) > self._browser_page_size()
+            page = [(("LT", "RT") if pad else ("KEY:LEFT", "KEY:RIGHT"), tr("hint.page"), (A.PAGE_UP, A.PAGE_DOWN))] if pages else []
+            return [(("A",) if pad else ("KEY:ENTER",), tr("hint.open"), (A.CONFIRM,)), *page,
+                    (("B",) if pad else ("KEY:ESC",), tr("hint.back"), (A.BACK,)), *toggle]
         if self.mode == "launcher":
             return [(("A",) if pad else ("KEY:ENTER",), tr("hint.choose"), (A.CONFIRM,)), (("B",) if pad else ("KEY:ESC",), tr("hint.close"), (A.BACK,))]
         if self.mode == "update":
@@ -2975,7 +3000,7 @@ class App:
         s = self.s
         t = _ease_out((now - self.menu_opened) / 0.2)
         items = self._menu_items()
-        pad, row_h, head_h = int(30 * s), int(68 * s), int(100 * s)
+        pad, row_h, head_h = int(30 * s), int(68 * s), int(72 * s)
         width = min(self.w - 2 * self.margin, int(760 * s))
         height = 2 * pad + head_h + len(items) * row_h
         box = pygame.Rect(0, 0, width, height)
@@ -2987,8 +3012,7 @@ class App:
         self.hits.append(Hit(box, lambda: None))
 
         x, y = box.x + pad, box.y + pad
-        self.screen.blit(self._tracked(tr("menu.title"), 16, self.theme.label, tracking=0.3), (x, y))
-        self.screen.blit(self._text("CouchDoom", self._font(36, bold=True), TEXT), (x, y + int(28 * s)))
+        self.screen.blit(self._text(tr("menu.title"), self._font(36, bold=True), TEXT), (x + int(12 * s), y))
         y += head_h
         font = self._font(27)
         selected_font = self._font(27, bold=True)
@@ -3028,7 +3052,7 @@ class App:
     def _draw_picker(self, now: float) -> None:
         s = self.s
         t = _ease_out((now - self.picker_opened) / 0.25)
-        pad, row_h, head_h, note_h = int(34 * s), int(84 * s), int(104 * s), int(58 * s)
+        pad, row_h, head_h, note_h = int(34 * s), int(84 * s), int(76 * s), int(58 * s)
         width = min(self.w - 2 * self.margin, int(1040 * s))
         box = pygame.Rect(0, 0, width, 2 * pad + head_h + len(self.picker) * row_h + note_h)
         box.center = (self.w // 2, (self.h - self.footer_h) // 2 + int(24 * s * (1 - t)))
@@ -3040,9 +3064,8 @@ class App:
 
         x, y = box.x + pad, box.y + pad
         inner = box.width - 2 * pad
-        self.screen.blit(self._tracked(tr("picker.heading"), 16, self.theme.label, tracking=0.3), (x, y))
         title_font = self._font(40, bold=True)
-        self.screen.blit(self._text(tr("picker.title"), title_font, TEXT), (x, y + int(28 * s)))
+        self.screen.blit(self._text(tr("picker.title"), title_font, TEXT), (x, y))
         y += head_h
 
         current = self.launchers.current if self.launchers else None
@@ -3102,7 +3125,7 @@ class App:
         s = self.s
         page = self._browser_page_size()
         shown = browser.entries[self.browser_scroll:self.browser_scroll + page]
-        pad, row_h, head_h = int(28 * s), int(54 * s), int(118 * s)
+        pad, row_h, head_h = int(28 * s), int(54 * s), int(92 * s)
         width = min(self.w - 2 * self.margin, int(1120 * s))
         rows = max(1, len(shown)) + (1 if browser.empty else 0)
         height = min(self.h - self.footer_h - int(32 * s), 2 * pad + head_h + rows * row_h)
@@ -3115,13 +3138,13 @@ class App:
 
         x, y = box.x + pad, box.y + pad
         inner = box.width - 2 * pad
-        self.screen.blit(self._tracked(tr("browser.title"), 16, self.theme.label, tracking=0.3), (x, y))
-        subtitle = tr("browser.choose_root") if browser.selecting_root else tr("browser.choose_file")
-        self.screen.blit(self._text(subtitle, self._font(35, bold=True), TEXT), (x, y + int(26 * s)))
+        title = tr("browser.choose_root") if browser.selecting_root else tr("picker.find_sub", program=PROGRAM)
+        title_font = self._font(35, bold=True)
+        self.screen.blit(self._text(self._fit(title, title_font, inner), title_font, TEXT), (x, y))
         if not browser.selecting_root:
             path_font = self._font(17, mono=True)
             path = self._fit_start(str(browser.directory), path_font, inner)
-            self.screen.blit(self._text(path, path_font, MUTED), (x, y + int(72 * s)))
+            self.screen.blit(self._text(path, path_font, MUTED), (x, y + int(48 * s)))
         y += head_h
 
         if not shown:
@@ -3136,20 +3159,35 @@ class App:
                 self.screen.blit(draw.rounded_rect(rect.width, rect.height, 9 * s, (255, 255, 255, 18)), rect)
                 pygame.draw.rect(self.screen, self.theme.accent, (rect.x, rect.y + int(8 * s), int(5 * s), rect.height - int(16 * s)))
             self.hits.append(Hit(rect, lambda i=index: self._browser_pick(i)))
+            if offset and shown[offset - 1].launcher and not entry.launcher:
+                pygame.draw.line(self.screen, (44, 37, 34), (x, y - int(2 * s)), (rect.right - int(16 * s), y - int(2 * s)), max(1, int(s)))
             label = entry.display_name
-            navigation = entry.root_selector or entry.parent_selector
-            font = self._font(25, bold=selected and not navigation)
-            room = rect.right - x - int(16 * s)
+            font = self._font(25, bold=selected and not entry.parent_selector)
+            chevron = int(6 * s)
+            name_x = x
+            # Folders and drives open into more rows; the way back up points the other way.
+            if entry.parent_selector:
+                name_x += 3 * chevron
+            enters = entry.is_dir and not entry.parent_selector
+            room = rect.right - name_x - int(16 * s) - (3 * chevron if enters else 0)
             detail_font = self._font(20)
             detail_color = self.theme.label if entry.launcher else MUTED
             detail = self._text(self._fit(entry.detail, detail_font, room // 2), detail_font, detail_color) if entry.detail else None
             gap = int(18 * s)
             name_room = room - (detail.get_width() + gap if detail else 0)
-            color = TEXT if selected else self.theme.label if entry.launcher else MUTED
+            other = browser.show_all and not entry.is_dir and not entry.launcher
+            color = TEXT if selected else self.theme.label if entry.launcher else DIM if other else MUTED
             name = self._text(self._fit(label, font, name_room), font, color)
-            self.screen.blit(name, (x, self._text_top(font, rect.centery)))
+            self.screen.blit(name, (name_x, self._text_top(font, rect.centery)))
             if detail:
-                self.screen.blit(detail, (x + name.get_width() + gap, self._text_top(detail_font, rect.centery)))
+                self.screen.blit(detail, (name_x + name.get_width() + gap, self._text_top(detail_font, rect.centery)))
+            if entry.parent_selector or enters:
+                mark = TEXT if selected else MUTED
+                cx = x + chevron // 2 if entry.parent_selector else rect.right - int(16 * s) - chevron
+                d = -1 if entry.parent_selector else 1
+                points = [(cx - d * chevron // 2, rect.centery - chevron), (cx + d * chevron // 2, rect.centery),
+                          (cx - d * chevron // 2, rect.centery + chevron)]
+                pygame.draw.lines(self.screen, mark, False, points, max(1, int(2 * s)))
             y += row_h
         if browser.empty:
             self.screen.blit(self._text(tr("browser.empty"), self._font(22), MUTED), (x, self._text_top(self._font(22), y + row_h // 2)))
@@ -3196,7 +3234,7 @@ class App:
         info = self.update or {}
         choices = update_choices(info, bool(getattr(sys, "frozen", False)))
         t = _ease_out((now - self.update_opened) / 0.25)
-        pad, row_h, head_h = int(34 * s), int(84 * s), int(118 * s)
+        pad, row_h, head_h = int(34 * s), int(84 * s), int(112 * s)
         width = min(self.w - 2 * self.margin, int(980 * s))
         inner = width - 2 * pad
         notes_font = self._font(23)
@@ -3204,7 +3242,7 @@ class App:
         for item in info.get("notes", [])[:updates.MAX_NOTES]:
             wrapped = self._wrap(item, notes_font, inner - int(26 * s), 2)
             notes += [(("•  " if i == 0 else "    ") + line) for i, line in enumerate(wrapped)]
-        notes_h = (int(34 * s) + len(notes) * int(32 * s)) if notes else 0
+        notes_h = (int(34 * s) + len(notes) * int(32 * s) + int(18 * s)) if notes else 0
         if info.get("more_notes"):
             notes_h += int(28 * s)
         downloading = self.update_install_job is not None
@@ -3223,9 +3261,8 @@ class App:
         self.hits.append(Hit(box, lambda: None))
 
         x, y = box.x + pad, box.y + pad
-        self.screen.blit(self._tracked(tr("update.heading"), 16, self.theme.label, tracking=0.3), (x, y))
-        self.screen.blit(self._text(tr("update.out", version=info.get("version", "")), self._font(40, bold=True), TEXT), (x, y + int(28 * s)))
-        self.screen.blit(self._text(tr("update.youre_on", current=info.get("current", __version__)), self._font(22), MUTED), (x, y + int(80 * s)))
+        self.screen.blit(self._text(tr("update.out", version=info.get("version", "")), self._font(40, bold=True), TEXT), (x, y))
+        self.screen.blit(self._text(tr("update.youre_on", current=info.get("current", __version__)), self._font(22), MUTED), (x, y + int(52 * s)))
         y += head_h
 
         if notes:
@@ -3238,6 +3275,7 @@ class App:
                 more_font = self._font(18)
                 self.screen.blit(self._text(tr("update.more_notes"), more_font, self.theme.label), (x, y))
                 y += int(28 * s)
+            y += int(18 * s)
 
         name_font, sel_font, sub_font = self._font(31), self._font(31, bold=True), self._font(21)
         if self.update_error:
@@ -3287,7 +3325,7 @@ class App:
         box = pygame.Rect(0, 0, width, height)
         box.center = (self.w // 2, (self.h - self.footer_h) // 2)
         pad = int(38 * s)
-        head_h = int(158 * s)
+        head_h = int(112 * s)
         body = pygame.Rect(box.x + pad, box.y + head_h, box.width - 2 * pad, box.height - head_h - pad)
         rows = self._help_rows(body.width)
         heights = [int((26 if is_head else 28 if text else 24) * s) for text, is_head in rows]
@@ -3312,12 +3350,12 @@ class App:
         self.hits.append(Hit(shade, self._close_overlay))
         self.hits.append(Hit(box, lambda: None))
 
-        x, y = box.x + int(38 * s), box.y + int(28 * s)
-        self.screen.blit(self._tracked(tr("help.guide"), 16, self.theme.label, tracking=0.3), (x, y))
-        self.screen.blit(self._text(tr("help.how_to"), self._font(40, bold=True), TEXT), (x, y + int(28 * s)))
-        self.screen.blit(self._text(tr("help.subtitle"), self._font(21), MUTED), (x, y + int(80 * s)))
+        x, y = box.x + int(38 * s), box.y + int(34 * s)
+        title_font = self._font(40, bold=True)
+        self.screen.blit(self._text(tr("help.how_to"), title_font, TEXT), (x, y))
         report = self._tracked(tr("help.feedback"), 15, TEXT, tracking=0.2)
-        report_rect = pygame.Rect(box.right - int(38 * s) - report.get_width() - int(26 * s), y + int(78 * s), report.get_width() + int(26 * s), int(38 * s))
+        report_rect = pygame.Rect(0, 0, report.get_width() + int(26 * s), int(38 * s))
+        report_rect.midright = (box.right - int(38 * s), y + title_font.get_height() // 2)
         pygame.draw.rect(self.screen, self.theme.accent, report_rect, border_radius=int(8 * s))
         self.screen.blit(report, (report_rect.centerx - report.get_width() // 2, report_rect.centery - report.get_height() // 2))
         self.hits.append(Hit(report_rect, lambda: webbrowser.open(ISSUE_URL)))
@@ -3382,7 +3420,7 @@ class App:
                 if len(key) == 1:
                     t = self._text(key, self._font(30, bold=True), TEXT if selected else MUTED)
                 else:
-                    t = self._tracked(key, 15, TEXT if selected else (self.theme.label if key == "DONE" else MUTED), tracking=0.2)
+                    t = self._tracked(tr(OSK_LABELS[key]), 15, TEXT if selected else (self.theme.label if key == "DONE" else MUTED), tracking=0.2)
                 ink = t.get_bounding_rect()
                 self.screen.blit(t, (rect.centerx - ink.centerx, rect.centery - ink.centery))
 
@@ -3525,12 +3563,10 @@ class App:
         lines = self._info_content()
         if self.info_tab == ENDOOM_TAB and endoom:
             pic = self._endoom_surface(endoom, body.width, body.height)
-            sheet.blit(pic, (body.x + (body.width - pic.get_width()) // 2, body.y))
+            top = body.y + max(0, (body.height - pic.get_height()) * 2 // 5)
+            sheet.blit(pic, (body.x + (body.width - pic.get_width()) // 2, top))
         elif not lines:
-            if self.info_tab == 0 and self.current not in self.readmes:
-                msg = "Looking for a readme…"
-            else:
-                msg = "No readme beside or inside this preset's files."
+            msg = tr("info.looking") if self.info_tab == 0 and self.current not in self.readmes else tr("info.no_readme")
             sheet.blit(self._text(msg, self._font(24), MUTED), body.topleft)
         else:
             mono = self._info_font()

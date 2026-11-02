@@ -9,7 +9,7 @@
   "menu.launcher": "Elegir launcher",
   "menu.help": "Ayuda",
   "menu.quit": "Salir",
-  "menu.title": "MENÚ",
+  "menu.title": "Menú",
   "menu.refreshed": "Actualizado",
   "menu.on": "Sí",
   "menu.off": "No",
@@ -78,11 +78,9 @@
   "toast.updated": "Actualizado a {version}",
   "toast.update_failed": "La actualización no se instaló. Los detalles están en couch-doom.log",
 
-  "browser.parent": "< Carpeta superior >",
-  "browser.drives_home": "< Unidades e Inicio >",
-  "browser.title": "Busca tu launcher de Doom",
+  "browser.parent": "Carpeta superior",
+  "browser.drives_home": "Unidades e inicio",
   "browser.choose_root": "Elige una unidad o tu carpeta de inicio",
-  "browser.choose_file": "Elige un archivo o abre una carpeta",
   "browser.empty": "No hay archivos ni carpetas que coincidan",
   "browser.home": "Inicio - {path}",
 
@@ -120,7 +118,6 @@
   "header.couch_launcher": "Launcher de sofá",
   "header.favorites_kind": "FAVORITOS",
   "header.category_kind": "CATEGORÍA",
-  "header.loading": "CARGANDO   {name}",
   "header.n_matching": "{shown} de {total}",
   "tag.last": "Último",
   "tag.missing": "Falta",
@@ -139,13 +136,11 @@
   "problem.addon_needs_base": "{addon} necesita {base} configurado como IWAD",
   "problem.unpack_failed": "No se pudo extraer {member} de {archive}: {error}",
 
-  "picker.heading": "Launcher",
   "picker.current": "Actual",
 
   "info.readme": "Readme",
   "info.endoom": "ENDOOM",
 
-  "update.heading": "Actualización disponible",
   "update.out": "CouchDoom {version} ya salió",
   "update.youre_on": "Estás en {current}",
   "update.whats_new": "Novedades",
@@ -171,9 +166,7 @@
   "update.packaged_only": "La actualización automática solo está en builds empaquetados.",
   "update.cancelled": "Actualización cancelada.",
 
-  "help.guide": "GUÍA DE COUCHDOOM",
   "help.how_to": "Cómo usar CouchDoom",
-  "help.subtitle": "Encontrar juegos, marcar favoritos y más",
   "help.feedback": "AYUDA Y COMENTARIOS",
   "help.0.title": "EMPEZAR A JUGAR",
   "help.0.body": "CouchDoom lee los juegos que ya tienes en DoomRunner, ZDL o Doom Launcher, y deja esas configuraciones como las hiciste. También puede mostrar juegos encontrados por GZDoom, UZDoom o VKDoom. Elige un juego y juega.",
@@ -192,5 +185,10 @@
   "help.7.title": "REPORTAR UN ERROR",
   "help.7.body": "Elige Ayuda y comentarios arriba en esta guía, o su indicación abajo, para abrir los reportes de CouchDoom en GitHub. Busca primero ahí; puede que alguien ya lo haya reportado. En un reporte nuevo, cuenta qué estabas haciendo, qué esperabas y qué pasó, e incluye tu versión (v{version}) y el juego o launcher involucrado. Una captura ayuda, y también un fragmento del log, que está en {log}. Quita las rutas personales antes de compartir.",
   "help.8.title": "ACERCA DE",
-  "help.8.body": "CouchDoom es un proyecto de KrisEnigma. ¡Gracias por jugar!"
+  "help.8.body": "CouchDoom es un proyecto de KrisEnigma. ¡Gracias por jugar!",
+  "loading.label": "Cargando",
+  "info.looking": "Buscando un readme…",
+  "info.no_readme": "No hay readme junto a los archivos de este preset ni dentro de ellos.",
+  "osk.space": "Espacio",
+  "osk.clear": "Limpiar"
 }
