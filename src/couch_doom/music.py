@@ -66,6 +66,7 @@ PEAK_TARGET = 0.9  # never louder than this, so nothing clips
 DWELL_SECONDS = 0.65
 FADE_IN_MS = 500
 FADE_OUT_MS = 700
+LEAVE_FADE_MS = 400  # moving off a preset: quick, so its track doesn't trail into the next one
 CACHE_BYTES = 24 * 1024 * 1024  # rendered MIDI PCM; encoded streams live in the persistent disk cache
 
 
@@ -637,7 +638,7 @@ class MusicPlayer:
     """One preset's title track at a time, crossfading on change.
 
     Moving to a preset that uses the same track (the stock title music, say) keeps it playing instead of starting
-    it over; the current track keeps going until the next preset's track is known.
+    it over, once that's known; any other track fades out as soon as the selection leaves its preset.
     Rendered MIDI alternates between two channels so the old track fades out under the new one.
     Streamed formats share SDL_mixer's single music slot, so a new stream waits for the old one's
     fade-out to finish instead of cutting it.
@@ -720,6 +721,17 @@ class MusicPlayer:
             future = self.pool.submit(_prepare, iwad, list(files or ()), renderer, cancel, dict(self.cache),
                                       None, protected)
         self.job = (key, ident, future, cancel)
+
+    def leave(self, key: object, soundfont: Path | None = None) -> None:
+        """The selection moved to `key` but hasn't settled: fade the current track now, unless `key` is already
+        known to use that same track, which then plays on. Cheap to call every frame."""
+        if self.want is None:
+            return
+        sig = self.tracks.get((key, soundfont or self.soundfont))
+        if sig is not None and sig == self.playing and self._audible():
+            return
+        self.want = None
+        self.stop(LEAVE_FADE_MS)
 
     def _cancel(self) -> None:
         if self.job:

@@ -962,7 +962,8 @@ class App:
         if not self.music:
             return
         self.music.update()
-        if self.current != self._music_sel:
+        moved = self.current != self._music_sel
+        if moved:
             self._music_sel, self._music_since = self.current, now
         if not self.state.music or not self.rows or self._category_selected():
             self.music.request(None)
@@ -970,12 +971,17 @@ class App:
             pass  # playing, loading, or finished; title tracks play once, like on the engine's title screen
         elif now - self._music_since >= DWELL_SECONDS:
             p = self.opts.presets[self.current]
-            engine_font = None
-            overrides = (self.soundfont_choice, os.environ.get("DOOMRUNNER_SOUNDFONT"))
-            if not any(font and Path(font).is_file() for font in overrides):
-                engine_font = self._engine_soundfont_for(self.opts.engine_for(p))
-            self.music.request(self.current, soundfont=engine_font or self.soundfont, preset=p)
-        # While the selection is still moving, the current track plays on: the next preset may share it.
+            self.music.request(self.current, soundfont=self._music_font(p), preset=p)
+        elif moved:
+            # The old track fades now rather than trailing through the dwell and the next track's preparation.
+            self.music.leave(self.current, soundfont=self._music_font(self.opts.presets[self.current]))
+
+    def _music_font(self, preset: Preset) -> Path | None:
+        overrides = (self.soundfont_choice, os.environ.get("DOOMRUNNER_SOUNDFONT"))
+        engine_font = None
+        if not any(font and Path(font).is_file() for font in overrides):
+            engine_font = self._engine_soundfont_for(self.opts.engine_for(preset))
+        return engine_font or self.soundfont
 
     def _set_music(self, on: bool) -> None:
         if self.state.music == on:
