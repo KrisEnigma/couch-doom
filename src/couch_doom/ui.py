@@ -2414,6 +2414,36 @@ class App:
             surf = self._text_cache[key] = draw.paint(d, d, p)
         return surf
 
+    def _browser_icon(self, kind: str, color) -> pygame.Surface:
+        """Line icon for a browser row: "folder", "drive", "file", or "launcher" (a solid file)."""
+        key = ("icon", kind, tuple(color), self.s)
+        surf = self._text_cache.get(key)
+        if surf is None:
+            d = max(10, int(22 * self.s))
+            stroke = max(1.0, 1.7 * self.s)
+
+            def p(big: pygame.Surface, k: int) -> None:
+                def pts(*uv: tuple[float, float]) -> list[tuple[float, float]]:
+                    return [(u * d * k, v * d * k) for u, v in uv]
+                w = max(1, int(stroke * k))
+                if kind == "folder":
+                    pygame.draw.lines(big, color, True, pts((.06, .86), (.06, .16), (.38, .16), (.48, .3), (.94, .3), (.94, .86)), w)
+                elif kind == "drive":
+                    draw.rr_on(big, pygame.Rect(*(int(c * d * k) for c in (.04, .28, .92, .5))), color, (3 * k,) * 4)
+                    draw.rr_on(big, pygame.Rect(*(int(c * d * k) + w for c in (.04, .28)), *(int(c * d * k) - 2 * w for c in (.92, .5))),
+                               (0, 0, 0, 0), (2 * k,) * 4)
+                    pygame.draw.circle(big, color, (int(.76 * d * k), int(.53 * d * k)), max(1, int(.07 * d * k)))
+                else:
+                    page = pts((.2, .06), (.6, .06), (.82, .28), (.82, .94), (.2, .94))
+                    if kind == "launcher":
+                        pygame.draw.polygon(big, color, page)
+                    else:
+                        pygame.draw.lines(big, color, True, page, w)
+                        pygame.draw.lines(big, color, False, pts((.6, .06), (.6, .28), (.82, .28)), w)
+
+            surf = self._text_cache[key] = draw.paint(d, d, p)
+        return surf
+
     def _tracked(self, text: str, size: float, color, bold: bool = True, tracking: float = 0.14) -> pygame.Surface:
         """Uppercase label with letter spacing."""
         key = ("trk", text, size, tuple(color), bold, tracking, self.s)
@@ -3201,10 +3231,9 @@ class App:
             label = entry.display_name
             font = self._font(25, bold=selected and not entry.parent_selector)
             chevron = int(6 * s)
-            name_x = x
+            icon_d = max(10, int(22 * s))
+            name_x = x + icon_d + int(14 * s)
             # Folders and drives open into more rows; the way back up points the other way.
-            if entry.parent_selector:
-                name_x += 3 * chevron
             enters = entry.is_dir and not entry.parent_selector
             room = rect.right - name_x - int(16 * s) - (3 * chevron if enters else 0)
             detail_font = self._font(20)
@@ -3218,9 +3247,13 @@ class App:
             self.screen.blit(name, (name_x, self._text_top(font, rect.centery)))
             if detail:
                 self.screen.blit(detail, (name_x + name.get_width() + gap, self._text_top(detail_font, rect.centery)))
+            if not entry.parent_selector:
+                kind = "drive" if entry.root_selector and entry.path != Path.home() else "folder" if entry.is_dir else "launcher" if entry.launcher else "file"
+                icon = self._browser_icon(kind, color)
+                self.screen.blit(icon, (x, rect.centery - icon.get_height() // 2))
             if entry.parent_selector or enters:
                 mark = TEXT if selected else MUTED
-                cx = x + chevron // 2 if entry.parent_selector else rect.right - int(16 * s) - chevron
+                cx = x + icon_d // 2 if entry.parent_selector else rect.right - int(16 * s) - chevron
                 d = -1 if entry.parent_selector else 1
                 points = [(cx - d * chevron // 2, rect.centery - chevron), (cx + d * chevron // 2, rect.centery),
                           (cx - d * chevron // 2, rect.centery + chevron)]
