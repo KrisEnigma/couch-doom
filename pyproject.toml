@@ -26,3 +26,7 @@ couch_doom = ["assets/**/*", "locales/*.json"]
 
 [tool.setuptools.dynamic]
 version = { attr = "couch_doom.__version__" }
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
