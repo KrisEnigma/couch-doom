@@ -76,15 +76,15 @@ MIDI playback support from source also needs tinysoundfont. On macOS, if GZDoom 
 | Back / View | F1 | Quick help |
 | Start | Esc | Open the menu |
 | — | F5 | Help & feedback |
-| X | Tab | Readme and ENDOOM info |
+| X | Tab | Readme and ENDOOM info; on a group heading, expand or collapse every group |
 | Y | / or type | Search |
 | R3 | F3 | Add or remove a favorite |
 | LB / RB | — | Jump between sections |
 | LT / RT | PgUp / PgDn | Jump through the list |
-| — | Home / End | Jump to the top / bottom of the list |
+| — | Home / End | Jump to the top / bottom of the list or file browser |
 | B | — | Back from an open panel |
 
-Escape or Start opens the menu for returning to the list, refreshing launcher data, choosing a launcher, toggling title music or menu sounds with Left/Right, cycling Colors and Language, opening Help, and quitting. Language follows the OS on first run when CouchDoom supports it (English, Spanish, Brazilian Portuguese, French, German); change it anytime from the menu. B closes an open panel and does nothing on the main selector. Mouse and keyboard prompts are available too. CouchDoom hides while a game runs and returns when it closes. Favorites have their own section at the top.
+Escape or Start opens the menu for returning to the list, refreshing launcher data, choosing a launcher, toggling title music or menu sounds with Left/Right, cycling Colors and Language, turning the optional Recently Played group on or off, opening Help, and quitting. Language follows the OS on first run when CouchDoom supports it (English, Spanish, Brazilian Portuguese, French, German); change it anytime from the menu. Colors can follow each game's art or lock one look for the whole app. Group headings can be folded to keep large libraries manageable; search still finds games inside collapsed groups, and Favorites stay near the top. B closes an open panel and does nothing on the main selector. Mouse and keyboard prompts are available too. CouchDoom hides while a game runs and returns when it closes.
 
 ## What you'll see and hear
 
@@ -95,8 +95,8 @@ Escape or Start opens the menu for returning to the list, refreshing launcher da
 
 ## A few extras
 
-- CouchDoom checks GitHub once after startup for updates. Packaged builds can install an update; source builds use the release page. Turn the check off with the `update_check` setting in `last_played.json` or by setting `COUCHDOOM_NO_UPDATE_CHECK`.
-- Favorites and preferences are saved locally. The troubleshooting log can include file paths and launch output, so review it before sharing.
+- CouchDoom checks GitHub once after startup for updates. Packaged builds can install an update; source builds use the release page. Turn the check off with the `update_check` setting in `last_played.json` or by setting `COUCHDOOM_NO_UPDATE_CHECK`. Leftover folders from an interrupted update are cleaned up on the next launch.
+- Favorites, language, colors, Recently Played, and other preferences are saved locally. The troubleshooting log can include file paths and launch output, so review it before sharing.
 - From source, `--windowed` opens a window, `--dry-run` prints launch commands, `--options` opens a settings file or supported port, and `--soundfont` selects MIDI music playback.
 
 ## Credits and license
