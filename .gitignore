@@ -5,3 +5,6 @@ state/
 /soundfonts/
 build/
 dist/
+*.egg-info/
+# Releases install from requirements.txt; a local `uv run` lockfile would only drift from it.
+uv.lock
