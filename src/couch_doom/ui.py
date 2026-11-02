@@ -61,7 +61,7 @@ OSK_ROWS = [
 OSK_LABELS = {"SPACE": "osk.space", "DELETE": "hint.delete", "CLEAR": "osk.clear", "DONE": "hint.done"}
 
 QUIT_CONFIRM_SECONDS = 2.0
-LAUNCH_WIPE_SECONDS = 0.38
+LAUNCH_WIPE_SECONDS = 0.5
 HANDOVER_TIMEOUT_SECONDS = handover.DEFAULT_TIMEOUT
 HANDOVER_GRACE_FRAMES = 4  # ~66 ms: cover the engine's first paint without lingering over the game
 WINDOW_RETRIES = 20  # half a second apart
@@ -1555,6 +1555,24 @@ class App:
             img = img.subsurface(pygame.Rect((w - width_169) // 2, 0, width_169, h)).copy()
         return img, aspect
 
+    def _panel_fit(self, w: int, h: int, aspect: float) -> tuple[float, tuple[int, int]]:
+        """How `_render_art` places w x h art in the panel: its scale, and where its top-left lands relative to
+        the panel's. Fits the width; art that's still short after that may zoom up to 25% so it isn't a thin
+        strip (short art dissolves at the bottom)."""
+        tw, th = self.art_rect.size
+        scale = tw / w
+        if h * aspect * scale < th * ART_MIN_FILL:
+            scale = min(th * ART_MIN_FILL / (h * aspect), scale * ART_MAX_ZOOM)
+        size = (int(w * scale) + 1, int(h * aspect * scale) + 1)
+        return scale, (-((size[0] - tw) // 2), -max(0, (size[1] - th) // 3))
+
+    def _window_cover(self, w: int, h: int, aspect: float) -> tuple[float, tuple[int, int]]:
+        """How the loading screen places w x h art across the window, like `_panel_fit`. Cropping 4:3 art to
+        the window keeps more of the top, where title pictures put their logo."""
+        scale = max(self.w / w, self.h / (h * aspect))
+        cover = (math.ceil(w * scale), math.ceil(h * aspect * scale))
+        return scale, ((self.w - cover[0]) // 2, -(cover[1] - self.h) // 6)
+
     def _render_art(self, art: Art | None):
         """Prepare selected art off-thread; return (theme, art, background, layers) for the UI thread to adopt."""
         lower_current_thread_priority()
@@ -1565,18 +1583,14 @@ class App:
         w, h = img.get_size()
         theme = from_art(img)
         tw, th = self.art_rect.size
-        # Fit the width; art that's still short after that may zoom up to 25% so it isn't a thin strip.
-        # Short art dissolves at the bottom.
-        scale = tw / w
-        if h * aspect * scale < th * ART_MIN_FILL:
-            scale = min(th * ART_MIN_FILL / (h * aspect), scale * ART_MAX_ZOOM)
+        scale, (ox, oy) = self._panel_fit(w, h, aspect)
         size = (int(w * scale) + 1, int(h * aspect * scale) + 1)
         scaled = pygame.transform.scale(img, size) if w <= 640 else pygame.transform.smoothscale(img, size)
         out = pygame.Surface((tw, th)).convert(_OPAQUE)
         background = self._make_background(theme)
         out.blit(background, (0, 0), self.art_rect)  # its own theme, for short art
         layers = self._make_theme_layers(background)
-        crop = scaled.subsurface(pygame.Rect((size[0] - tw) // 2, max(0, (size[1] - th) // 3), tw, min(th, size[1])))
+        crop = scaled.subsurface(pygame.Rect(-ox, -oy, tw, min(th, size[1])))
         if crop.get_height() < th:
             # Art shorter than the panel: dissolve its bottom edge instead of leaving a hard line.
             crop = crop.convert_alpha()
@@ -2304,33 +2318,84 @@ class App:
             self._notify(tr("toast.back_from", name=preset.name), MUTED)
 
     def _play_wipe(self, name: str) -> None:
+        """The list sinks into shadow while the game's art zooms out of its panel to fill the window, then the
+        loading text fades in. The zoom waits for the full-window art (a few frames, usually; the shadow starts
+        at once) and begins exactly where the panel shows that art, so the two line up."""
         clock = pygame.time.Clock()
         start = time.monotonic()
         poll = self._start_loading_backdrop()
-        final = None
-        band, slant = int(120 * self.s), int(160 * self.s)
-        while (t := (time.monotonic() - start) / LAUNCH_WIPE_SECONDS) < 1:
+        self._draw(start)
+        ui_shot = self.screen.copy()
+        full = self.screen.get_rect()
+        art = final = path = None
+        art_at = dim = 0.0
+        while True:
+            now = time.monotonic()
             pygame.event.pump()
-            self._draw(time.monotonic())
-            if final is None and (backdrop := poll()) is not None:
+            if art is None and (ready := poll()) is not None:
+                backdrop, dims, soft = ready
+                # Zoom the feathered copy, so the art has no hard edge against the list; _loading_screen writes
+                # its text onto `backdrop`.
+                art, art_at = soft or backdrop.copy(), now
                 final = self._loading_screen(name, backdrop)[0]
-            # An accent blade sweeps across, uncovering the loading screen behind it (accent until it's ready).
-            x = int((self.w + band + slant) * _ease_out(t)) - band
-            if x > 0:
-                if final is not None:
-                    self.screen.blit(final, (0, 0), pygame.Rect(0, 0, x, self.h))
-                else:
-                    self.screen.fill(self.theme.accent, (0, 0, x, self.h))
-            pygame.draw.polygon(self.screen, self.theme.accent, [(x, 0), (x + band + slant, 0), (x + band, self.h), (x, self.h)])
+                path = self._zoom_path(dims)
+            t = (now - art_at) / LAUNCH_WIPE_SECONDS if art is not None else 0.0
+            if t >= 1:
+                break
+            grow = _smoothstep(t / 0.7)
+            dim = max(dim, grow, 0.6 * _smoothstep((now - start) / LAUNCH_WIPE_SECONDS))
+            self.screen.blit(ui_shot, (0, 0))
+            k = 255 - int(215 * dim)
+            self.screen.fill((k, k, k), special_flags=pygame.BLEND_MULT)
+            if art is not None:
+                # Without art there's nothing to zoom, so the plain backdrop opens out from the panel instead.
+                a, b = self.art_rect, full
+                clip = full if path else pygame.Rect(
+                    round(_lerp(a.x, b.x, grow)), round(_lerp(a.y, b.y, grow)),
+                    round(_lerp(a.w, b.w, grow)), round(_lerp(a.h, b.h, grow)))
+                self._blit_zoomed(art, path, grow, clip, _smoothstep(t / 0.2))
+            if final is not None and t > 0.7:
+                final.set_alpha(int(255 * _smoothstep((t - 0.7) / 0.3)))
+                self.screen.blit(final, (0, 0))
+                _reset_alpha(final)
             self._flip()
             clock.tick(60)
-        while final is None:
-            if (backdrop := poll()) is not None:
-                final = self._loading_screen(name, backdrop)[0]
-            else:
-                time.sleep(0.005)
         self.screen.blit(final, (0, 0))
         self._flip()
+
+    def _zoom_path(self, dims: tuple | None) -> tuple | None:
+        """The launch zoom's ends: art placed as in the panel, then as across the window, each as (scale, x, y);
+        None for a backdrop without art, which just opens out from the panel."""
+        if dims is None:
+            return None
+        s0, (px, py) = self._panel_fit(*dims)
+        s1, (wx, wy) = self._window_cover(*dims)
+        return (s0, self.art_rect.x + px, self.art_rect.y + py), (s1, wx, wy)
+
+    def _blit_zoomed(self, art: pygame.Surface, path: tuple | None, grow: float, clip: pygame.Rect, alpha: float) -> None:
+        """Draw the full-window backdrop `grow` of the way along the zoom, inside `clip`. Only the visible part
+        is scaled, nearest-neighbour: this runs every frame."""
+        if path is None:
+            k, x, y = 1.0, 0.0, 0.0
+        else:
+            (s0, x0, y0), (s1, x1, y1) = path
+            s = _lerp(s0, s1, grow)
+            k = s / s1
+            x, y = _lerp(x0, x1, grow) - k * x1, _lerp(y0, y1, grow) - k * y1
+        src = pygame.Rect(math.floor((clip.x - x) / k), math.floor((clip.y - y) / k),
+                          math.ceil(clip.w / k) + 2, math.ceil(clip.h / k) + 2).clip(art.get_rect())
+        if src.w <= 0 or src.h <= 0:
+            return
+        part = art.subsurface(src)
+        if k != 1.0:
+            part = pygame.transform.scale(part, (max(1, round(src.w * k)), max(1, round(src.h * k))))
+        if alpha < 1:
+            part.set_alpha(int(255 * alpha))
+        self.screen.set_clip(clip)
+        self.screen.blit(part, (round(x + src.x * k), round(y + src.y * k)))
+        self.screen.set_clip(None)
+        if part.get_parent() is art:
+            _reset_alpha(part)
 
     def _hold_loading(self, name: str, launched: log.Launched) -> None:
         """Keep the LOADING screen up until the engine has a window, so a big WAD does not show the desktop.
@@ -2360,9 +2425,10 @@ class App:
         if reason == "timeout":
             log.write("handover timeout", f"{name}: no engine window after {HANDOVER_TIMEOUT_SECONDS:.0f} seconds")
 
-    def _loading_backdrop(self, index: int, bg: pygame.Surface) -> pygame.Surface:
-        """The game's title art across the whole window, dissolving into the theme at the bottom. No text, so
-        it can be built off the main thread while the wipe starts: HD art takes tens of milliseconds."""
+    def _loading_backdrop(self, index: int, bg: pygame.Surface) -> tuple[pygame.Surface, tuple | None]:
+        """The game's title art across the whole window, dissolving into the theme at the bottom, and the art's
+        (width, height, aspect) for the launch transition (None without art). No text, so it can be built off
+        the main thread while the transition starts: HD art takes tens of milliseconds."""
         size = (self.w, self.h)
         surf = bg.copy()
         try:
@@ -2371,32 +2437,38 @@ class App:
             art = None
         decoded = self._art_image(art) if art is not None else None
         if decoded is None:
-            return surf
+            return surf, None
         img, aspect = decoded
         w, h = img.get_size()
-        scale = max(self.w / w, self.h / (h * aspect))
+        scale, at = self._window_cover(w, h, aspect)
         cover = (math.ceil(w * scale), math.ceil(h * aspect * scale))
         scaled = pygame.transform.scale(img, cover) if w <= 640 else pygame.transform.smoothscale(img, cover)
-        # Cropping 4:3 art to the window: keep more of the top, where title pictures put their logo.
-        surf.blit(scaled, ((self.w - cover[0]) // 2, -(cover[1] - self.h) // 6))
+        surf.blit(scaled, at)
 
         def scrim(u: float, v: float) -> float:
             return max(0.15, 0.97 * _smoothstep((v - 0.42) / 0.5), 0.55 * (1 - _smoothstep(u / 0.6)) * _smoothstep((v - 0.25) / 0.5))
 
         surf.blit(self._bg_overlay(bg, pygame.Rect((0, 0), size), self._alpha_mask(size, scrim)), (0, 0))
-        return surf
+        return surf, (w, h, aspect)
 
-    def _start_loading_backdrop(self) -> Callable[[], pygame.Surface | None]:
-        """Build the backdrop on a thread; the returned poll gives it once ready (None until then)."""
+    def _start_loading_backdrop(self) -> Callable[[], tuple[pygame.Surface, tuple | None, pygame.Surface | None] | None]:
+        """Build the backdrop on a thread; the returned poll gives it, the art's dimensions and a copy feathered
+        at the left and bottom for the launch zoom (both None without art), or None until they're ready."""
         bg = self._layers_for(self.theme)["bg"][0]
         index = self.current
-        done: list[pygame.Surface] = []
+        done: list[tuple[pygame.Surface, tuple | None, pygame.Surface | None]] = []
 
         def work() -> None:
             try:
-                done.append(self._loading_backdrop(index, bg))
+                surf, dims = self._loading_backdrop(index, bg)
+                soft = None
+                if dims is not None:
+                    soft = surf.convert_alpha()
+                    feather = self._alpha_mask(soft.get_size(), lambda u, v: _smoothstep(u / 0.12) * _smoothstep((1 - v) / 0.15))
+                    soft.blit(feather, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+                done.append((surf, dims, soft))
             except Exception:
-                done.append(bg.copy())
+                done.append((bg.copy(), None, None))
 
         thread = threading.Thread(target=work, daemon=True)
         thread.start()
@@ -2409,7 +2481,7 @@ class App:
         if self._loading_cache and self._loading_cache[0] == key:
             return self._loading_cache[1]
         s, m = self.s, self.margin
-        surf = backdrop if backdrop is not None else self._loading_backdrop(self.current, self._layers_for(self.theme)["bg"][0])
+        surf = backdrop if backdrop is not None else self._loading_backdrop(self.current, self._layers_for(self.theme)["bg"][0])[0]
         room = self.w - 2 * m
         for pt in range(96, 39, -8):
             font = self._font(pt, bold=True)
