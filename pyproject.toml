@@ -22,7 +22,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-couch_doom = ["assets/**/*"]
+couch_doom = ["assets/**/*", "locales/*.json"]
 
 [tool.setuptools.dynamic]
 version = { attr = "couch_doom.__version__" }

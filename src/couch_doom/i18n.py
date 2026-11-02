@@ -3,9 +3,13 @@ from __future__ import annotations
 
 import json
 import locale
+import sys
 from pathlib import Path
 
-LOCALES_DIR = Path(__file__).resolve().parent / "locales"
+from .config import FROZEN, PACKAGE_DIR
+
+# Packaged builds keep catalogs next to assets under _MEIPASS; source/pip keep them beside this module.
+LOCALES_DIR = Path(sys._MEIPASS) / "locales" if FROZEN else PACKAGE_DIR / "locales"
 LANGUAGES = [
     ("en", "lang.en"),
     ("es", "lang.es"),

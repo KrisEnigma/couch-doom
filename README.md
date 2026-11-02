@@ -84,7 +84,7 @@ MIDI playback support from source also needs tinysoundfont. On macOS, if GZDoom 
 | — | Home / End | Jump to the top / bottom of the list |
 | B | — | Back from an open panel |
 
-Escape or Start opens the menu for returning to the list, refreshing launcher data, choosing a launcher, toggling title music or menu sounds with Left/Right, opening Help, and quitting. B closes an open panel and does nothing on the main selector. Mouse and keyboard prompts are available too. CouchDoom hides while a game runs and returns when it closes. Favorites have their own section at the top.
+Escape or Start opens the menu for returning to the list, refreshing launcher data, choosing a launcher, toggling title music or menu sounds with Left/Right, cycling Colors and Language, opening Help, and quitting. Language follows the OS on first run when CouchDoom supports it (English, Spanish, Brazilian Portuguese, French, German); change it anytime from the menu. B closes an open panel and does nothing on the main selector. Mouse and keyboard prompts are available too. CouchDoom hides while a game runs and returns when it closes. Favorites have their own section at the top.
 
 ## What you'll see and hear
 

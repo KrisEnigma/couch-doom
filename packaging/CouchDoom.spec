@@ -16,7 +16,12 @@ tsf_datas, tsf_binaries, tsf_hidden = collect_all("tinysoundfont") if importlib.
 certifi_datas, certifi_binaries, certifi_hidden = collect_all("certifi")
 mac = sys.platform == "darwin"
 
-datas = [(str(root / "src" / "couch_doom" / "assets"), "assets"), *tsf_datas, *certifi_datas]
+datas = [
+    (str(root / "src" / "couch_doom" / "assets"), "assets"),
+    (str(root / "src" / "couch_doom" / "locales"), "locales"),
+    *tsf_datas,
+    *certifi_datas,
+]
 
 a = Analysis(
     [str(root / "packaging" / "couch_doom_entry.py")],
