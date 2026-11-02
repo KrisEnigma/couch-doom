@@ -19,6 +19,7 @@ def test_requesting_preset_music_defers_file_identity_work_to_worker(monkeypatch
     player = music.MusicPlayer.__new__(music.MusicPlayer)
     player.soundfont = None
     player.tsf_available = False
+    player.peek = None
     player.renderers = {}
     player.channels = ()
     player.active = 0

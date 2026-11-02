@@ -14,6 +14,7 @@ class ManualPool:
 def test_music_update_schedules_cache_pruning_without_running_it_inline(monkeypatch):
     player = MusicPlayer.__new__(MusicPlayer)
     player.job = None
+    player.peek = None
     player.pending = None
     player.stream_path = None
     player._prune_needed = True

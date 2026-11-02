@@ -973,8 +973,10 @@ class App:
             p = self.opts.presets[self.current]
             self.music.request(self.current, soundfont=self._music_font(p), preset=p)
         elif moved:
-            # The old track fades now rather than trailing through the dwell and the next track's preparation.
-            self.music.leave(self.current, soundfont=self._music_font(self.opts.presets[self.current]))
+            # A track the next preset doesn't share fades now rather than trailing through the dwell and the
+            # next track's preparation.
+            p = self.opts.presets[self.current]
+            self.music.leave(self.current, soundfont=self._music_font(p), preset=p)
 
     def _music_font(self, preset: Preset) -> Path | None:
         overrides = (self.soundfont_choice, os.environ.get("DOOMRUNNER_SOUNDFONT"))

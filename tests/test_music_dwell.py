@@ -1,3 +1,4 @@
+from concurrent.futures import Future
 from types import SimpleNamespace
 
 from couch_doom import music
@@ -36,25 +37,84 @@ class FakeChannel:
         self.fades.append(ms)
 
 
+class HeldPool:
+    """Lookups that finish only when the test says so."""
+
+    def __init__(self):
+        self.calls = []
+
+    def submit(self, fn, *args):
+        future = Future()
+        self.calls.append((args, future))
+        return future
+
+
 def playing_player(sig="title"):
     player = music.MusicPlayer.__new__(music.MusicPlayer)
     player.soundfont = None
+    player.tsf_available = False
     player.channels = (FakeChannel(), FakeChannel())
     player.active = 0
     player.want, player.job, player.pending = "old", None, None
+    player.peek_pool, player.peek = HeldPool(), None
     player.tracks = {("old", None): sig}
     player.playing = sig
     player.streaming = False
     return player
 
 
-def test_leaving_a_preset_fades_its_track_right_away():
+def test_leaving_for_a_preset_known_to_use_another_track_fades_right_away():
     player = playing_player()
+    player.tracks[("next", None)] = "other"
 
-    player.leave("next")
+    player.leave("next", preset=object())
 
     assert player.channels[0].fades == [music.LEAVE_FADE_MS]
     assert player.want is None and player.playing is None
+    assert player.peek_pool.calls == []
+
+
+def test_leaving_for_an_unknown_preset_keeps_playing_until_its_track_turns_out_shared():
+    player = playing_player()
+
+    player.leave("next", preset=object())
+    player._update_peek()
+    assert player.channels[0].fades == []  # still looking it up
+
+    player.peek_pool.calls[0][1].set_result("title")
+    player._update_peek()
+
+    assert player.channels[0].fades == []
+    assert player.playing == "title" and player.tracks[("next", None)] == "title"
+
+
+def test_leaving_for_an_unknown_preset_fades_once_its_track_turns_out_different():
+    player = playing_player()
+
+    player.leave("next", preset=object())
+    player.peek_pool.calls[0][1].set_result("other")
+    player._update_peek()
+
+    assert player.channels[0].fades == [music.LEAVE_FADE_MS]
+    assert player.want is None and player.tracks[("next", None)] == "other"
+
+
+def test_a_slow_track_lookup_fades_rather_than_trailing(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(music.time, "monotonic", lambda: clock[0])
+    player = playing_player()
+
+    player.leave("next", preset=object())
+    clock[0] += music.LEAVE_WAIT_SECONDS / 2
+    player._update_peek()
+    assert player.channels[0].fades == []
+
+    clock[0] += music.LEAVE_WAIT_SECONDS
+    player._update_peek()
+    assert player.channels[0].fades == [music.LEAVE_FADE_MS]
+
+    player.peek_pool.calls[0][1].set_result("title")
+    assert player.tracks[("next", None)] == "title"  # remembered for the next visit
 
 
 def test_leaving_for_a_preset_known_to_share_the_track_keeps_it_playing():
@@ -71,7 +131,7 @@ def test_moving_the_selection_fades_music_before_the_dwell_ends():
     app = App.__new__(App)
     left = []
     app.music = SimpleNamespace(want=0, update=lambda: None, request=lambda *a, **k: None,
-                                leave=lambda key, soundfont=None: left.append(key))
+                                leave=lambda key, soundfont=None, preset=None: left.append(key))
     app.current, app._music_sel, app._music_since = 1, 0, 10.0
     app.state = SimpleNamespace(music=True)
     app.rows = [object()]

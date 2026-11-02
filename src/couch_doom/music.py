@@ -67,6 +67,7 @@ DWELL_SECONDS = 0.65
 FADE_IN_MS = 500
 FADE_OUT_MS = 700
 LEAVE_FADE_MS = 400  # moving off a preset: quick, so its track doesn't trail into the next one
+LEAVE_WAIT_SECONDS = 0.35  # longest the old track plays on while finding out whether the next preset shares it
 CACHE_BYTES = 24 * 1024 * 1024  # rendered MIDI PCM; encoded streams live in the persistent disk cache
 
 
@@ -518,11 +519,12 @@ def _pcm_stats(samples: array, chunk_size: int = 16_384) -> tuple[float, float]:
     return peak, rms
 
 
-def _prepare(
-    iwad: Path | None, files: list[Path], renderer: MidiRenderer | None, cancel: threading.Event,
-    ready: dict[str, Prepared], selection_key: str | None = None,
-    protected_streams: set[Path] | None = None,
-) -> Prepared | None:
+def _find_track(
+    iwad: Path | None, files: list[Path], soundfont: Path | None, cancel: threading.Event,
+    selection_key: str | None = None,
+) -> tuple[Track, str] | None:
+    """Which title track this game plays and its identity (`sig`), without rendering it: cheap once the
+    selection cache knows where the track lives. `soundfont` is the renderer's, which is part of a MIDI's sig."""
     from . import log
 
     from . import music_cache
@@ -573,8 +575,22 @@ def _prepare(
         if track.format == "mus":
             track.midi_data = mus_to_midi(track.midi_data)
     sig = track.source.identity if track.source else hashlib.sha1(track.midi_data or b"").hexdigest()
-    if track.kind == "midi" and renderer:
-        sig = hashlib.sha1(f"{renderer.soundfont}\0".encode() + (track.midi_data or b"")).hexdigest()
+    if track.kind == "midi" and soundfont:
+        sig = hashlib.sha1(f"{soundfont}\0".encode() + (track.midi_data or b"")).hexdigest()
+    return track, sig
+
+
+def _prepare(
+    iwad: Path | None, files: list[Path], renderer: MidiRenderer | None, cancel: threading.Event,
+    ready: dict[str, Prepared], selection_key: str | None = None,
+    protected_streams: set[Path] | None = None,
+) -> Prepared | None:
+    from . import log, music_cache
+
+    found = _find_track(iwad, files, renderer.soundfont if renderer else None, cancel, selection_key)
+    if found is None:
+        return None
+    track, sig = found
     if sig in ready:
         return ready[sig]  # another preset's copy of the same track, already rendered
     if track.kind == "midi":
@@ -634,11 +650,25 @@ def _prepare_preset(
     return _prepare(iwad, list(files), renderer, cancel, ready, selection_key, protected_streams)
 
 
+def _identify_preset(preset, soundfont: Path | None, cancel: threading.Event) -> str | None:
+    """The sig `_prepare_preset` would give this preset's track (None when it has none), without rendering."""
+    if cancel.is_set():
+        raise InterruptedError("track lookup cancelled")  # scrolled past while queued
+    lower_current_thread_priority()
+    from . import asset_cache, music_cache
+    from .launch import load_order, presented_files
+
+    iwad, files = presented_files(preset)
+    selection_key = music_cache.selection_key(asset_cache.key_for(preset, iwad, load_order(preset)), iwad, list(files))
+    found = _find_track(iwad, list(files), soundfont, cancel, selection_key)
+    return found[1] if found else None
+
+
 class MusicPlayer:
     """One preset's title track at a time, crossfading on change.
 
     Moving to a preset that uses the same track (the stock title music, say) keeps it playing instead of starting
-    it over, once that's known; any other track fades out as soon as the selection leaves its preset.
+    it over; any other track fades out as soon as the selection leaves its preset (see `leave`).
     Rendered MIDI alternates between two channels so the old track fades out under the new one.
     Streamed formats share SDL_mixer's single music slot, so a new stream waits for the old one's
     fade-out to finish instead of cutting it.
@@ -672,6 +702,9 @@ class MusicPlayer:
         self.active = 0  # index of the channel the current PCM track is on
         self.sounds: list[pygame.mixer.Sound | None] = [None, None]
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="music")
+        # Separate from `pool` so a lookup on leaving a preset never queues behind a render.
+        self.peek_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="music-peek")
+        self.peek: tuple[tuple, Future, threading.Event, float] | None = None
         self.want: object = None
         self.job: tuple[object, tuple, Future, threading.Event] | None = None
         self.pending: tuple[object, Prepared] | None = None
@@ -690,6 +723,7 @@ class MusicPlayer:
         """Ask for `key`'s track; None stops. Cheap to call every frame."""
         if key == self.want:
             return
+        self._cancel_peek()
         self.want = key
         self._cancel()
         if key is None:
@@ -722,16 +756,63 @@ class MusicPlayer:
                                       None, protected)
         self.job = (key, ident, future, cancel)
 
-    def leave(self, key: object, soundfont: Path | None = None) -> None:
-        """The selection moved to `key` but hasn't settled: fade the current track now, unless `key` is already
-        known to use that same track, which then plays on. Cheap to call every frame."""
+    def leave(self, key: object, soundfont: Path | None = None, preset=None) -> None:
+        """The selection moved to `key` but hasn't settled. A track `key` shares plays on; any other fades now.
+        When that isn't known yet, the track plays on while `key`'s is looked up (no rendering, so usually quick),
+        but no longer than LEAVE_WAIT_SECONDS."""
+        self._cancel_peek()
         if self.want is None:
             return
-        sig = self.tracks.get((key, soundfont or self.soundfont))
-        if sig is not None and sig == self.playing and self._audible():
+        if self.playing is None or not self._audible():
+            self._fade_for_leave()  # the old preset's track may still be on its way: drop it
             return
+        soundfont = soundfont or self.soundfont
+        ident = (key, soundfont)
+        if ident in self.tracks:
+            if self.tracks[ident] != self.playing:
+                self._fade_for_leave()
+            return
+        if preset is None:
+            self._fade_for_leave()
+            return
+        cancel = threading.Event()
+        font = soundfont if soundfont and self.tsf_available else None
+        future = self.peek_pool.submit(_identify_preset, preset, font, cancel)
+        self.peek = (ident, future, cancel, time.monotonic())
+
+    def _fade_for_leave(self) -> None:
         self.want = None
         self.stop(LEAVE_FADE_MS)
+
+    def _cancel_peek(self) -> None:
+        if self.peek:
+            self.peek[2].set()
+            self.peek = None
+
+    def _update_peek(self) -> None:
+        if not self.peek:
+            return
+        ident, future, _, started = self.peek
+        if future.done():
+            self.peek = None
+            try:
+                sig = future.result()
+            except Exception:
+                sig = None
+            self.tracks[ident] = sig
+            if sig != self.playing:
+                self._fade_for_leave()
+        elif time.monotonic() - started > LEAVE_WAIT_SECONDS:
+            # Too slow to tell: fade rather than trail on. The lookup finishes for next time.
+            self.peek = None
+            future.add_done_callback(lambda f: self._remember(ident, f))
+            self._fade_for_leave()
+
+    def _remember(self, ident: tuple, future: Future) -> None:
+        try:
+            self.tracks.setdefault(ident, future.result())
+        except Exception:
+            pass
 
     def _cancel(self) -> None:
         if self.job:
@@ -767,6 +848,7 @@ class MusicPlayer:
             self.streaming = False
 
     def update(self) -> None:
+        self._update_peek()
         if self.prune_job and self.prune_job.done():
             self.prune_job = None
         if self.job and self.job[2].done():
@@ -866,3 +948,5 @@ class MusicPlayer:
         self.stream_path = None
         self._prune_stream_cache()
         self.pool.shutdown(wait=False, cancel_futures=True)
+        self._cancel_peek()
+        self.peek_pool.shutdown(wait=False, cancel_futures=True)
