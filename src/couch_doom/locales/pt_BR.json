@@ -125,6 +125,7 @@
   "tag.missing": "Ausente",
   "tag.problems": "Problemas",
   "tag.by": "por {author}",
+  "tag.n_more": "+{count} mais",
 
   "picker.heading": "Launcher",
   "picker.current": "Atual",

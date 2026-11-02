@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import ctypes
-import ctypes.util
 import io
 import math
 import os
@@ -66,6 +65,7 @@ HANDOVER_TIMEOUT_SECONDS = handover.DEFAULT_TIMEOUT
 HANDOVER_GRACE_FRAMES = 4  # ~66 ms: cover the engine's first paint without lingering over the game
 WINDOW_RETRIES = 20  # half a second apart
 INPUT_COOLDOWN = 0.45
+HIDDEN_FPS = 10
 ART_FADE_SECONDS = 0.45
 ART_CACHE_SIZE = 24
 ART_CACHE_BYTES = 96 * 1024 * 1024  # 24 panels at 1080p, but only ~8 at 4K
@@ -313,6 +313,8 @@ def _force_foreground() -> None:
 
 def _appkit():
     """(objc, send, NSApp) through ctypes, or None; pygame exposes no AppKit handles of its own."""
+    import ctypes.util
+
     lib = ctypes.util.find_library("objc")
     if not lib:
         return None
@@ -483,6 +485,7 @@ class App:
         self.drag: tuple[str, int] | None = None  # scrollbar being dragged, and where on the thumb it was grabbed
         self.mouse_pos = (0, 0)
         self.running = True
+        self.hidden = False  # minimized or hidden: the loop ticks slowly and skips drawing
         self.row_offset: dict[tuple[bool, int], float] = {}
 
         self.art_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="titleart")
@@ -504,6 +507,7 @@ class App:
         self._theme_bars: OrderedDict[int, pygame.Surface] = OrderedDict()
         self._theme_layers: OrderedDict[int, dict] = OrderedDict()
         self._footer_band: pygame.Surface | None = None
+        self._detail_panel: tuple[tuple, tuple, pygame.Surface] | None = None
         self._warm_generation = 0  # bumped per cache-warming pass; older workers stop when it moves on
         self._warm_allowed = threading.Event()  # cleared while a game runs
         self._warm_allowed.set()
@@ -2193,6 +2197,7 @@ class App:
         pygame.display.init()
         pygame.display.set_caption("CouchDoom")
         self._open_window()
+        self.hidden = False  # a fresh window; any minimize event belonged to the old one
         self._audio_up()
         self.input.resume()
         pygame.event.clear()
@@ -2395,12 +2400,12 @@ class App:
                 continue
             if len(lines) + 1 == max_lines:
                 rest = len(items) - i
-                more = f"{sep}+{rest} more"
+                more = sep + tr("tag.n_more", count=rest)
                 while line and font.size(line + more)[0] > max_w:
                     line = line.rsplit(sep, 1)[0] if sep in line else ""
                     rest += 1
-                    more = f"{sep}+{rest} more"
-                lines.append(line + more if line else f"+{rest} more")
+                    more = sep + tr("tag.n_more", count=rest)
+                lines.append(line + more if line else tr("tag.n_more", count=rest))
                 return lines
             lines.append(line)
             line = self._fit(item, font, max_w)
@@ -2636,24 +2641,47 @@ class App:
         if self.rows[selected].kind == "header":
             self._draw_category_detail(now, self.rows[selected])
             return
-        dr, s = self.detail_rect, self.s
-        w = dr.width
         preset = self.opts.presets[self.current]
         cmd = self.commands[self.current]
         engine = self.opts.engine_for(preset)
+        readme = self.readmes.get(self.current)
+        logo = self.logos.get(self.current)
+        show_title = not logo and self._should_show_title_text(self.current)
+        panel = self._cached_detail_panel(
+            (preset, cmd, engine, readme, logo),
+            (show_title, self.theme.label, self.detail_rect.size, self.s, current_language()),
+            lambda: self._build_detail_panel(preset, cmd, engine, readme, logo, show_title),
+        )
+        self._blit_detail_panel(now, panel)
+
+    def _cached_detail_panel(self, objects: tuple, values: tuple, build: Callable[[], pygame.Surface]) -> pygame.Surface:
+        """The composed detail panel, rebuilt only when what it shows changes. Objects match by
+        identity (a reload replaces them wholesale); holding them keeps their ids from being reused."""
+        cached = self._detail_panel
+        if cached is None or cached[1] != values or any(a is not b for a, b in zip(cached[0], objects, strict=True)):
+            cached = self._detail_panel = (objects, values, build())
+        return cached[2]
+
+    def _blit_detail_panel(self, now: float, panel: pygame.Surface) -> None:
+        dr, s = self.detail_rect, self.s
+        t = _ease_out((now - self.detail_changed) / 0.3)
+        panel.set_alpha(int(255 * t))
+        self.screen.blit(panel, (dr.x + int(32 * s * (1 - t)), dr.y))
+
+    def _build_detail_panel(self, preset: Preset, cmd, engine, readme, logo: pygame.Surface | None, show_title: bool) -> pygame.Surface:
+        dr, s = self.detail_rect, self.s
+        w = dr.width
         blocks: list[tuple[pygame.Surface, int]] = []  # (surface, gap after)
 
         blocks.append((self._tracked(preset.section, 18, self.theme.label, tracking=0.22), int(10 * s)))
         title_font = self._font(64, bold=True)
         lines = self._wrap(preset.name, title_font, w, 3)
-        readme = self.readmes.get(self.current)
         byline = " · ".join(x for x in ((tr("tag.by", author=readme.author) if readme.author else ""), readme.year) if x) if readme else ""
         blurb = readme.blurb if readme else ""
         title_gap = int(8 * s) if byline or blurb else int(26 * s)
-        logo = self.logos.get(self.current)
         if logo:
             blocks.append((logo, title_gap + int(10 * s)))
-        elif self._should_show_title_text(self.current):
+        elif show_title:
             for n, line in enumerate(lines):
                 blocks.append((self._shadowed(line, title_font, TEXT), title_gap if n == len(lines) - 1 else -int(8 * s)))
         if byline:
@@ -2698,15 +2726,21 @@ class App:
         for surf, gap in blocks:
             panel.blit(surf, (0, y))
             y += surf.get_height() + gap
-
-        t = _ease_out((now - self.detail_changed) / 0.3)
-        panel.set_alpha(int(255 * t))
-        self.screen.blit(panel, (dr.x + int(32 * s * (1 - t)), dr.y))
+        return panel
 
     def _draw_category_detail(self, now: float, row: Row) -> None:
+        presets = self._category_presets(row)
+        panel = self._cached_detail_panel(
+            (self.opts,),
+            (row.group_id, row.text, row.count, row.collapsed, bool(self.filter), tuple(presets),
+             self.theme.label, self.detail_rect.size, self.s, current_language()),
+            lambda: self._build_category_panel(row, presets),
+        )
+        self._blit_detail_panel(now, panel)
+
+    def _build_category_panel(self, row: Row, presets: list[int]) -> pygame.Surface:
         dr, s = self.detail_rect, self.s
         w = dr.width
-        presets = self._category_presets(row)
         header: list[tuple[pygame.Surface, int]] = []
         kind = tr("header.favorites_kind") if row.group_id == FAVORITES_ID else tr("header.category_kind")
         header.append((self._tracked(kind, 16, self.theme.label, tracking=0.28), int(16 * s)))
@@ -2752,9 +2786,7 @@ class App:
         for surf, gap in blocks:
             panel.blit(surf, (0, y))
             y += surf.get_height() + gap
-        t = _ease_out((now - self.detail_changed) / 0.3)
-        panel.set_alpha(int(255 * t))
-        self.screen.blit(panel, (dr.x + int(32 * s * (1 - t)), dr.y))
+        return panel
 
     def _footer_hints(self) -> list[tuple[tuple[str, ...], str, tuple[Action, ...]]]:
         """(glyphs, label, actions): one action for the whole hint, or one per glyph (LB = previous, RB = next)."""
@@ -3462,6 +3494,12 @@ class App:
                     if event.type == pygame.QUIT:
                         self.running = False
                         continue
+                    if event.type in (pygame.WINDOWMINIMIZED, pygame.WINDOWHIDDEN):
+                        self.hidden = True
+                        continue
+                    if event.type in (pygame.WINDOWRESTORED, pygame.WINDOWSHOWN, pygame.WINDOWEXPOSED):
+                        self.hidden = False
+                        continue
                     if event.type == pygame.DROPFILE:
                         self._on_drop(Path(event.file))
                         continue
@@ -3489,6 +3527,9 @@ class App:
                         self._on_action(action, now, repeat=True)
 
                 self.tick(now, dt)
+                if self.hidden:
+                    clock.tick(HIDDEN_FPS)  # minimized: keep music, art and update checks moving without painting
+                    continue
                 self._draw(now)
                 self._flip()
                 clock.tick(60)

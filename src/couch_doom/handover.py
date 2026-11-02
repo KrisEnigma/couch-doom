@@ -20,7 +20,7 @@ LINUX = sys.platform.startswith("linux")
 MACOS = sys.platform == "darwin"
 
 DEFAULT_TIMEOUT = 45.0
-POLL_SECONDS = 0.1  # enumerating windows is not free; four looks a second is plenty
+POLL_SECONDS = 0.1  # enumerating windows is not free; ten looks a second is plenty
 FRAME_SECONDS = 1 / 60
 PROCESS_CACHE_SECONDS = 0.5
 

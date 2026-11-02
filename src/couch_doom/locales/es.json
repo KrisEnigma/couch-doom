@@ -125,6 +125,7 @@
   "tag.missing": "Falta",
   "tag.problems": "Problemas",
   "tag.by": "por {author}",
+  "tag.n_more": "+{count} más",
 
   "picker.heading": "Launcher",
   "picker.current": "Actual",
