@@ -2,6 +2,11 @@
 
 Each release's notes on GitHub are its own section below, behind the download instructions in `packaging/release-header.md`. Keep the `**New in X.Y.Z**` heading format: the release workflow and the in-app update notice both look for it.
 
+**New in 1.2.3**
+
+- Games added through a DoomRunner .dmb bundle now show their readme, and a readme you add later shows up without clearing anything.
+- The first launch after updating rescans title art and music once, so it can take a little longer than usual.
+
 **New in 1.2.2**
 
 - Starting a game zooms its title art up to fill the screen, and the loading screen shows that art instead of a plain red one.
