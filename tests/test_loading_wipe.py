@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import pygame
 
 from couch_doom import ui
