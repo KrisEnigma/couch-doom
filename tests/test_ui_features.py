@@ -515,18 +515,11 @@ def test_bulk_fold_blocked_while_filter_active():
     assert app.collapsed_sections == set()
 
 
-def test_menu_collapse_all_and_expand_all():
+def test_menu_has_no_expand_or_collapse_all_rows():
     app = make_app()
-    app._rebuild_rows()
-    app.mode = "menu"
-    app._sound = lambda _n: None
-    items = app._menu_items()
-    collapse_i = next(i for i, (key, _) in enumerate(items) if key == "collapse_all")
-    app._menu_pick(collapse_i)
-    assert app.collapsed_sections == {"Section A", "Section B"}
-    expand_i = next(i for i, (key, _) in enumerate(app._menu_items()) if key == "expand_all")
-    app._menu_pick(expand_i)
-    assert app.collapsed_sections == set()
+    keys = [key for key, _ in app._menu_items()]
+    assert "expand_all" not in keys
+    assert "collapse_all" not in keys
 
 
 def test_footer_shows_bulk_fold_hint_on_category():
