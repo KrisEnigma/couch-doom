@@ -69,7 +69,7 @@ HANDOVER_GRACE_FRAMES = 4  # ~66 ms: cover the engine's first paint without ling
 WINDOW_RETRIES = 20  # half a second apart
 INPUT_COOLDOWN = 0.45
 HIDDEN_FPS = 10
-ART_FADE_SECONDS = 0.45
+ART_FADE_SECONDS = 0.3
 ART_CACHE_SIZE = 24
 ART_CACHE_BYTES = 96 * 1024 * 1024  # 24 panels at 1080p, but only ~8 at 4K
 # Each theme holds a full-screen background plus an art-panel veil (~11 MB at 1080p, ~45 MB at 4K).
@@ -1231,10 +1231,22 @@ class App:
         if self.theme_from is None:
             self.screen.blit(surf, pos)
             return
-        self.screen.blit(self._layers_for(self.theme_from)[name][0], pos)
-        surf.set_alpha(int(255 * self.theme_t))
-        self.screen.blit(surf, pos)
-        _reset_alpha(surf)
+        old = self._layers_for(self.theme_from)[name][0]
+        if name == "bg":
+            self.screen.blit(old, pos)
+            surf.set_alpha(int(255 * self.theme_t))
+            self.screen.blit(surf, pos)
+            _reset_alpha(surf)
+            return
+        # Masked overlays share one alpha shape: stacking the new over the old would thicken it mid-fade
+        # (it snaps back thin when the fade ends), so mix their colours and keep the alpha as is.
+        k = int(255 * self.theme_t)
+        mixed = old.copy()
+        mixed.fill((255 - k, 255 - k, 255 - k, 255), special_flags=pygame.BLEND_RGBA_MULT)
+        incoming = surf.copy()
+        incoming.fill((k, k, k, 255), special_flags=pygame.BLEND_RGBA_MULT)
+        mixed.blit(incoming, (0, 0), special_flags=pygame.BLEND_RGB_ADD)
+        self.screen.blit(mixed, pos)
 
     def _update_theme(self, now: float) -> None:
         """Follow the title art on screen; the background crossfades in step with the art itself."""

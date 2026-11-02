@@ -6,6 +6,7 @@ Each release's notes on GitHub are its own section below, behind the download in
 
 - Games added through a DoomRunner .dmb bundle now show their readme, and a readme you add later shows up without clearing anything.
 - After an update, a What's new screen lists every change since the version you had, even if you skipped a few releases.
+- Moving between games crossfades the title art faster and without a dark film that flashed over it mid-change.
 - Updates on Windows install reliably, and CouchDoom closes straight away instead of showing a restart screen.
 - The first launch after updating rescans title art and music once, so it can take a little longer than usual.
 
