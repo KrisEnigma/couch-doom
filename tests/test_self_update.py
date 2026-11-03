@@ -66,6 +66,41 @@ class ReleaseTargetTests(unittest.TestCase):
         self.assertEqual(update.asset_for_platform("linux", "aarch64"), "linux-arm64")
         self.assertIsNone(update.asset_for_platform("linux", "riscv64"))
 
+    def test_native_machine_reports_arm64_for_an_intel_build_under_rosetta(self):
+        # platform.machine() says x86_64 inside Rosetta; the hardware sysctl still says arm64.
+        with patch.object(update.sys, "platform", "darwin"), \
+                patch.object(update.subprocess, "run", return_value=SimpleNamespace(stdout="1\n")), \
+                patch.object(update._platform, "machine", return_value="x86_64"):
+            self.assertEqual(update.native_machine(), "arm64")
+
+    def test_native_machine_keeps_platform_answer_on_intel_macs_and_other_systems(self):
+        with patch.object(update.sys, "platform", "darwin"), \
+                patch.object(update.subprocess, "run", return_value=SimpleNamespace(stdout="0\n")), \
+                patch.object(update._platform, "machine", return_value="x86_64"):
+            self.assertEqual(update.native_machine(), "x86_64")
+        with patch.object(update.sys, "platform", "darwin"), \
+                patch.object(update.subprocess, "run", side_effect=OSError("no sysctl")), \
+                patch.object(update._platform, "machine", return_value="x86_64"):
+            self.assertEqual(update.native_machine(), "x86_64")
+        with patch.object(update.sys, "platform", "win32"), \
+                patch.object(update.subprocess, "run") as run, \
+                patch.object(update._platform, "machine", return_value="AMD64"):
+            self.assertEqual(update.native_machine(), "AMD64")
+        run.assert_not_called()
+
+    def test_check_offers_the_arm64_build_to_an_intel_build_under_rosetta(self):
+        assets = [
+            {"name": "CouchDoom-v1.2.5-macos-arm64.zip", "browser_download_url": "https://github.com/KrisEnigma/couch-doom/releases/download/v1.2.5/CouchDoom-v1.2.5-macos-arm64.zip"},
+            {"name": "CouchDoom-v1.2.5-macos-arm64.zip.sha256", "browser_download_url": "https://github.com/KrisEnigma/couch-doom/releases/download/v1.2.5/CouchDoom-v1.2.5-macos-arm64.zip.sha256"},
+        ]
+        data = {"tag_name": "v1.2.5", "html_url": "https://github.com/KrisEnigma/couch-doom/releases/tag/v1.2.5",
+                "body": "", "assets": assets}
+        with patch.object(update, "_fetch_latest", return_value=data), \
+                patch.object(update.sys, "platform", "darwin"), \
+                patch.object(update, "native_machine", return_value="arm64"):
+            info = update.check("1.2.4")
+        self.assertEqual(info["asset"].target, "macos-arm64")
+
     def test_release_check_selects_matching_archive_and_digest_sidecar(self):
         assets = [
             {"name": "CouchDoom-v1.2.0-windows-x64.zip", "browser_download_url": "https://github.com/KrisEnigma/couch-doom/releases/download/v1.2.0/CouchDoom-v1.2.0-windows-x64.zip"},

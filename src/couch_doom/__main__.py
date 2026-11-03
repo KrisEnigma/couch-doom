@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import platform
 import sys
 import traceback
 from pathlib import Path
@@ -91,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if FROZEN:
         from . import self_update, update
-        target = update.asset_for_platform(sys.platform, platform.machine())
+        target = update.asset_for_platform(sys.platform, update.native_machine())
         if target and (install := self_update.installation_path(Path(sys.executable), target)):
             self_update.purge_stale_update_dirs(install.parent)
 

@@ -6,6 +6,7 @@ import os
 import platform as _platform
 import re
 import ssl
+import subprocess
 import sys
 from dataclasses import dataclass
 import urllib.request
@@ -25,6 +26,20 @@ class ReleaseAsset:
     url: str
     sha256_url: str
     target: str
+
+
+def native_machine() -> str:
+    """The CPU the Mac actually has. An Intel build under Rosetta reports x86_64 from platform.machine(),
+    so asking that would keep the updater on the Intel download forever."""
+    if sys.platform == "darwin":
+        try:
+            done = subprocess.run(["sysctl", "-n", "hw.optional.arm64"], capture_output=True, text=True,
+                                  timeout=2, check=False)
+            if done.stdout.strip() == "1":
+                return "arm64"
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return _platform.machine()
 
 
 def asset_for_platform(os_name: str, machine: str) -> str | None:
@@ -124,7 +139,7 @@ def check(current: str, skipped: str | None = None, *, platform: str | None = No
         return None
     if not url.startswith("https://github.com/"):
         return None
-    target = platform or asset_for_platform(sys.platform, _platform.machine())
+    target = platform or asset_for_platform(sys.platform, native_machine())
     notes = whats_new(body, version)
     return {"version": version, "current": current, "notes": notes[:MAX_NOTES],
             "more_notes": len(notes) > MAX_NOTES, "url": url,

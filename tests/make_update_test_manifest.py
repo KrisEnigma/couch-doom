@@ -4,19 +4,18 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import platform
 import shutil
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from couch_doom.update import asset_for_platform  # noqa: E402
+from couch_doom.update import asset_for_platform, native_machine  # noqa: E402
 
 
 def write_manifest(archive_path: Path, output_dir: Path, *, target: str | None = None,
                    version: str = "99.0.0") -> Path:
     archive_path, output_dir = Path(archive_path), Path(output_dir)
-    target = target or asset_for_platform(sys.platform, platform.machine())
+    target = target or asset_for_platform(sys.platform, native_machine())
     if not target:
         raise ValueError("Could not map this OS/arch to a CouchDoom release target.")
     if not archive_path.is_file():
