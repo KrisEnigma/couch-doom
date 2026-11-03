@@ -4,7 +4,7 @@ Each release's notes on GitHub are its own section below, behind the download in
 
 **New in 1.2.4**
 
-- A readme or commentary you edit beside a game shows up the next time you select it. Title art stays cached, so you don't have to clear anything.
+- Refresh list now picks up a readme you've edited beside a game. Title art stays cached.
 - If a mod bundle can't be read, the log names the game and the bundle that listed the missing file, including a bundle inside another bundle.
 
 **New in 1.2.3**
