@@ -328,6 +328,23 @@ def _readme_files(preset: Preset) -> list[Path]:
     return out
 
 
+def beside_stamp(preset: Preset) -> str:
+    """Size and modified time of text files beside the preset's maps and mods.
+
+    The asset key ignores those files, so a cache hit can see that one of them changed without opening the wad."""
+    parts = []
+    for path in _readme_files(preset):
+        for candidate in (_beside(path), _beside_fuzzy(path)):
+            if candidate is None:
+                continue
+            try:
+                st = candidate.stat()
+            except OSError:
+                continue
+            parts.append(f"{candidate.resolve()}:{st.st_mtime_ns}:{st.st_size}")
+    return "\n".join(sorted(set(parts)))
+
+
 def _find_readme(preset: Preset) -> Readme | None:
     files = _readme_files(preset)
     if table := _load_overrides():

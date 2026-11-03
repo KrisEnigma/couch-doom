@@ -115,11 +115,13 @@ def _endoom_from_dict(d: dict[str, Any] | None) -> Endoom | None:
 
 
 class CachedAssets:
-    def __init__(self, art: Art | None, readme: Readme | None, endoom: Endoom | None, logo: Art | None):
+    def __init__(self, art: Art | None, readme: Readme | None, endoom: Endoom | None, logo: Art | None,
+                 readme_stamp: str | None = None):
         self.art = art
         self.readme = readme
         self.endoom = endoom
         self.logo = logo
+        self.readme_stamp = readme_stamp  # None: written before stamps existed
 
 
 def get(key: str) -> CachedAssets | None:
@@ -137,7 +139,7 @@ def get(key: str) -> CachedAssets | None:
             os.utime(path, None)
         except OSError:
             pass
-        return CachedAssets(art, readme, endoom, logo)
+        return CachedAssets(art, readme, endoom, logo, data.get("readme_stamp"))
     except Exception:
         return None
 
@@ -152,6 +154,7 @@ def put(key: str, assets: CachedAssets) -> None:
             "readme": _readme_to_dict(assets.readme),
             "endoom": _endoom_to_dict(assets.endoom),
             "logo": _art_to_dict(assets.logo),
+            "readme_stamp": assets.readme_stamp,
             "ts": time.time(),
         }
         tmp.write_text(json.dumps(data), encoding="utf-8")

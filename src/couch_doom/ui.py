@@ -38,7 +38,7 @@ from .launchers import Launchers
 from .music import DWELL_SECONDS, MusicPlayer, find_engine_soundfont, find_soundfont
 from .options import Options, OptionsError, Preset, unpack
 from .endoom import COLS, ROWS, Endoom, find_endoom
-from .readme import Readme, find_readme
+from .readme import Readme, beside_stamp, find_readme
 from .sfx import Sfx
 from .sources import SOURCES, Choice
 from .state import State
@@ -218,12 +218,24 @@ def _load_extras(preset: Preset) -> tuple[Art | None, Readme | None, Endoom | No
     try:
         key = asset_cache.key_for(preset, iwad, files)
         if cached := asset_cache.get(key):
-            if cached.readme is None:
-                # The key ignores text files, so a readme dropped in after the first scan is only found by looking again.
+            # The key ignores a text file beside the wad. A stamp of those files lets an edit refresh the
+            # readme and leave the title art cached. No stamp at all is an older entry: re-read when a text
+            # file is there, and only record the stamp when there is nothing beside the wad to contradict it.
+            try:
+                stamp = beside_stamp(preset)
+            except Exception:
+                stamp = cached.readme_stamp
+            if cached.readme_stamp != stamp:
+                if cached.readme_stamp is None and stamp == "":
+                    cached.readme_stamp = ""
+                else:
+                    try:
+                        cached.readme = find_readme(preset)
+                    except Exception:
+                        stamp = cached.readme_stamp
+                    cached.readme_stamp = stamp
                 try:
-                    if readme := find_readme(preset):
-                        cached.readme = readme
-                        asset_cache.put(key, cached)
+                    asset_cache.put(key, cached)
                 except Exception:
                     pass
             return cached.art, cached.readme, cached.endoom, cached.logo
@@ -253,7 +265,11 @@ def _load_extras(preset: Preset) -> tuple[Art | None, Readme | None, Endoom | No
         endoom = None
     try:
         if key:
-            asset_cache.put(key, asset_cache.CachedAssets(art, readme, endoom, logo))
+            try:
+                stamp = beside_stamp(preset)
+            except Exception:
+                stamp = None
+            asset_cache.put(key, asset_cache.CachedAssets(art, readme, endoom, logo, stamp))
     except Exception:
         pass
     return art, readme, endoom, logo

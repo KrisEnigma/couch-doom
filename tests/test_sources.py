@@ -23,12 +23,17 @@ class PortableDoomRunnerDiscoveryTests(unittest.TestCase):
             launcher_dir.mkdir()
             options = launcher_dir / "options.json"
             options.write_text("{}", encoding="utf-8")
+            empty_home = root / "empty-home"
+            empty_home.mkdir()
 
             with patch.object(doomrunner, "FROZEN", True), \
                  patch.object(doomrunner, "PROJECT_ROOT", app_dir), \
                  patch.object(doomrunner, "DEV_LAUNCHERS", None), \
+                 patch.object(doomrunner, "home", lambda: empty_home), \
                  patch.dict(os.environ, {"LOCALAPPDATA": str(root / "empty-local"),
-                                         "APPDATA": str(root / "empty-roaming")}), \
+                                         "APPDATA": str(root / "empty-roaming"),
+                                         "XDG_DATA_HOME": str(root / "empty-xdg"),
+                                         "DOOMRUNNER_OPTIONS": ""}), \
                  patch("couch_doom.sources.shortcuts.targets", return_value=[]):
                 found = discover(only="doomrunner")
 
