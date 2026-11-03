@@ -1400,6 +1400,65 @@ class App:
         if selected != sel:
             self._select_row(selected)
 
+    def _copies_of(self, idx: int) -> dict[str, int]:
+        """First visible row of this game in each group."""
+        found: dict[str, int] = {}
+        group: str | None = None
+        for i, row in enumerate(self.rows):
+            if row.kind == "header":
+                group = _header_key(row)
+            elif row.preset == idx and group is not None and group not in found:
+                found[group] = i
+        return found
+
+    def _reveal_group(self, key: str) -> None:
+        if key in self.collapsed_sections:
+            self.collapsed_sections.discard(key)
+            self._rebuild_rows()
+
+    def _jump_to_last_played(self) -> None:
+        """B or Ctrl: select the last game played.
+
+        With Recently Played on, the game is listed there and in its own group. Pressing again
+        switches between those two rows, so a list that opened on the recent copy can still
+        reach the game where it lives.
+        """
+        name = getattr(self.state, "last_played", None)
+        if not name:
+            return
+        idx = next((i for i, preset in enumerate(self.opts.presets) if preset.name == name), None)
+        if idx is None:
+            return
+        section = self.opts.presets[idx].section
+        history = getattr(self.state, "history", ())
+        if getattr(self.state, "recent_group", False) and name in history:
+            self._toggle_last_played(idx, section)
+            return
+        if not any(row.kind == "preset" and row.preset == idx for row in self.rows):
+            if section not in self.collapsed_sections:
+                return
+            self._reveal_group(section)
+        if any(i == self._sel_row() and row.kind == "preset" and row.preset == idx for i, row in enumerate(self.rows)):
+            return
+        target = next((i for i, row in enumerate(self.rows) if row.kind == "preset" and row.preset == idx), None)
+        if target is None:
+            return
+        self.free_scroll = None
+        self._select_row(target)
+
+    def _toggle_last_played(self, idx: int, section: str) -> None:
+        sel = self._sel_row() if self.rows else -1
+        dest = section if self._copies_of(idx).get(RECENT_ID) == sel else RECENT_ID
+        self._reveal_group(dest)
+        target = self._copies_of(idx).get(dest)
+        if target is None and dest == RECENT_ID:
+            self._reveal_group(section)
+            target = self._copies_of(idx).get(section)
+        if target is None or target == self._sel_row():
+            return
+        self.free_scroll = None
+        self._select_row(target)
+
     def _jump_section(self, direction: int) -> None:
         headers = [i for i, r in enumerate(self.rows) if r.kind == "header"]
         if not headers:
@@ -1988,7 +2047,9 @@ class App:
         elif action == Action.BACK:
             if self.filter:
                 self._set_filter("")
-            return  # B has no other action on the main selector; Escape opens the menu.
+            else:
+                self._jump_to_last_played()  # B, or a bare Ctrl. Escape opens the menu instead.
+            return
 
     def _on_menu_action(self, action: Action, *, repeat: bool = False) -> None:
         if action in (Action.MENU, Action.BACK):
@@ -2341,8 +2402,39 @@ class App:
             self._set_filter(self.filter + key.lower())
         self._sound("move")
 
+    def _ctrl_keys(self) -> set[int]:
+        held = getattr(self, "_ctrl_held", None)
+        if held is None:
+            held = self._ctrl_held = set()
+            self._ctrl_tap = False
+        return held
+
+    def _release_ctrl(self, key: int, *, jump: bool = True) -> None:
+        """A bare Ctrl jumps to the last game. Ctrl+Backspace is a chord, so it does not."""
+        held = self._ctrl_keys()
+        held.discard(key)
+        tap = jump and getattr(self, "_ctrl_tap", False) and not held and self.mode == "list" and not self.blocked
+        if not held:
+            self._ctrl_tap = False
+        if not tap:
+            return
+        name = getattr(self.state, "last_played", None)
+        if self.filter and name:
+            idx = next((i for i, preset in enumerate(self.opts.presets) if preset.name == name), None)
+            visible = any(row.kind == "preset" and row.preset == idx for row in self.rows)
+            if idx is not None and not visible:
+                self._set_filter("")
+        self._jump_to_last_played()
+
     def _on_key(self, event: pygame.event.Event) -> bool:
         """Keyboard-only behaviour that does not map onto pad actions. Returns True if consumed."""
+        if event.key in (pygame.K_LCTRL, pygame.K_RCTRL):
+            held = self._ctrl_keys()
+            if not held:
+                self._ctrl_tap = self.mode == "list" and not self.blocked
+            held.add(event.key)
+            return True
+        self._ctrl_tap = False
         if event.key == pygame.K_ESCAPE and self.mode == "list" and self.filter and not self.blocked:
             self._set_filter("")  # Escape clears the search before it reaches the menu.
             return True
@@ -3241,12 +3333,23 @@ class App:
             info_hint = [(('X',) if pad else ('KEY:TAB',), tr("hint.info"), (A.ALT,))]
         favorite_hint = [] if category_selected else [(('R3',) if pad else ('KEY:F3',), fav, (A.FAVORITE,))]
         if pad:
-            return [(("START",), tr("hint.menu"), (A.MENU,)), (("A",), primary, (A.CONFIRM,)), (("BACK",), tr("hint.help"), (A.HELP,)), *info_hint, (("Y",), tr("hint.search"), (A.SEARCH,)),
+            if self.filter:
+                last_hint = [(("B",), tr("hint.clear"), (A.BACK,))]
+            elif getattr(self.state, "last_played", None):
+                last_hint = [(("B",), tr("hint.last"), (A.BACK,))]
+            else:
+                last_hint = []
+            return [(("START",), tr("hint.menu"), (A.MENU,)), (("A",), primary, (A.CONFIRM,)), *last_hint,
+                    (("BACK",), tr("hint.help"), (A.HELP,)), *info_hint, (("Y",), tr("hint.search"), (A.SEARCH,)),
                     (("LB", "RB"), tr("hint.section"), section),
                     *favorite_hint]
         clear = (("KEY:ESC",), tr("hint.clear"), (A.BACK,)) if self.filter else (("KEY:ESC",), tr("hint.menu"), (A.MENU,))
+        if not self.filter and getattr(self.state, "last_played", None):
+            last_hint = [(("KEY:CTRL",), tr("hint.last"), (A.BACK,))]
+        else:
+            last_hint = []
         return [clear, (("KEY:ENTER",), primary, (A.CONFIRM,)), (("KEY:F1",), tr("hint.help"), (A.HELP,)), *info_hint,
-                (("KEY:LEFT", "KEY:RIGHT"), tr("hint.section"), section),
+                *last_hint, (("KEY:LEFT", "KEY:RIGHT"), tr("hint.section"), section),
                 *([] if category_selected else [(("KEY:F3",), fav, (A.FAVORITE,))])]
 
     def _dim_backdrop(self, alpha: int) -> pygame.Rect:
@@ -4020,6 +4123,9 @@ class App:
                         self._on_drop(Path(event.file))
                         continue
                     actions = self.input.handle(event, now)
+                    if event.type == pygame.KEYUP and event.key in (pygame.K_LCTRL, pygame.K_RCTRL):
+                        self._release_ctrl(event.key, jump=now >= self.ignore_until)
+                        continue
                     if now < self.ignore_until:
                         continue
                     if event.type in MOUSE_EVENTS:

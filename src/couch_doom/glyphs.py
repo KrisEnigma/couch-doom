@@ -59,6 +59,7 @@ _KEY_FILES = {
     "F3": "keyboard_mouse/keyboard_f3",
     "F4": "keyboard_mouse/keyboard_f4",
     "BKSP": "keyboard_mouse/keyboard_backspace_icon",
+    "CTRL": "keyboard_mouse/keyboard_ctrl",
     "A-Z": "keyboard_mouse/keyboard_a",
 }
 

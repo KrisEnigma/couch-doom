@@ -192,6 +192,33 @@ def test_backspace_is_consumed_by_overlays_but_reaches_the_filter_in_list_mode()
     assert app.filter == "ab"
 
 
+def test_ctrl_jumps_to_the_last_played_game_and_a_chord_does_not():
+    from couch_doom.glyphs import ASSET_DIR, _KEY_FILES
+    from couch_doom.i18n import t as tr
+
+    assert (ASSET_DIR / f"{_KEY_FILES['CTRL']}.svg").is_file()
+
+    app = make_app(filter_text="hello world ")
+    app.state.last_played = "Gamma"
+    app.collapsed_sections = {"Section B"}
+    app._rebuild_rows()
+    app.current = 0
+
+    app._on_key(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_LCTRL))
+    chord = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_BACKSPACE, mod=pygame.KMOD_CTRL)
+    assert app._on_key(chord) is True
+    assert app.filter == "hello "
+    app._release_ctrl(pygame.K_LCTRL)
+    assert app.current == 0
+
+    app._set_filter("")
+    assert any(glyphs == ("KEY:CTRL",) and label == tr("hint.last") for glyphs, label, _ in app._footer_hints())
+    app._on_key(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RCTRL))
+    app._release_ctrl(pygame.K_RCTRL)
+    assert app.opts.presets[app.current].name == "Gamma"
+    assert "Section B" not in app.collapsed_sections
+
+
 def test_ctrl_backspace_deletes_the_last_filter_word():
     app = make_app(filter_text="hello world ")
     app.mode = "list"
@@ -347,6 +374,96 @@ def test_pad_footer_puts_help_on_back_and_menu_on_start():
     assert any(glyphs == ("START",) and label == tr("hint.menu") for glyphs, label, _ in hints)
 
 
+def test_b_jumps_to_the_last_played_game_and_opens_its_group():
+    from couch_doom.i18n import t as tr
+
+    app = make_app()
+    app.state.last_played = "Gamma"
+    app.collapsed_sections = {"Section B"}
+    app.input.pad_mode = True
+    app._rebuild_rows()
+    app.current = 0
+
+    assert not any(row.kind == "preset" and row.text == "Gamma" for row in app.rows)
+    assert any(glyphs == ("B",) and label == tr("hint.last") and actions == (Action.BACK,) for glyphs, label, actions in app._footer_hints())
+
+    app._on_action(Action.BACK, 0.0)
+
+    assert app.opts.presets[app.current].name == "Gamma"
+    assert any(row.kind == "preset" and row.text == "Gamma" for row in app.rows)
+    assert "Section B" not in app.collapsed_sections
+
+
+def _group_of(app, row: int) -> str | None:
+    for i in range(row, -1, -1):
+        if app.rows[i].kind == "header":
+            return app.rows[i].group_id or app.rows[i].text
+    return None
+
+
+def test_last_toggles_between_recently_played_and_the_games_own_group():
+    app = make_app()
+    app.state.last_played = "Gamma"
+    app.state.history = ["Gamma", "Alpha"]
+    app.state.recent_group = True
+    app.collapsed_sections = {"Section B", ui.RECENT_ID}
+    app._rebuild_rows()
+    app.current = 0  # Alpha, not the last game
+
+    app._on_action(Action.BACK, 0.0)
+
+    assert _group_of(app, app._sel_row()) == ui.RECENT_ID
+    assert ui.RECENT_ID not in app.collapsed_sections
+    assert "Section B" in app.collapsed_sections
+
+    app._on_action(Action.BACK, 1.0)
+
+    assert app.opts.presets[app.current].name == "Gamma"
+    assert _group_of(app, app._sel_row()) == "Section B"
+    assert "Section B" not in app.collapsed_sections
+
+    app._on_action(Action.BACK, 2.0)
+
+    assert _group_of(app, app._sel_row()) == ui.RECENT_ID
+
+
+def test_b_on_the_last_played_game_stays_put_and_a_missing_one_does_nothing():
+    app = make_app()
+    app.state.last_played = "Alpha"
+    app._rebuild_rows()
+    app.current = 0
+    sounds = []
+    app._sound = sounds.append
+
+    app._on_action(Action.BACK, 0.0)
+
+    assert app.current == 0
+    assert sounds == []
+
+    app.state.last_played = "Gone"
+    app.current = 1
+    app._on_action(Action.BACK, 1.0)
+
+    assert app.current == 1
+    assert sounds == []
+
+
+def test_pad_footer_hides_last_until_a_game_has_been_played_and_b_still_clears_search():
+    from couch_doom.i18n import t as tr
+
+    app = make_app()
+    app.input.pad_mode = True
+    app._rebuild_rows()
+
+    assert not any(glyphs == ("B",) for glyphs, _, _ in app._footer_hints())
+
+    app.filter = "beta"
+    app._rebuild_rows()
+    assert any(glyphs == ("B",) and label == tr("hint.clear") for glyphs, label, _ in app._footer_hints())
+    app._on_action(Action.BACK, 0.0)
+    assert app.filter == ""
+
+
 def test_help_covers_the_usage_guide_without_hard_coded_buttons():
     sections = ui.help_sections()
     headings = [heading for heading, _ in sections]
@@ -355,6 +472,7 @@ def test_help_covers_the_usage_guide_without_hard_coded_buttons():
     assert {"START PLAYING", "CAN'T FIND YOUR GAMES?", "MENU AND MUSIC", "IF SOMETHING DOESN'T WORK"} <= set(headings)
     assert {"REPORT A BUG", "ABOUT"} <= set(headings)
     assert "controller" in text.lower()
+    assert "last game you played" in text.lower()
     assert "KrisEnigma" in text
     assert "STEAM DECK" not in headings
     assert "F1" not in text and "Enter" not in text and "Tab" not in text
