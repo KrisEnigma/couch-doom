@@ -4,8 +4,9 @@ Each release's notes on GitHub are its own section below, behind the download in
 
 **New in 1.2.5**
 
+- Windows and Linux: an update keeps files you added in the CouchDoom folder, such as a note or the installer. The program itself is still replaced.
 - macOS: the Dock keeps CouchDoom's icon instead of switching to pygame's when the window opens, and after a game.
-- Quitting no longer crashes after title music has played. The Intel Mac build did this every time.
+- Intel Mac: quitting no longer crashes after title music has played. It did this every time.
 
 **New in 1.2.4**
 

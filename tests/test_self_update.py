@@ -251,6 +251,51 @@ class DownloadTests(unittest.TestCase):
             self.assertEqual((install / "CouchDoom.exe").read_text(), "new")
             self.assertEqual((install / "state" / "last_played.json").read_text(), "saved")
 
+    def test_update_keeps_files_the_new_build_does_not_ship(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            install, staged = base / "CouchDoom", base / "new" / "CouchDoom"
+            (install / "state").mkdir(parents=True)
+            (install / "state" / "last_played.json").write_text("saved")
+            (install / "soundfonts").mkdir()
+            (install / "soundfonts" / "mine.sf2").write_text("mine")
+            (install / "notes.txt").write_text("keep")
+            (install / "CouchDoom-v1.2.4.zip").write_bytes(b"installer")
+            (install / "_internal").mkdir()
+            (install / "_internal" / "old.dll").write_text("old")
+            (install / "CouchDoom.exe").write_text("old")
+            staged.mkdir(parents=True)
+            (staged / "CouchDoom.exe").write_text("new")
+            (staged / "_internal").mkdir()
+            (staged / "_internal" / "new.dll").write_text("new")
+            (staged / "state").mkdir()
+            (staged / "state" / "last_played.json").write_text("fresh")
+            (staged / "soundfonts").mkdir()
+            (staged / "soundfonts" / "bundled.sf2").write_text("bundled")
+            with patch.object(self_update, "_wait_for_exit"):
+                self_update.apply_staged_update(staged, install, pid=77, platform="windows-x64", relaunch=False)
+            self.assertEqual((install / "CouchDoom.exe").read_text(), "new")
+            self.assertEqual((install / "_internal" / "new.dll").read_text(), "new")
+            self.assertFalse((install / "_internal" / "old.dll").exists())
+            self.assertEqual((install / "state" / "last_played.json").read_text(), "saved")
+            self.assertEqual((install / "soundfonts" / "mine.sf2").read_text(), "mine")
+            self.assertFalse((install / "soundfonts" / "bundled.sf2").exists())
+            self.assertEqual((install / "notes.txt").read_text(), "keep")
+            self.assertEqual((install / "CouchDoom-v1.2.4.zip").read_bytes(), b"installer")
+
+    def test_macos_update_replaces_the_app_bundle_without_keeping_files_inside_it(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            install, staged = base / "CouchDoom.app", base / "new" / "CouchDoom.app"
+            install.mkdir()
+            (install / "notes.txt").write_text("inside the bundle")
+            staged.mkdir(parents=True)
+            (staged / "Contents").mkdir()
+            with patch.object(self_update, "_wait_for_exit"):
+                self_update.apply_staged_update(staged, install, pid=77, platform="macos-arm64", relaunch=False)
+            self.assertTrue((install / "Contents").is_dir())
+            self.assertFalse((install / "notes.txt").exists())
+
     def test_failed_relaunch_restores_and_reopens_previous_install(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)

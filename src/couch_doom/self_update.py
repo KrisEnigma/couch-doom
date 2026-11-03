@@ -363,6 +363,26 @@ def _rename_when_free(source: Path, destination: Path, timeout: float = 10) -> N
             time.sleep(0.25)
 
 
+# Portable installs keep the player's files in the same folder as the program.
+# state and soundfonts are always theirs, even when a build also ships a copy.
+# Any other top-level name the new build does not contain (a note, the installer)
+# comes along too. A name the new build ships is replaced, so the program itself updates.
+_PLAYER_DIRS = ("state", "soundfonts")
+
+
+def _carry_player_files(install_path: Path, staged_app: Path) -> None:
+    for source in install_path.iterdir():
+        destination = staged_app / source.name
+        if source.name not in _PLAYER_DIRS and destination.exists():
+            continue
+        if destination.exists():
+            shutil.rmtree(destination) if destination.is_dir() else destination.unlink()
+        if source.is_dir():
+            shutil.copytree(source, destination)
+        else:
+            shutil.copy2(source, destination)
+
+
 def _relaunch(install_path: Path, platform: str) -> None:
     subprocess.Popen([str(helper_executable(install_path, platform))], cwd=str(install_path.parent),
                      close_fds=True, env=_installed_app_environment(), stdin=subprocess.DEVNULL,
@@ -395,13 +415,9 @@ def apply_staged_update(staged_app: Path, install_path: Path, *, pid: int, platf
     moved_new = False
     try:
         if not platform.startswith("macos-"):
-            for name in ("state", "soundfonts"):
-                source = install_path / name
-                if source.exists():
-                    destination = staged_app / name
-                    if destination.exists():
-                        shutil.rmtree(destination) if destination.is_dir() else destination.unlink()
-                    shutil.copytree(source, destination) if source.is_dir() else shutil.copy2(source, destination)
+            # The .app is the whole install on macOS, and player files live beside it.
+            # Copying extras into the bundle would keep them through the swap and break the signature.
+            _carry_player_files(install_path, staged_app)
         _rename_when_free(install_path, backup)
         try:
             shutil.move(str(staged_app), str(install_path))
