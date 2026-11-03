@@ -54,7 +54,21 @@ def test_unreadable_doomrunner_bundle_is_logged_and_skipped(monkeypatch, tmp_pat
     preset = Preset("broken", "s", "e", None, [bundle], mod_entries=[bundle])
 
     assert launch.load_order(preset) == []
-    assert logged and "Couldn't read mod bundle" in logged[0][0]
+    assert logged[0][0] == "Couldn't read mod bundle broken.dmb for preset broken"
+
+
+def test_unreadable_nested_bundle_logs_the_preset_and_the_bundle_that_lists_it(monkeypatch, tmp_path):
+    parent = tmp_path / "LedsGeneric.dmb"
+    parent.write_text("LedsGenericWeaponMod_All.dmb\n", encoding="utf-8")
+    logged = []
+    monkeypatch.setattr(launch.log, "write", lambda *args: logged.append(args))
+    preset = Preset("Led's weapons", "s", "e", None, [parent], mod_entries=[parent])
+
+    assert launch.load_order(preset) == []
+    assert logged[0][0] == (
+        "Couldn't read mod bundle LedsGenericWeaponMod_All.dmb "
+        "for preset Led's weapons, listed by LedsGeneric.dmb"
+    )
 
 
 def test_presented_files_expand_doomrunner_bundle_inside_mappack(tmp_path):

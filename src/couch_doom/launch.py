@@ -63,7 +63,7 @@ def _expand_mappack(path: Path) -> list[Path]:
     return [path]
 
 
-def _expand_dmb(path: Path, seen: frozenset[Path] = frozenset()) -> list[Path]:
+def _expand_dmb(path: Path, seen: frozenset[Path] = frozenset(), preset: str = "", via: Path | None = None) -> list[Path]:
     """Expand a DoomRunner mod bundle into its listed files."""
     if path.suffix.lower() != ".dmb":
         return [path]
@@ -75,7 +75,10 @@ def _expand_dmb(path: Path, seen: frozenset[Path] = frozenset()) -> list[Path]:
         lines = bundle.read_text(encoding="utf-8-sig").splitlines()
     except (OSError, UnicodeError) as exc:
         # The engine cannot use a raw .dmb, so pass nothing and leave a note instead of a confusing launch error.
-        log.write(f"Couldn't read mod bundle {path.name}", str(exc))
+        # A nested path is not in the launcher's preset list, so name the preset and the bundle that listed this one.
+        where = [part for part in (f"for preset {preset}" if preset else "",
+                                    f"listed by {via.name}" if via is not None else "") if part]
+        log.write(f"Couldn't read mod bundle {path.name}{' ' + ', '.join(where) if where else ''}", str(exc))
         return []
 
     nested = seen | {bundle}
@@ -87,7 +90,7 @@ def _expand_dmb(path: Path, seen: frozenset[Path] = frozenset()) -> list[Path]:
         entry = Path(item)
         if not entry.is_absolute():
             entry = bundle.parent / entry
-        entries.extend(_expand_dmb(entry, nested))
+        entries.extend(_expand_dmb(entry, nested, preset, bundle))
     return entries
 
 
@@ -110,8 +113,8 @@ def load_order(preset: Preset) -> list[Path]:
     argument builder keeps its special dehacked/custom-argument ordering.
     """
     maps = [entry for mp in preset.mappacks if mp.exists()
-            for f in _expand_mappack(mp) for entry in _expand_dmb(f)]
-    mods = [entry for mod in preset.mods for entry in _expand_dmb(mod)]
+            for f in _expand_mappack(mp) for entry in _expand_dmb(f, preset=preset.name)]
+    mods = [entry for mod in preset.mods for entry in _expand_dmb(mod, preset=preset.name)]
     return [*mods, *maps] if preset.load_maps_after_mods else [*maps, *mods]
 
 
@@ -135,7 +138,7 @@ def _doomrunner_file_args(preset: Preset, traits: Traits) -> list[str]:
     mods: list[str] = []
 
     def add(group: list[str], f: Path) -> None:
-        for entry in _expand_dmb(f):
+        for entry in _expand_dmb(f, preset=preset.name):
             ext = entry.suffix.lower()
             if ext in (".deh", ".hhe"):
                 args.extend(["-deh", str(entry)])

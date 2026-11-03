@@ -324,7 +324,7 @@ def _readme_files(preset: Preset) -> list[Path]:
     for f in [*(f for mp in preset.mappacks if mp.exists() for f in _expand_mappack(mp)), *preset.mods]:
         out.append(f)
         if f.suffix.lower() == ".dmb":
-            out.extend(_expand_dmb(f))
+            out.extend(_expand_dmb(f, preset=preset.name))
     return out
 
 
