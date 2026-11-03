@@ -118,6 +118,14 @@ def disabled() -> bool:
     return bool(os.environ.get("COUCHDOOM_NO_UPDATE_CHECK"))
 
 
+def process_is_translated() -> bool:
+    """An Intel build on Apple Silicon (or the reverse). `platform.machine()` is the slice, not the Mac."""
+    if sys.platform != "darwin":
+        return False
+    native = native_machine()
+    return bool(native) and native != _platform.machine()
+
+
 def check(current: str, skipped: str | None = None, *, platform: str | None = None) -> dict | None:
     """Release metadata, including whether the displayed notes omit extra entries."""
     if disabled():
@@ -134,13 +142,22 @@ def check(current: str, skipped: str | None = None, *, platform: str | None = No
     if version == skipped:
         log.write("update check", f"Latest release {version} was skipped.")
         return None
-    if not is_newer(version, current):
-        log.write("update check", f"Current version {current}; latest release is {version}.")
-        return None
     if not url.startswith("https://github.com/"):
         return None
+    # `platform` is a test override. Only a real translated process may replace its own version:
+    # an Intel 1.2.5 on Apple Silicon is not newer than 1.2.5, but it is the wrong download,
+    # and Rosetta retranslates that whole app the first time the new files run.
     target = platform or asset_for_platform(sys.platform, native_machine())
+    switching = platform is None and process_is_translated() and parse_version(version) == parse_version(current)
+    if not is_newer(version, current) and not switching:
+        log.write("update check", f"Current version {current}; latest release is {version}.")
+        return None
+    if switching:
+        log.write("update check", f"This {_platform.machine()} build is running on {native_machine()}; offering {target} of {version}.")
     notes = whats_new(body, version)
+    native_arm = (target or "").endswith("arm64")
     return {"version": version, "current": current, "notes": notes[:MAX_NOTES],
-            "more_notes": len(notes) > MAX_NOTES, "url": url,
+            "more_notes": len(notes) > MAX_NOTES, "url": url, "arch_switch": switching,
+            "native_label": "Apple Silicon" if native_arm else "Intel",
+            "running_label": "Intel" if native_arm else "Apple Silicon",
             "asset": _release_asset(data, tag, target)}

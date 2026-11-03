@@ -6,7 +6,7 @@ Each release's notes on GitHub are its own section below, behind the download in
 
 - The Last hint jumps to the last game you played. With Recently Played on, pressing it again moves between that group and the game's own group.
 - Windows and Linux: an update keeps files you added in the CouchDoom folder, such as a note or the installer. The program itself is still replaced.
-- macOS: the Dock keeps CouchDoom's icon instead of switching to pygame's when the window opens and after a game. On Intel Macs, quitting after title music no longer crashes, and an Intel build running on Apple Silicon now updates to the Apple Silicon download instead of being offered the Intel one every time.
+- macOS: the Dock keeps CouchDoom's icon instead of switching to pygame's when the window opens and after a game. On Intel Macs, quitting after title music no longer crashes. An Intel copy on Apple Silicon is offered the Apple Silicon download even when the version number is the same, and installing an update no longer ends in a crash report.
 
 **New in 1.2.4**
 

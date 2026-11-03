@@ -40,20 +40,9 @@ def _dry_run(opts, name: str | None) -> int:
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if raw_argv and raw_argv[0] == "--apply-update":
-        # 1.2.1 and older pass six arguments; newer ones add where to leave the result.
-        if len(raw_argv) not in (6, 7):
-            return 2
-        from . import self_update
-        result_file = Path(raw_argv[6]) if len(raw_argv) == 7 else None
-        try:
-            return self_update.apply_staged_update(Path(raw_argv[1]), Path(raw_argv[2]),
-                                                   pid=int(raw_argv[3]), platform=raw_argv[4],
-                                                   cleanup_root=Path(raw_argv[5]), result_file=result_file)
-        except Exception:
-            # The helper runs from a throwaway copy, so its own log path would be deleted with it.
-            log.write("update", traceback.format_exc(),
-                      result_file.with_name(log.LOG_FILE.name) if result_file else None)
-            return 1
+        from .self_update import apply_from_argv
+
+        return apply_from_argv(raw_argv)
     ap = argparse.ArgumentParser(prog="couch-doom", description=__doc__)
     ap.add_argument("--options", help="Launcher settings file: DoomRunner options.json, ZDL qZDL.ini or .zdl, DoomLauncher.sqlite, "
                                        "or a GZDoom/UZDoom/VKDoom program")

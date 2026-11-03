@@ -140,6 +140,8 @@
   "info.endoom": "ENDOOM",
 
   "update.out": "CouchDoom {version} est sorti",
+  "update.native": "Passer à la version {kind}",
+  "update.native_sub": "Cette copie est la version {other}, donc elle met du temps à s'ouvrir sur ce Mac",
   "update.youre_on": "Vous utilisez {current}",
   "update.whats_new": "Nouveautés",
   "update.more_notes": "Plus de changements sur la page de la version.",

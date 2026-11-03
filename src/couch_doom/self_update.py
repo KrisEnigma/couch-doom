@@ -310,6 +310,27 @@ def write_result(path: Path | None, ok: bool, error: str = "") -> None:
         pass
 
 
+def apply_from_argv(argv: list[str]) -> int:
+    """Swap a staged update into place. The packaged entry calls this before importing the UI:
+    the helper is a second copy of CouchDoom, and loading pygame first is what makes the relaunch wait."""
+    # 1.2.1 and older pass six arguments; newer ones add where to leave the result.
+    if len(argv) not in (6, 7):
+        return 2
+    result_file = Path(argv[6]) if len(argv) == 7 else None
+    try:
+        return apply_staged_update(Path(argv[1]), Path(argv[2]), pid=int(argv[3]), platform=argv[4],
+                                   cleanup_root=Path(argv[5]), result_file=result_file)
+    except Exception:
+        import traceback
+
+        from . import log
+
+        # The helper runs from a throwaway copy, so its own log path would be deleted with it.
+        log.write("update", traceback.format_exc(),
+                  result_file.with_name(log.LOG_FILE.name) if result_file else None)
+        return 1
+
+
 def take_result(path: Path) -> dict | None:
     """Read and remove the helper's outcome, so it's reported once."""
     try:

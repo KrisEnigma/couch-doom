@@ -53,6 +53,7 @@ class ReleaseTargetTests(unittest.TestCase):
             "assets": [],
         }
         with patch.object(update, "_fetch_latest", return_value=data), \
+                patch.object(update, "process_is_translated", return_value=False), \
                 patch.object(update.log, "write") as write_log:
             result = update.check("1.0.0")
 
@@ -100,6 +101,30 @@ class ReleaseTargetTests(unittest.TestCase):
                 patch.object(update, "native_machine", return_value="arm64"):
             info = update.check("1.2.4")
         self.assertEqual(info["asset"].target, "macos-arm64")
+        self.assertFalse(info["arch_switch"])
+
+    def test_same_version_intel_build_on_apple_silicon_offers_the_native_download(self):
+        # 1.2.3 asked platform.machine(), got x86_64 under Rosetta, and installed another Intel build.
+        # That build is not "newer", so the check used to stop. The first launch then retranslated it.
+        assets = [
+            {"name": "CouchDoom-v1.2.5-macos-arm64.zip", "browser_download_url": "https://github.com/KrisEnigma/couch-doom/releases/download/v1.2.5/CouchDoom-v1.2.5-macos-arm64.zip"},
+            {"name": "CouchDoom-v1.2.5-macos-arm64.zip.sha256", "browser_download_url": "https://github.com/KrisEnigma/couch-doom/releases/download/v1.2.5/CouchDoom-v1.2.5-macos-arm64.zip.sha256"},
+            {"name": "CouchDoom-v1.2.5-macos-x64.zip", "browser_download_url": "https://github.com/KrisEnigma/couch-doom/releases/download/v1.2.5/CouchDoom-v1.2.5-macos-x64.zip"},
+            {"name": "CouchDoom-v1.2.5-macos-x64.zip.sha256", "browser_download_url": "https://github.com/KrisEnigma/couch-doom/releases/download/v1.2.5/CouchDoom-v1.2.5-macos-x64.zip.sha256"},
+        ]
+        data = {"tag_name": "v1.2.5", "html_url": "https://github.com/KrisEnigma/couch-doom/releases/tag/v1.2.5",
+                "body": "", "assets": assets}
+        with patch.object(update, "_fetch_latest", return_value=data), \
+                patch.object(update.sys, "platform", "darwin"), \
+                patch.object(update, "native_machine", return_value="arm64"), \
+                patch.object(update._platform, "machine", return_value="x86_64"):
+            info = update.check("1.2.5")
+            skipped = update.check("1.2.5", "1.2.5")
+        self.assertTrue(info["arch_switch"])
+        self.assertEqual(info["native_label"], "Apple Silicon")
+        self.assertEqual(info["running_label"], "Intel")
+        self.assertEqual(info["asset"].target, "macos-arm64")
+        self.assertIsNone(skipped)
 
     def test_release_check_selects_matching_archive_and_digest_sidecar(self):
         assets = [
@@ -555,6 +580,11 @@ class InstallFlowTests(unittest.TestCase):
         self.assertIs(launch.call_args.args[0], staged)
         self.assertEqual(launch.call_args.args[4].name, self_update.RESULT_FILE)
         self.assertFalse(app.running)  # closes at once: the helper is waiting on this process
+        self.assertTrue(app.update_handoff)
+
+    def test_packaged_entry_handles_apply_update_before_importing_the_ui(self):
+        source = (Path(__file__).resolve().parents[1] / "packaging" / "couch_doom_entry.py").read_text()
+        self.assertLess(source.index("apply_from_argv"), source.index("couch_doom.__main__"))
 
     @unittest.skipUnless(os.name == "nt", "Windows process handles")
     def test_waiting_for_exit_leaves_a_running_process_alone(self):

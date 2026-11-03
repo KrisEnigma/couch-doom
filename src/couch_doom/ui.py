@@ -488,6 +488,7 @@ class App:
         self.update_cancel: threading.Event | None = None
         self.update_progress: tuple[str, int, int | None] = ("checking", 0, None)  # see self_update.PHASES
         self.update_error: str | None = None
+        self.update_handoff = False  # quitting so the apply helper can swap; skip interpreter shutdown
         # After an update, the notes for every release since the last one that ran: {"version", "previous", "sections"}.
         self.whats_new = whats_new.pending(state.seen_version, state.returning, __version__)
         self.whats_new_opened = 0.0
@@ -825,7 +826,11 @@ class App:
                 install_path = self_update.installation_path(Path(sys.executable), info["asset"].target)
                 self_update.launch_apply_helper(staged, install_path, os.getpid(), info["asset"].target,
                                                 config.STATE_DIR / self_update.RESULT_FILE)
-                self.running = False  # the helper waits for this window to close, then starts the new version
+                # The helper waits for this process to exit. Leave via os._exit once pygame is down:
+                # interpreter shutdown frees tinysoundfont, and the unpatched Intel build aborts there.
+                # That crash dialog is the update "exiting with a crash" before the new copy opens.
+                self.update_handoff = True
+                self.running = False
             except Exception as exc:
                 if staged:
                     self_update.discard_staged(staged)
@@ -3667,8 +3672,15 @@ class App:
         self.hits.append(Hit(box, lambda: None))
 
         x, y = box.x + pad, box.y + pad
-        self.screen.blit(self._text(tr("update.out", version=info.get("version", "")), self._font(40, bold=True), TEXT), (x, y))
-        self.screen.blit(self._text(tr("update.youre_on", current=info.get("current", __version__)), self._font(22), MUTED), (x, y + int(52 * s)))
+        if info.get("arch_switch"):
+            title = tr("update.native", kind=info.get("native_label", ""))
+            subtitle = tr("update.native_sub", other=info.get("running_label", ""))
+        else:
+            title = tr("update.out", version=info.get("version", ""))
+            subtitle = tr("update.youre_on", current=info.get("current", __version__))
+        title_font = self._font(40, bold=True)
+        self.screen.blit(self._text(self._fit(title, title_font, inner), title_font, TEXT), (x, y))
+        self.screen.blit(self._text(self._fit(subtitle, self._font(22), inner), self._font(22), MUTED), (x, y + int(52 * s)))
         y += head_h
 
         if notes:
@@ -4163,6 +4175,8 @@ class App:
                 self.music.shutdown()
             self._close_window()
             pygame.quit()
+            if self.update_handoff:
+                os._exit(0)  # Py_Finalize is where the Intel quit abort happens; the helper only needs us gone
         return 0
 
     def tick(self, now: float, dt: float) -> None:
