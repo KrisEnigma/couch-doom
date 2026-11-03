@@ -2,6 +2,11 @@
 
 Each release's notes on GitHub are its own section below, behind the download instructions in `packaging/release-header.md`. Keep the `**New in X.Y.Z**` heading format: the release workflow and the in-app update notice both look for it.
 
+**New in 1.2.5**
+
+- macOS: the Dock keeps CouchDoom's icon instead of switching to pygame's when the window opens, and after a game.
+- Quitting no longer crashes after title music has played. The Intel Mac build did this every time.
+
 **New in 1.2.4**
 
 - Refresh list now picks up a readme you've edited beside a game. Title art stays cached.

@@ -293,17 +293,22 @@ def _key_out_dark(img: pygame.Surface) -> pygame.Surface:
     return pygame.image.frombytes(bytes(rgba), img.get_size(), "RGBA").convert_alpha()
 
 
-def _set_window_icon() -> None:
-    """The exe's embedded icon only covers Explorer; the taskbar shows the window's own, which pygame
-    leaves as its default. Windows also groups taskbar buttons by app ID, which would otherwise be python's."""
+def _set_window_icon(window=None) -> None:
+    """Finder and Explorer use the bundle or exe icon. The Dock and taskbar use the window's own, which
+    pygame leaves as its logo. pygame.Window applies that logo again at the end of construction, so an
+    icon set before the window exists does not stick on macOS. Windows also groups taskbar buttons by
+    app ID, which would otherwise be python's."""
     if sys.platform == "win32":
         try:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("com.krisenigma.couchdoom")
         except (AttributeError, OSError):
             pass
     try:
-        pygame.display.set_icon(pygame.image.load(str(ASSET_DIR / "icon.png")))
-    except (pygame.error, FileNotFoundError):
+        icon = pygame.image.load(str(ASSET_DIR / "icon.png"))
+        pygame.display.set_icon(icon)
+        if window is not None:
+            window.set_icon(icon)
+    except (pygame.error, FileNotFoundError, AttributeError):
         pass
 
 
@@ -1102,6 +1107,7 @@ class App:
                 _disable_macos_fullscreen_shadow()
             self.screen = self.window.get_surface()
             self.dpi = self.screen.get_width() / self.window.size[0]
+            _set_window_icon(self.window)  # Window() just installed pygame's Dock icon
         elif self.windowed:
             self.screen = pygame.display.set_mode(size)
         else:
