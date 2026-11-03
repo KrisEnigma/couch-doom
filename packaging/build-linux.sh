@@ -15,8 +15,8 @@ LIMIT=2.28
 source /tmp/venv/bin/activate
 
 python -m pip install --quiet -r requirements.txt pyinstaller pillow
-# No wheel for this Python: it builds from source here, against the container's old glibc.
-python -m pip install --no-deps tinysoundfont || echo "No tinysoundfont for this platform: MIDI title music is left out"
+# No wheel we can trust for this Python: build the patched source here, against the container's old glibc.
+python packaging/install_tinysoundfont.py || echo "No tinysoundfont for this platform: MIDI title music is left out"
 
 python -m PyInstaller --noconfirm --clean --distpath dist --workpath build packaging/CouchDoom.spec
 

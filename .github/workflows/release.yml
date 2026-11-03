@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install -r requirements.txt pyinstaller pillow
-          python -m pip install --no-deps tinysoundfont || echo "No tinysoundfont for this platform: MIDI title music is left out"
+          python packaging/install_tinysoundfont.py || echo "No tinysoundfont for this platform: MIDI title music is left out"
 
       - name: Install DMG tooling
         if: startsWith(matrix.target, 'macos-')

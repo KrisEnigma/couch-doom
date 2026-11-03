@@ -68,7 +68,7 @@ For development or to run from a checkout, install Python 3.11 or later:
     .venv/bin/pip install -r requirements.txt
     PYTHONPATH=src .venv/bin/python -m couch_doom
 
-MIDI playback support from source also needs tinysoundfont. On macOS, if GZDoom was downloaded but never opened, launch it once from Finder so its first-run prompt doesn't appear behind CouchDoom.
+MIDI playback support from source also needs tinysoundfont, installed with `python packaging/install_tinysoundfont.py` (a plain `pip install` still has a bug that crashes the Intel Mac build on quit). On macOS, if GZDoom was downloaded but never opened, launch it once from Finder so its first-run prompt doesn't appear behind CouchDoom.
 
 ## Controls
 

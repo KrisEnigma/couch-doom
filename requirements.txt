@@ -1,4 +1,5 @@
 pygame-ce>=2.5
 certifi>=2024.2.2
-# MIDI title music also needs: pip install --no-deps tinysoundfont
-# (its PyAudio dependency is only for live playback, which we don't use, and doesn't build on new Pythons)
+# MIDI title music also needs tinysoundfont: python packaging/install_tinysoundfont.py
+# A plain pip install keeps a released bug that crashes the Intel Mac build on quit.
+# (PyAudio, tinysoundfont's playback dependency, is not installed: it doesn't build on new Pythons, and we render ourselves.)
