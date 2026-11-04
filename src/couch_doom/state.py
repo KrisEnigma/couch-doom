@@ -18,6 +18,7 @@ class State:
         self.music = True
         self.menu_sounds = True
         self.recent_group = False
+        self.windowed = False  # last Alt+Enter or menu choice; fullscreen unless the player picked a window
         self.favorites: list[str] = []
         self.launcher: tuple[str, str] | None = None  # (source key, settings path) the player last picked
         self.added: list[tuple[str, str]] = []  # launchers dropped onto the window, kept for the picker
@@ -48,6 +49,7 @@ class State:
             self.music = bool(data.get("music", True))
             self.menu_sounds = bool(data.get("menu_sounds", True))
             self.recent_group = bool(data.get("recent_group", False))
+            self.windowed = data.get("windowed") is True
             self.favorites = [f for f in data.get("favorites") or [] if isinstance(f, str)]
             if (pick := _pair(data.get("launcher"))) is not None:
                 self.launcher = pick
@@ -102,6 +104,10 @@ class State:
         self.recent_group = on
         self._save()
 
+    def set_windowed(self, on: bool) -> None:
+        self.windowed = on
+        self._save()
+
     def set_color_palette(self, palette: str) -> None:
         self.color_palette = palette if palette in MANUAL_PALETTE_KEYS else "auto"
         self._save()
@@ -137,6 +143,7 @@ class State:
             "music": self.music,
             "menu_sounds": self.menu_sounds,
             "recent_group": self.recent_group,
+            "windowed": self.windowed,
             "favorites": self.favorites,
             "launcher": {"source": self.launcher[0], "path": self.launcher[1]} if self.launcher else None,
             "added_launchers": [{"source": k, "path": p} for k, p in self.added],

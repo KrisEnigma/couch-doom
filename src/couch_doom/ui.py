@@ -72,6 +72,7 @@ INPUT_COOLDOWN = 0.45
 FALLBACK_FPS = 60  # used only when the display will not report a refresh rate
 HIDDEN_FPS = 10
 VSYNC_MARGIN = 0.002  # wake this long before the vblank; Windows' sleep overshoots by up to ~1 ms
+WINDOWED_SIZE = (1440, 810)  # Alt+Enter and --windowed; the other mode is borderless at the desktop size
 WINDOW_EVENTS = {
     pygame.QUIT, pygame.WINDOWCLOSE, pygame.WINDOWMINIMIZED, pygame.WINDOWHIDDEN, pygame.WINDOWRESTORED,
     pygame.WINDOWSHOWN, pygame.WINDOWEXPOSED, pygame.WINDOWDISPLAYCHANGED, pygame.RENDER_DEVICE_RESET,
@@ -227,13 +228,12 @@ def _desktop_refresh_rate() -> int:
 
 
 def use_gpu() -> bool:
-    """Draw through the GPU canvas. On by default on macOS, where it is tested; COUCHDOOM_RENDERER=software or
-    =gpu overrides it. Windows and Linux open a pygame.Window like the Mac does, so the canvas can draw into it;
-    it stays off there until the hardware checks in docs/gpu-canvas-handoff.md pass."""
+    """Draw through the GPU canvas. On everywhere; COUCHDOOM_RENDERER=software forces the old path and =gpu
+    forces the canvas. A machine without a GPU still gets the window surface: the canvas refuses a software renderer."""
     choice = os.environ.get("COUCHDOOM_RENDERER", "").lower()
     if choice in ("gpu", "software"):
         return choice == "gpu"
-    return sys.platform == "darwin"
+    return True
 
 
 def show_fps() -> bool:
@@ -605,6 +605,7 @@ class App:
         self.state = state
         set_language(state.language)
         self.windowed = windowed
+        self._alt_enter_held = False  # key repeat would flip the window every tick while Alt+Enter is held
         self.problem = problem  # options.json missing/unreadable: the notice screen replaces the list
         self.launchers = launchers
         self.reload = reload or (launchers.load if launchers else None)
@@ -1265,7 +1266,7 @@ class App:
 
     def _create_window(self) -> None:
         _set_window_icon()  # display.quit() after a game forgets it
-        size = (1440, 810) if self.windowed else pygame.display.get_desktop_sizes()[0]
+        size = WINDOWED_SIZE if self.windowed else pygame.display.get_desktop_sizes()[0]
         self.window = None
         self.dpi = 1.0
         if sys.platform == "darwin":
@@ -1296,6 +1297,38 @@ class App:
         pygame.key.start_text_input()
         self._layout()
         _force_foreground(self.window.handle or None)
+
+    def _toggle_window(self) -> None:
+        """Alt+Enter. Borderless at the desktop size, or the 1440×810 window. Not exclusive fullscreen:
+        that changes the display mode and its refresh."""
+        if self.window is None:
+            return
+        self.windowed = not self.windowed
+        if sys.platform == "darwin":
+            if self.windowed:
+                self.window.set_windowed()
+                self.window.size = WINDOWED_SIZE
+            else:
+                self.window.size = pygame.display.get_desktop_sizes()[0]
+                self.window.set_fullscreen(desktop=True)
+                _disable_macos_fullscreen_shadow()
+            self._frame_period = 0.0
+            self.refresh_hz = display_refresh_rate()
+            self.dpi = self.screen.get_width() / (self.window.size[0] or 1)
+            self.screen.set_clip(None)  # a clip saved at the old size would keep painting into that corner
+            self._layout()
+        else:
+            # Recreate rather than resize: X11 ignores a position request on a window that already exists, so a
+            # borderless window grown in place stays centred and runs off the screen. A new window is placed at
+            # creation, the same way startup places it. The canvas and its textures go with the old window.
+            self._close_window()
+            pygame.display.init()
+            pygame.display.set_caption("CouchDoom")
+            self._open_window()
+            self._frame_period = 0.0
+        save = getattr(getattr(self, "state", None), "set_windowed", None)
+        if save is not None:
+            save(self.windowed)
 
     @staticmethod
     def _window_target(window: pygame.Window) -> canvas.Canvas | pygame.Surface:
@@ -2370,6 +2403,7 @@ class App:
             ("music", tr("menu.music")),
             ("sounds", tr("menu.sounds")),
             ("recent", tr("menu.recent")),
+            ("fullscreen", tr("menu.fullscreen")),
         ]
         items.append(("colors", tr("menu.colors")))
         items.append(("language", tr("menu.language")))
@@ -2406,6 +2440,9 @@ class App:
             self.state.set_recent_group(not self.state.recent_group)
             self._rebuild_rows()
             self._sound("open")
+        elif key == "fullscreen":
+            self._toggle_window()
+            self._sound("open")
         elif key == "colors":
             self._cycle_color_palette(delta)
         elif key == "language":
@@ -2428,6 +2465,9 @@ class App:
         elif key == "recent":
             self.state.set_recent_group(not self.state.recent_group)
             self._rebuild_rows()
+            self._sound("open")
+        elif key == "fullscreen":
+            self._toggle_window()
             self._sound("open")
         elif key == "colors":
             self._cycle_color_palette(1)
@@ -2715,6 +2755,11 @@ class App:
 
     def _on_key(self, event: pygame.event.Event) -> bool:
         """Keyboard-only behaviour that does not map onto pad actions. Returns True if consumed."""
+        if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER) and event.mod & pygame.KMOD_ALT:
+            if not self._alt_enter_held:
+                self._alt_enter_held = True
+                self._toggle_window()
+            return True
         if event.key in (pygame.K_LCTRL, pygame.K_RCTRL):
             held = self._ctrl_keys()
             if not held:
@@ -3732,7 +3777,7 @@ class App:
         s = self.s
         t = _ease_out((now - self.menu_opened) / 0.2)
         items = self._menu_items()
-        pad, row_h, head_h = int(30 * s), int(68 * s), int(72 * s)
+        pad, row_h, head_h = int(30 * s), int(60 * s), int(72 * s)
         width = min(self.w - 2 * self.margin, int(760 * s))
         height = 2 * pad + head_h + len(items) * row_h
         box = pygame.Rect(0, 0, width, height)
@@ -3767,8 +3812,13 @@ class App:
                 status.set_alpha(int(255 * max(0.0, 1.0 - age / 2.0)))
                 self.screen.blit(status, (rect.right - status.get_width() - int(22 * s), rect.centery - status.get_height() // 2))
             value, on = None, False
-            if key in ("music", "sounds", "recent"):
-                on = {"music": self.state.music, "sounds": self.state.menu_sounds, "recent": self.state.recent_group}[key]
+            if key in ("music", "sounds", "recent", "fullscreen"):
+                on = {
+                    "music": self.state.music,
+                    "sounds": self.state.menu_sounds,
+                    "recent": self.state.recent_group,
+                    "fullscreen": not self.windowed,
+                }[key]
                 value = tr("menu.on") if on else tr("menu.off")
             elif key == "colors":
                 palette = self._current_palette_key()
@@ -4442,6 +4492,8 @@ class App:
                         self._on_drop(Path(event.file))
                         continue
                     actions = self.input.handle(event, now)
+                    if event.type == pygame.KEYUP and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                        self._alt_enter_held = False
                     if event.type == pygame.KEYUP and event.key in (pygame.K_LCTRL, pygame.K_RCTRL):
                         self._release_ctrl(event.key, jump=now >= self.ignore_until)
                         continue

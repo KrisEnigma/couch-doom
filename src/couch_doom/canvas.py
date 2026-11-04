@@ -136,7 +136,13 @@ class Canvas:
         return self._clip.copy() if self._clip else self.get_rect()
 
     def set_clip(self, rect) -> None:
-        self._clip = pygame.Rect(rect).clip(self.get_rect()) if rect is not None else None
+        # A clip covering the whole target is no clip. Storing that rect would pin later frames to its size,
+        # so growing the window keeps painting into the old corner and leaves the rest black.
+        if rect is None:
+            self._clip = None
+            return
+        clipped = pygame.Rect(rect).clip(self.get_rect())
+        self._clip = None if clipped == self.get_rect() else clipped
 
     def copy(self) -> pygame.Surface:
         """What has been drawn this frame, read back from the GPU. Slow: for one-off snapshots only."""

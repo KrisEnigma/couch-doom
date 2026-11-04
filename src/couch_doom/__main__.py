@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from .ui import App
 
-    app = App(opts, state, windowed=args.windowed, soundfont=args.soundfont, problem=problem, launchers=launchers, pick=pick)
+    app = App(opts, state, windowed=args.windowed or state.windowed, soundfont=args.soundfont, problem=problem, launchers=launchers, pick=pick)
     return app.run()
 
 

@@ -708,6 +708,21 @@ def test_menu_has_no_expand_or_collapse_all_rows():
     assert "collapse_all" not in keys
 
 
+def test_menu_full_screen_row_uses_the_same_toggle_as_alt_enter():
+    app = make_app()
+    app.mode = "menu"
+    calls = []
+    app._toggle_window = lambda: calls.append("toggle")
+    index = [key for key, _ in app._menu_items()].index("fullscreen")
+    assert index == [key for key, _ in app._menu_items()].index("recent") + 1
+
+    app._menu_pick(index)
+    app.menu_sel = index
+    app._set_menu_option(-1)
+
+    assert calls == ["toggle", "toggle"]
+
+
 def test_menu_includes_language_row():
     app = make_app()
     keys = [key for key, _ in app._menu_items()]

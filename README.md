@@ -77,6 +77,7 @@ MIDI playback support from source also needs tinysoundfont, installed with `pyth
 | D-pad / left stick up or down | Up / Down | Move through games |
 | D-pad / stick left or right | Left / Right | Left goes to the current group heading, then the previous group; Right goes to the next group |
 | A | Enter | Play or open / close a section heading |
+| — | Alt+Enter | Switch between the full screen and a window |
 | Back / View | F1 | Quick help |
 | Start | Esc | Open the menu |
 | — | F5 | Help & feedback |
@@ -88,7 +89,7 @@ MIDI playback support from source also needs tinysoundfont, installed with `pyth
 | — | Home / End | Jump to the top / bottom of the list or file browser |
 | B | — | Back from an open panel |
 
-Escape or Start opens the menu. From there you can return to the list, refresh launcher data, choose a launcher, toggle title music or menu sounds with Left/Right, cycle Colors and Language, turn the optional Recently Played group on or off, open Help, or quit.
+Escape or Start opens the menu. From there you can return to the list, refresh launcher data, choose a launcher, toggle title music or menu sounds with Left/Right, switch between full screen and a window, cycle Colors and Language, turn the optional Recently Played group on or off, open Help, or quit.
 
 Language follows the OS on first run when CouchDoom supports it (English, Spanish, Brazilian Portuguese, French, German). Change it anytime from the menu. Colors can follow each game's art or lock one look for the whole app.
 
@@ -116,7 +117,7 @@ B closes an open panel and does nothing on the main selector. Mouse and keyboard
 ## A few extras
 
 - CouchDoom checks GitHub once after startup for updates. Packaged builds can install an update; source builds use the release page. Turn the check off with the `update_check` setting in `last_played.json` or by setting `COUCHDOOM_NO_UPDATE_CHECK`. Leftover folders from an interrupted update are cleaned up on the next launch.
-- Favorites, language, colors, Recently Played, and other preferences are saved locally. The troubleshooting log can include file paths and launch output, so review it before sharing.
+- Favorites, language, colors, full screen or a window, Recently Played, and other preferences are saved locally. The troubleshooting log can include file paths and launch output, so review it before sharing.
 - From source, `--windowed` opens a window, `--dry-run` prints launch commands, `--options` opens a settings file or supported port, and `--soundfont` selects MIDI music playback.
 
 ## Credits and license

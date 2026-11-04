@@ -8,6 +8,19 @@ import couch_doom.ui as ui
 from couch_doom.theme import HOUSE
 
 
+@pytest.mark.parametrize("platform", ["darwin", "win32", "linux"])
+def test_gpu_is_the_default_on_every_platform(monkeypatch, platform):
+    monkeypatch.setattr(ui.sys, "platform", platform)
+    monkeypatch.delenv("COUCHDOOM_RENDERER", raising=False)
+    assert ui.use_gpu() is True
+
+
+def test_software_env_still_forces_the_cpu(monkeypatch):
+    monkeypatch.setattr(ui.sys, "platform", "win32")
+    monkeypatch.setenv("COUCHDOOM_RENDERER", "software")
+    assert ui.use_gpu() is False
+
+
 def test_releases_window_surface_before_destroying_window_and_display(monkeypatch):
     events = []
     app = ui.App.__new__(ui.App)
@@ -275,6 +288,30 @@ def test_canvas_stretches_the_background_column_instead_of_uploading_it():
     assert calls == [(column, pygame.Rect(0, 0, 8, 4), 0.4)]
 
 
+def test_a_fullscreen_clip_does_not_keep_the_old_size_when_the_window_grows():
+    """_draw_list saves the clip and puts it back. The saved rect is the whole screen, and keeping it
+    pins later frames to that size: Alt+Enter up leaves the rest of the frame black."""
+    screen = ui.canvas.Canvas.__new__(ui.canvas.Canvas)
+    size = [1440, 810]
+    screen.get_rect = lambda: pygame.Rect(0, 0, *size)
+    screen._clip = None
+
+    screen.set_clip(screen.get_clip())
+    size[:] = [2560, 1440]
+
+    assert screen.get_clip() == pygame.Rect(0, 0, 2560, 1440)
+
+
+def test_a_partial_clip_still_limits_drawing():
+    screen = ui.canvas.Canvas.__new__(ui.canvas.Canvas)
+    screen.get_rect = lambda: pygame.Rect(0, 0, 1440, 810)
+    screen._clip = None
+    screen.set_clip(pygame.Rect(10, 20, 30, 40))
+    assert screen.get_clip() == pygame.Rect(10, 20, 30, 40)
+    screen.set_clip(None)
+    assert screen.get_clip() == pygame.Rect(0, 0, 1440, 810)
+
+
 def test_software_still_blits_the_full_background():
     pygame.init()
     app = ui.App.__new__(ui.App)
@@ -296,6 +333,160 @@ def test_vendored_sdl_is_the_hashed_library_not_the_image_addon(tmp_path):
     image.write_bytes(b"")
     assert ui.canvas.vendored_sdl(tmp_path) == sdl
     assert ui.canvas.vendored_sdl(Path(tmp_path) / "missing") is None
+
+
+class _ToggleWindow:
+    def __init__(self, size, borderless=True):
+        self.size = size
+        self.borderless = borderless
+        self.position = (0, 0)
+        self.calls = []
+
+    def set_windowed(self):
+        self.calls.append("windowed")
+
+    def set_fullscreen(self, desktop=False):
+        self.calls.append(("fullscreen", desktop))
+
+
+def _toggle_app(size, windowed, monkeypatch):
+    app = window_app()
+    app.window = _ToggleWindow(size, borderless=not windowed)
+    app.windowed = windowed
+    app.state = SimpleNamespace(windowed=windowed)
+    app.state.set_windowed = lambda on: setattr(app.state, "windowed", on)
+    app.screen = SimpleNamespace(
+        get_width=lambda: app.window.size[0],
+        get_size=lambda: tuple(app.window.size),
+        set_clip=lambda rect: None,
+    )
+    app.layouts = []
+    app._layout = lambda: app.layouts.append(tuple(app.window.size))
+    app._frame_period = 1 / 60
+    monkeypatch.setattr(ui, "display_refresh_rate", lambda: 170)
+    monkeypatch.setattr(ui.pygame.display, "get_desktop_sizes", lambda: [(2560, 1440)])
+    return app
+
+
+def test_the_window_mode_is_remembered(tmp_path):
+    from couch_doom.state import State
+
+    path = tmp_path / "state.json"
+    assert State(path).windowed is False
+    State(path).set_windowed(True)
+    assert State(path).windowed is True
+    State(path).set_windowed(False)
+    assert State(path).windowed is False
+
+
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_alt_enter_recreates_the_window_so_borderless_lands_at_the_corner(monkeypatch, platform):
+    # X11 ignores a position request on a window that already exists, so growing one in place leaves a
+    # borderless window centred and off the screen. A new window takes its position at creation.
+    monkeypatch.setattr(ui.sys, "platform", platform)
+    app = window_app()
+    app.window = object()
+    app.windowed = False
+    app.state = SimpleNamespace(windowed=False)
+    app.state.set_windowed = lambda on: setattr(app.state, "windowed", on)
+    events = []
+    app._close_window = lambda: events.append(("close", app.windowed))
+    app._open_window = lambda: events.append(("open", app.windowed))
+    monkeypatch.setattr(ui.pygame.display, "init", lambda: events.append("display-init"))
+    monkeypatch.setattr(ui.pygame.display, "set_caption", lambda title: None)
+
+    app._toggle_window()
+
+    assert events == [("close", True), "display-init", ("open", True)]
+    assert app.windowed is True
+    assert app.state.windowed is True
+    assert app._frame_period == 0.0
+
+
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_borderless_window_is_created_at_the_desktop_corner(monkeypatch, platform):
+    monkeypatch.setattr(ui.sys, "platform", platform)
+    monkeypatch.setattr(ui.pygame.display, "get_desktop_sizes", lambda: [(2560, 1440)])
+    monkeypatch.setattr(ui, "display_refresh_rate", lambda: 170)
+    monkeypatch.setattr(ui, "_set_window_icon", lambda window=None: None)
+    monkeypatch.setattr(ui, "_force_foreground", lambda handle=None: None)
+    monkeypatch.setattr(ui.log, "write", lambda *a: None)
+    monkeypatch.setattr(ui.pygame.key, "start_text_input", lambda: None)
+    created = []
+
+    class FakeWindow:
+        handle = 0
+
+        def __init__(self, title, size, **kwargs):
+            created.append((size, kwargs))
+            self.size = size
+
+    monkeypatch.setattr(ui.pygame, "Window", FakeWindow)
+    app = window_app()
+    app.windowed = False
+    app._window_target = lambda window: SimpleNamespace(get_width=lambda: 2560)
+    app._mouse_off = lambda: None
+    app._layout = lambda: None
+
+    app._create_window()
+
+    size, kwargs = created[0]
+    assert size == (2560, 1440)
+    assert kwargs["borderless"] is True
+    assert kwargs["position"] == (0, 0)
+
+
+def test_alt_enter_on_mac_uses_desktop_fullscreen_not_a_mode_change(monkeypatch):
+    monkeypatch.setattr(ui.sys, "platform", "darwin")
+    shadows = []
+    monkeypatch.setattr(ui, "_disable_macos_fullscreen_shadow", lambda: shadows.append("shadow"))
+    app = _toggle_app((2560, 1440), windowed=False, monkeypatch=monkeypatch)
+
+    app._toggle_window()
+
+    assert app.windowed is True
+    assert app.window.calls == ["windowed"]
+    assert app.window.size == ui.WINDOWED_SIZE
+    assert shadows == []
+
+    app._toggle_window()
+
+    assert app.windowed is False
+    assert app.window.calls == ["windowed", ("fullscreen", True)]
+    assert app.window.size == (2560, 1440)
+    assert shadows == ["shadow"]
+
+
+def test_alt_enter_is_consumed_and_a_held_key_toggles_once():
+    app = window_app()
+    app.mode, app.filter = "list", ""
+    app._alt_enter_held = False
+    calls = []
+    app._toggle_window = lambda: calls.append("toggle")
+    alt = SimpleNamespace(key=ui.pygame.K_RETURN, mod=ui.pygame.KMOD_ALT)
+    plain = SimpleNamespace(key=ui.pygame.K_RETURN, mod=0)
+
+    assert app._on_key(plain) is False
+    assert app._on_key(alt) is True
+    assert app._on_key(alt) is True
+    assert calls == ["toggle"]
+
+    app._alt_enter_held = False
+    pad = SimpleNamespace(key=ui.pygame.K_KP_ENTER, mod=ui.pygame.KMOD_LALT)
+    assert app._on_key(pad) is True
+    assert calls == ["toggle", "toggle"]
+
+
+def test_alt_enter_toggles_while_search_is_open_instead_of_closing_it():
+    app = window_app()
+    app.mode, app.filter = "search", "doom"
+    app._alt_enter_held = False
+    seen = []
+    app._close_overlay = lambda: seen.append("close")
+    app._toggle_window = lambda: seen.append("toggle")
+
+    assert app._on_key(SimpleNamespace(key=ui.pygame.K_RETURN, mod=ui.pygame.KMOD_ALT)) is True
+    assert seen == ["toggle"]
 
 
 def test_motion_tracks_elapsed_time_rather_than_the_frame():
