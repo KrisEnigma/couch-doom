@@ -8,6 +8,7 @@ import os
 import sys
 import threading
 import time
+import weakref
 import webbrowser
 from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -70,6 +71,7 @@ WINDOW_RETRIES = 20  # half a second apart
 INPUT_COOLDOWN = 0.45
 FALLBACK_FPS = 60  # used only when the display will not report a refresh rate
 HIDDEN_FPS = 10
+VSYNC_MARGIN = 0.002  # wake this long before the vblank; Windows' sleep overshoots by up to ~1 ms
 WINDOW_EVENTS = {
     pygame.QUIT, pygame.WINDOWCLOSE, pygame.WINDOWMINIMIZED, pygame.WINDOWHIDDEN, pygame.WINDOWRESTORED,
     pygame.WINDOWSHOWN, pygame.WINDOWEXPOSED, pygame.WINDOWDISPLAYCHANGED, pygame.RENDER_DEVICE_RESET,
@@ -206,15 +208,28 @@ def display_refresh_rate() -> int:
     try:
         rate = pygame.display.get_current_refresh_rate()
     except pygame.error:
-        pass  # the Mac build's pygame.Window: see _macos_refresh_rate
+        pass  # every pygame.Window: see _macos_refresh_rate and _desktop_refresh_rate
     if rate <= 0 and sys.platform == "darwin":
         rate = _macos_refresh_rate()
+    if rate <= 0 and sys.platform in ("win32", "linux"):
+        rate = _desktop_refresh_rate()
     return rate if rate > 0 else FALLBACK_FPS
+
+
+def _desktop_refresh_rate() -> int:
+    """The highest rate among the displays, 0 when none reports one. pygame-ce 2.5.8 cannot say which display a
+    window is on, so this guesses high: vsync paces the present at the window's real rate, and a high cap only
+    stops a spin, whereas a low one makes clock.tick sleep past the vblank."""
+    try:
+        return max(pygame.display.get_desktop_refresh_rates(), default=0)
+    except pygame.error:
+        return 0
 
 
 def use_gpu() -> bool:
     """Draw through the GPU canvas. On by default on macOS, where it is tested; COUCHDOOM_RENDERER=software or
-    =gpu overrides it. Windows and Linux open their window with display.set_mode, which has no canvas yet."""
+    =gpu overrides it. Windows and Linux open a pygame.Window like the Mac does, so the canvas can draw into it;
+    it stays off there until the hardware checks in docs/gpu-canvas-handoff.md pass."""
     choice = os.environ.get("COUCHDOOM_RENDERER", "").lower()
     if choice in ("gpu", "software"):
         return choice == "gpu"
@@ -465,12 +480,13 @@ def _set_dpi_aware() -> None:
             pass
 
 
-def _force_foreground() -> None:
-    """Bring the launcher in front of the terminal (or the game that just exited)."""
+def _force_foreground(handle: int | None = None) -> None:
+    """Bring the launcher in front of the terminal (or the game that just exited). `handle` is the window's own
+    HWND from pygame.Window.handle; get_wm_info is only the fallback, since it is empty for a pygame.Window."""
     if sys.platform == "win32":
         # Windows blocks background processes from stealing focus; a synthetic Alt press lifts that lock.
         try:
-            hwnd = pygame.display.get_wm_info().get("window")
+            hwnd = handle or pygame.display.get_wm_info().get("window")
             if not hwnd:
                 return
             user32 = ctypes.windll.user32
@@ -672,6 +688,8 @@ class App:
         self.dt = 1 / FALLBACK_FPS  # last frame's duration; draws before the first tick still move at this pace
         self._fps_clock: pygame.time.Clock | None = None  # set in run() when the dev overlay is on
         self._fps_hz = 0
+        self._presented_at = 0.0
+        self._frame_period = 0.0  # learned vblank spacing; 0 until present() has shown what this window actually does
         self.row_offset: dict[tuple[bool, int], float] = {}
 
         self.art_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="titleart")
@@ -692,6 +710,8 @@ class App:
         self._theme_bgs: OrderedDict[int, pygame.Surface] = OrderedDict()
         self._theme_bars: OrderedDict[int, pygame.Surface] = OrderedDict()
         self._theme_layers: OrderedDict[int, dict] = OrderedDict()
+        # The full-screen background is that column scaled across. The canvas draws the column and skips the upload.
+        self._bg_columns: weakref.WeakKeyDictionary[pygame.Surface, pygame.Surface] = weakref.WeakKeyDictionary()
         self._footer_band: pygame.Surface | None = None
         self._detail_panel: tuple[tuple, tuple, pygame.Surface] | None = None
         self._warm_generation = 0  # bumped per cache-warming pass; older workers stop when it moves on
@@ -1261,24 +1281,33 @@ class App:
             self.screen = self._window_target(self.window)
             self.dpi = self.screen.get_width() / self.window.size[0]
             _set_window_icon(self.window)  # Window() just installed pygame's Dock icon
-        elif self.windowed:
-            self.screen = pygame.display.set_mode(size)
         else:
-            self.screen = pygame.display.set_mode(size, pygame.NOFRAME)
+            # Windows and Linux get a pygame.Window too, so the canvas can draw into it. Borderless at the desktop's
+            # size, not exclusive fullscreen: that would change the display mode, and the window should track the
+            # desktop's refresh the way a normal one does. --windowed is a normal window.
+            self.window = pygame.Window("CouchDoom", size, allow_high_dpi=True, borderless=not self.windowed,
+                                        position=pygame.WINDOWPOS_UNDEFINED if self.windowed else (0, 0))
+            self.screen = self._window_target(self.window)
+            self.dpi = self.screen.get_width() / self.window.size[0]
+            _set_window_icon(self.window)  # the taskbar shows pygame's logo otherwise
         self.refresh_hz = display_refresh_rate()  # per window: get_current_refresh_rate needs the window to exist
+        log.write("display refresh", f"{self.refresh_hz} Hz")
         self._mouse_off()
         pygame.key.start_text_input()
         self._layout()
-        _force_foreground()
+        _force_foreground(self.window.handle or None)
 
     @staticmethod
     def _window_target(window: pygame.Window) -> canvas.Canvas | pygame.Surface:
         """The GPU canvas when the system has one, else the window's own software surface."""
         if use_gpu():
             try:
-                return canvas.Canvas(window)
+                target = canvas.Canvas(window)
             except canvas.ERRORS as exc:
                 log.write("gpu renderer unavailable", f"{exc}\nDrawing in software instead.")
+            else:
+                log.write("gpu renderer", f"driver: {target.driver}")
+                return target
         return window.get_surface()
 
     def _frame_cap(self) -> int:
@@ -1302,6 +1331,7 @@ class App:
             self.hidden = False
         elif event.type == pygame.WINDOWDISPLAYCHANGED:
             self.refresh_hz = display_refresh_rate()
+            self._frame_period = 0.0  # the new panel's vblank is learned again; the old period would oversleep it
         elif event.type == pygame.RENDER_DEVICE_RESET:
             # The GPU dropped every texture (driver update, D3D device lost). A new window re-uploads them all.
             log.write("gpu device reset", "Recreating the window.")
@@ -1314,9 +1344,44 @@ class App:
             return False
         return True
 
+    def _vblank_period(self) -> float:
+        """Seconds between vblanks. The desktop's fastest rate is only the first guess: this window may be on
+        the slower panel, and a compositor may not block in present() at all. `_learn_vblank` replaces the guess."""
+        return self._frame_period or 1 / self.refresh_hz
+
+    def _sleep_until_vblank(self) -> bool:
+        """Release the GIL until just before the next vblank. False when this frame is already late."""
+        if not self._presented_at:
+            return False
+        delay = self._presented_at + self._vblank_period() - VSYNC_MARGIN - time.perf_counter()
+        if delay > 0:
+            time.sleep(delay)
+            return True
+        return False
+
+    def _learn_vblank(self, slept: bool, blocked: float) -> None:
+        """Steer the wait so present() blocks for about `VSYNC_MARGIN` and no longer.
+
+        A long block means we woke early, which is what a too-fast guess does on a 60 Hz panel. Waking late
+        because a frame hitched must not stretch the period, or the next frames sleep through a vblank.
+        """
+        if not slept:
+            return
+        period = self._vblank_period()
+        if blocked < 0.0005:
+            period -= VSYNC_MARGIN
+        else:
+            period += 0.5 * (blocked - VSYNC_MARGIN)
+        self._frame_period = min(1 / 24, max(1 / 360, period))
+
     def _flip(self) -> None:
         if isinstance(self.screen, canvas.Canvas):
+            # present() waits for the vblank while holding the GIL, which starved the art and music threads.
+            slept = self._sleep_until_vblank()
+            started = time.perf_counter()
             self.screen.present()
+            self._learn_vblank(slept, time.perf_counter() - started)
+            self._presented_at = time.perf_counter()
         elif self.window is not None:
             self.window.flip()
         else:
@@ -1381,20 +1446,38 @@ class App:
         return _theme_cache(self._theme_bars, theme.key, create)
 
     def _make_background(self, theme: Theme) -> pygame.Surface:
-        # Build the vertical gradient in a one-pixel strip, then expand it in C instead of
-        # issuing one full-screen draw call per scanline on the UI thread.
-        strip = pygame.Surface((1, self.h))
+        # One column, then a nearest-neighbour scale. Blending the scanlines into the column first matches
+        # blending them after the scale, and the canvas can draw the column instead of uploading the copy.
+        column = pygame.Surface((1, self.h))
         top, bottom = theme.bg_top, theme.bg_bottom
+        span = max(1, self.h - 1)
         for y in range(self.h):
-            t = (y / max(1, self.h - 1)) ** 1.6
-            strip.set_at((0, y), [int(_lerp(top[i], bottom[i], t)) for i in range(3)])
-        bg = pygame.transform.scale(strip.convert(_OPAQUE), (self.w, self.h))
+            t = (y / span) ** 1.6
+            column.set_at((0, y), [int(_lerp(top[i], bottom[i], t)) for i in range(3)])
+        column = column.convert(_OPAQUE)
         lines = pygame.Surface((1, self.h), pygame.SRCALPHA)
         step = max(3, int(4 * self.s))
         for y in range(0, self.h, step):
             lines.set_at((0, y), (0, 0, 0, 30))
-        bg.blit(pygame.transform.scale(lines, (self.w, self.h)), (0, 0))
+        column.blit(lines, (0, 0))
+        bg = pygame.transform.scale(column, (self.w, self.h))
+        if not hasattr(self, "_bg_columns"):
+            self._bg_columns = weakref.WeakKeyDictionary()
+        self._bg_columns[bg] = column
         return bg
+
+    def _blit_background(self, surf: pygame.Surface, pos, alpha: float) -> None:
+        """Draw a background. On the canvas, stretch its column: uploading the full surface stalls the frame."""
+        column = self._bg_columns.get(surf) if isinstance(self.screen, canvas.Canvas) else None
+        if column is not None:
+            self.screen.blit_scaled(column, column.get_rect(), pygame.Rect(pos, (self.w, self.h)), alpha)
+            return
+        if alpha < 1:
+            surf.set_alpha(int(255 * alpha))
+            self.screen.blit(surf, pos)
+            _reset_alpha(surf)
+            return
+        self.screen.blit(surf, pos)
 
     def _alpha_mask(self, size: tuple[int, int], fn) -> pygame.Surface:
         """White mask whose alpha is fn(u, v) in 0..1, computed coarse then smoothly upscaled."""
@@ -1449,16 +1532,18 @@ class App:
     def _blit_layer(self, name: str) -> None:
         """Mid-change, the old theme's layer goes down first and the new one fades in over it."""
         surf, pos = self._layers_for(self.theme)[name]
+        if name == "bg":
+            if self.theme_from is None:
+                self._blit_background(surf, pos, 1.0)
+            else:
+                old = self._layers_for(self.theme_from)[name][0]
+                self._blit_background(old, pos, 1.0)
+                self._blit_background(surf, pos, self.theme_t)
+            return
         if self.theme_from is None:
             self.screen.blit(surf, pos)
             return
         old = self._layers_for(self.theme_from)[name][0]
-        if name == "bg":
-            self.screen.blit(old, pos)
-            surf.set_alpha(int(255 * self.theme_t))
-            self.screen.blit(surf, pos)
-            _reset_alpha(surf)
-            return
         # Masked overlays share one alpha shape: stacking the new over the old would thicken it mid-fade
         # (it snaps back thin when the fade ends), so mix their colours and keep the alpha as is.
         if isinstance(self.screen, canvas.Canvas):
@@ -2837,10 +2922,8 @@ class App:
         """
         if not handover.available():
             return
-        try:
-            own = pygame.display.get_wm_info().get("window")
-        except pygame.error:
-            own = None
+        # Our own window is not the game's: the cover must ignore it. Handle is 0 on Wayland, which reads as None.
+        own = (self.window.handle or None) if self.window is not None else None
         started = time.monotonic()
 
         def ready() -> bool:

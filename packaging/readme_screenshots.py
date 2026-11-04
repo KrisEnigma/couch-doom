@@ -55,7 +55,7 @@ def make_app(render_size: tuple[int, int], language: str) -> App:
         self._layout()
 
     App._create_window = create_window
-    ui._force_foreground = lambda: None
+    ui._force_foreground = lambda *a: None
     state = State(STATE_FILE)
     state.music = state.menu_sounds = False  # no title music renders between shots
     state.recent_group = False

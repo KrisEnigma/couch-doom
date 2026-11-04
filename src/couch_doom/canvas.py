@@ -11,8 +11,11 @@ Canvas: its texture would go stale. The UI already builds a surface once and the
 """
 from __future__ import annotations
 
+import ctypes
+import sys
 import weakref
 from collections import OrderedDict
+from pathlib import Path
 
 import pygame
 from pygame._sdl2 import video
@@ -24,6 +27,66 @@ _SHAPE_CACHE_SIZE = 256
 ACCELERATED = 1
 # Renderer failures raise pygame._sdl2.sdl2.error, a RuntimeError that is not a pygame.error.
 ERRORS = (pygame.error, RuntimeError)
+# SDL's default on Windows is Direct3D 9 (-1 picks it). Direct3D 11 is what the port is measured on. pygame has no
+# SDL hint API, so the driver is chosen by its index in get_drivers(); a missing name falls back to SDL's choice.
+PREFERRED_DRIVER = {"win32": "direct3d11"}
+
+
+def driver_index() -> int:
+    """Index of the preferred render driver for this platform, or -1 to let SDL choose."""
+    want = PREFERRED_DRIVER.get(sys.platform)
+    if want:
+        for index, info in enumerate(video.get_drivers()):
+            if info.name == want:
+                return index
+    return -1
+
+
+def vendored_sdl(site_packages: Path) -> Path | None:
+    """pygame-ce's Linux wheel puts SDL in `pygame_ce.libs` under a hashed name and loads it privately, so the
+    process-wide namespace has no SDL_GetRenderer. `libSDL2-` is that library; `libSDL2_image` and the other
+    addons only share the text up to the underscore."""
+    directory = Path(site_packages) / "pygame_ce.libs"
+    if not directory.is_dir():
+        return None
+    found = [path for path in directory.iterdir() if path.is_file() and path.name.startswith("libSDL2-")]
+    return sorted(found)[0] if found else None
+
+
+def _sdl_library():
+    if sys.platform == "win32":
+        return ctypes.WinDLL("SDL2")
+    vendored = vendored_sdl(Path(pygame.__file__).resolve().parent.parent)
+    if vendored is not None:
+        return ctypes.CDLL(str(vendored))
+    return ctypes.CDLL(None)
+
+
+def driver_name(window: pygame.Window) -> str:
+    """The backend SDL actually picked (direct3d11, opengl...) for `window`'s renderer. pygame does not expose it,
+    so ask SDL. Only used for the log line, so any failure just reads "unknown".
+    """
+    try:
+        sdl = _sdl_library()
+
+        class RendererInfo(ctypes.Structure):  # SDL_RendererInfo
+            _fields_ = [("name", ctypes.c_char_p), ("flags", ctypes.c_uint32), ("num_texture_formats", ctypes.c_uint32),
+                        ("texture_formats", ctypes.c_uint32 * 16), ("max_texture_width", ctypes.c_int),
+                        ("max_texture_height", ctypes.c_int)]
+
+        sdl.SDL_GetWindowFromID.restype = ctypes.c_void_p
+        sdl.SDL_GetWindowFromID.argtypes = [ctypes.c_uint32]
+        sdl.SDL_GetRenderer.restype = ctypes.c_void_p
+        sdl.SDL_GetRenderer.argtypes = [ctypes.c_void_p]
+        sdl.SDL_GetRendererInfo.restype = ctypes.c_int
+        sdl.SDL_GetRendererInfo.argtypes = [ctypes.c_void_p, ctypes.POINTER(RendererInfo)]
+        info = RendererInfo()
+        sdl_window = sdl.SDL_GetWindowFromID(window.id)
+        if sdl.SDL_GetRendererInfo(sdl.SDL_GetRenderer(sdl_window), ctypes.byref(info)) != 0 or not info.name:
+            return "unknown"
+        return info.name.decode("ascii", "replace")
+    except (AttributeError, OSError, ValueError, TypeError):
+        return "unknown"
 
 
 class Canvas:
@@ -34,10 +97,11 @@ class Canvas:
         self.format_window = pygame.Window("CouchDoom", (1, 1), hidden=True, utility=True)
         self.format_window.get_surface()
         try:
-            self.renderer = video.Renderer(window, accelerated=ACCELERATED, vsync=True)
+            self.renderer = video.Renderer(window, driver_index(), accelerated=ACCELERATED, vsync=True)
         except ERRORS:
             self.format_window.destroy()
             raise
+        self.driver = driver_name(window)
         self._textures: weakref.WeakKeyDictionary[pygame.Surface, video.Texture] = weakref.WeakKeyDictionary()
         self._shapes: OrderedDict[tuple, pygame.Surface] = OrderedDict()
         self._clip: pygame.Rect | None = None
