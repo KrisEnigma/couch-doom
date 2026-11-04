@@ -40,10 +40,28 @@ jobs:
         if: ${{ !matrix.image }}
         with:
           python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      # The patched tinysoundfont wheel compiles from source. Keep the wheel; the cache key changes with the patch.
+      - uses: actions/cache@v4
+        if: ${{ !matrix.image }}
+        with:
+          path: .ci/wheels
+          key: tsf-${{ matrix.target }}-${{ matrix.deploy || 'none' }}-${{ hashFiles('packaging/install_tinysoundfont.py') }}
+
+      # Linux compiles inside a container that cannot see the host pip cache. .ci/cache is on the mounted workspace.
+      - uses: actions/cache@v4
+        if: ${{ matrix.image }}
+        with:
+          path: .ci/cache
+          key: linux-${{ matrix.target }}-${{ hashFiles('requirements.txt', 'packaging/install_tinysoundfont.py', 'packaging/build-linux.sh') }}
 
       - name: Install
         if: ${{ !matrix.image }}
         shell: bash
+        env:
+          COUCHDOOM_WHEEL_DIR: ${{ github.workspace }}/.ci/wheels
         run: |
           python -m pip install -r requirements.txt pyinstaller pillow
           python packaging/install_tinysoundfont.py || echo "No tinysoundfont for this platform: MIDI title music is left out"

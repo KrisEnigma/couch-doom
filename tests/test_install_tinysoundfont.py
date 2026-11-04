@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
+import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 _spec = importlib.util.spec_from_file_location(
     "install_tinysoundfont",
@@ -28,3 +31,20 @@ class TinysoundfontPatchTests(unittest.TestCase):
     def test_patch_refuses_a_header_where_the_bad_store_moved(self):
         with self.assertRaises(ValueError):
             install_tinysoundfont.patch_tsf_header("\t*pFloatBuffer = res;\n")
+
+    def test_a_cached_wheel_is_installed_without_compiling(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wheel_dir = Path(tmp)
+            wheel = wheel_dir / f"tinysoundfont-{install_tinysoundfont.VERSION}-cp314-cp314-py3-none-any.whl"
+            wheel.write_bytes(b"")
+            seen: list[list[str]] = []
+
+            def run(cmd, check=False):
+                seen.append(list(cmd))
+                return subprocess.CompletedProcess(cmd, 0)
+
+            with patch.object(install_tinysoundfont.subprocess, "run", run):
+                install_tinysoundfont.install(sys.executable, wheel_dir)
+        self.assertEqual(seen, [[sys.executable, "-m", "pip", "install", "--no-deps", str(wheel)]])

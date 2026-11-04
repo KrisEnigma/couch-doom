@@ -9,13 +9,21 @@ set -euo pipefail
 LIMIT=2.28
 
 # uv fetches python-build-standalone, a shared-library CPython (PyInstaller needs one; manylinux's own Pythons are static).
+# The directory is on the mounted workspace, so actions/cache can keep the interpreter, pip wheels and the
+# patched tinysoundfont wheel. The container itself is thrown away after every build.
+CACHE="$PWD/.ci/cache"
+mkdir -p "$CACHE/pip" "$CACHE/wheels" "$CACHE/uv-python"
+export PIP_CACHE_DIR="$CACHE/pip"
+export UV_PYTHON_INSTALL_DIR="$CACHE/uv-python"
+export COUCHDOOM_WHEEL_DIR="$CACHE/wheels"
 /opt/python/cp312-cp312/bin/python -m pip install --quiet uv
 /opt/python/cp312-cp312/bin/uv venv --python 3.14 --managed-python --seed /tmp/venv
 # shellcheck disable=SC1091
 source /tmp/venv/bin/activate
 
 python -m pip install --quiet -r requirements.txt pyinstaller pillow
-# No wheel we can trust for this Python: build the patched source here, against the container's old glibc.
+# The published wheel still crashes on quit. This builds the patched source, or reuses the wheel a previous
+# run of this container left in $COUCHDOOM_WHEEL_DIR.
 python packaging/install_tinysoundfont.py || echo "No tinysoundfont for this platform: MIDI title music is left out"
 
 python -m PyInstaller --noconfirm --clean --distpath dist --workpath build packaging/CouchDoom.spec

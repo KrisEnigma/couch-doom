@@ -6,6 +6,8 @@ state/
 /soundfonts/
 build/
 dist/
+# Release-build caches restored by GitHub Actions. Not source.
+.ci/
 *.egg-info/
 # Releases install from requirements.txt; a local `uv run` lockfile would only drift from it.
 uv.lock
