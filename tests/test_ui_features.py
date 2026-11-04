@@ -469,10 +469,10 @@ def test_help_covers_the_usage_guide_without_hard_coded_buttons():
     headings = [heading for heading, _ in sections]
     text = " ".join(body for _, body in sections)
 
-    assert {"START PLAYING", "CAN'T FIND YOUR GAMES?", "MENU AND MUSIC", "IF SOMETHING DOESN'T WORK"} <= set(headings)
+    assert {"START PLAYING", "CAN'T FIND YOUR PRESETS?", "MENU AND MUSIC", "IF SOMETHING DOESN'T WORK"} <= set(headings)
     assert {"REPORT A BUG", "ABOUT"} <= set(headings)
     assert "controller" in text.lower()
-    assert "last game you played" in text.lower()
+    assert "last preset you played" in text.lower()
     assert "KrisEnigma" in text
     assert "STEAM DECK" not in headings
     assert "F1" not in text and "Enter" not in text and "Tab" not in text

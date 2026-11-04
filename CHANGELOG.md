@@ -4,11 +4,11 @@ Each release's notes on GitHub are its own section below, behind the download in
 
 **New in 1.2.6**
 
-- Scrolling stays smooth on a high refresh rate display. The picture is drawn by the graphics card instead of the processor, on Mac, Windows and Linux.
-- Alt+Enter switches between the full screen and a window. The same choice is in the menu, and CouchDoom opens that way next time.
-- Title music starts as the artwork appears, instead of well after it. The games just above and below are prepared ahead, so moving to one of them starts sooner.
-- When a game is several files, the title art, logo and description come from the first one that has them. A mod loaded after a map no longer replaces that map's logo. The music still comes from the last file.
-- macOS: an Intel copy running on Apple Silicon is offered the Apple Silicon download even when the version number is the same, and installing that update no longer crashes.
+- The 60 frames-per-second cap is gone. CouchDoom now draws through your graphics card on Mac, Windows and Linux, and scrolling keeps up with the display, including high refresh rate screens.
+- Alt+Enter switches between full screen and a window, and the menu has a Full screen option. CouchDoom remembers your choice for next time.
+- Title music now starts with the artwork instead of trailing behind it. Moving to the next preset starts its music sooner.
+- Presets made of several files show the right art: the title art, logo and description come from the first file that has them, so a mod loaded after a map no longer covers that map's logo.
+- macOS: an Intel copy running on Apple Silicon is offered the native Apple Silicon download, and installing it no longer crashes.
 
 **New in 1.2.5**
 

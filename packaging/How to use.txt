@@ -7,9 +7,9 @@ Made by KrisEnigma: https://github.com/KrisEnigma/couch-doom
 GETTING STARTED
 ---------------
 
-1. Set up games in DoomRunner, ZDL, Doom Launcher or Doom Launcher 667. You can
-   also use GZDoom, UZDoom or VKDoom by itself; CouchDoom lists the IWADs it
-   finds.
+1. Set up presets in DoomRunner, ZDL, Doom Launcher or Doom Launcher 667. You can
+   also use GZDoom, UZDoom or VKDoom by itself; CouchDoom lists one preset for
+   each IWAD it finds.
 2. Start CouchDoom:
    Windows: Run CouchDoom.exe.
    macOS: Open the DMG, drag CouchDoom.app to Applications, then open it there.
@@ -26,8 +26,8 @@ automatically.
 Library art:
 https://github.com/KrisEnigma/couch-doom/tree/main/packaging/steam
 
-FINDING YOUR GAMES
-------------------
+FINDING YOUR PRESETS
+--------------------
 
 CouchDoom finds launcher settings automatically, including portable installs
 with a Start Menu, Desktop or taskbar shortcut. You can also put the CouchDoom
@@ -80,7 +80,7 @@ launcher, toggle title music or menu sounds, cycle Colors and Language, turn the
 optional Recently played group on or off, open Help, or quit.
 
 Language follows your system on first run when CouchDoom supports it (English,
-Spanish, Brazilian Portuguese, French, German). Colors can follow each game's
+Spanish, Brazilian Portuguese, French, German). Colors can follow each preset's
 art or lock one look for the whole app.
 
 FIRST LAUNCH
@@ -127,7 +127,7 @@ inside the app, then restart. Source builds open the release page instead.
 TROUBLESHOOTING AND LOGS
 ------------------------
 
-CouchDoom logs game launches, SoundFont searches and MIDI music status to:
+CouchDoom logs preset launches, SoundFont searches and MIDI music status to:
 
 macOS:  ~/Library/Application Support/CouchDoom/state/couch-doom.log
 Windows: %LOCALAPPDATA%\CouchDoom\state\couch-doom.log
