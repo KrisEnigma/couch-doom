@@ -48,6 +48,7 @@ def test_minimized_window_ticks_without_drawing(monkeypatch):
     app.mouse_on = False
     app.music = None
     app.update_pool = None
+    app.update_handoff = False
 
     class Pool:
         def shutdown(self, **_kwargs):
