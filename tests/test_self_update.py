@@ -126,6 +126,21 @@ class ReleaseTargetTests(unittest.TestCase):
         self.assertEqual(info["asset"].target, "macos-arm64")
         self.assertIsNone(skipped)
 
+    def test_release_notes_keep_five_bullets_and_say_when_more_exist(self):
+        bullets = "\n".join(f"- Change number {i} stays whole." for i in range(7))
+        data = {
+            "tag_name": "v2.0.0",
+            "html_url": "https://github.com/KrisEnigma/couch-doom/releases/tag/v2.0.0",
+            "body": f"**New in 2.0.0**\n\n{bullets}\n",
+            "assets": [],
+        }
+        with patch.object(update, "_fetch_latest", return_value=data), \
+                patch.object(update, "process_is_translated", return_value=False):
+            info = update.check("1.0.0", platform="linux-x64")
+        self.assertEqual(len(info["notes"]), 5)
+        self.assertEqual(info["notes"][0], "Change number 0 stays whole.")
+        self.assertTrue(info["more_notes"])
+
     def test_release_check_selects_matching_archive_and_digest_sidecar(self):
         assets = [
             {"name": "CouchDoom-v1.2.0-windows-x64.zip", "browser_download_url": "https://github.com/KrisEnigma/couch-doom/releases/download/v1.2.0/CouchDoom-v1.2.0-windows-x64.zip"},

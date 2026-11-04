@@ -17,7 +17,7 @@ from . import log
 
 API = "https://api.github.com/repos/KrisEnigma/couch-doom/releases/latest"
 TIMEOUT = 10.0
-MAX_NOTES = 6
+MAX_NOTES = 5
 
 
 @dataclass(frozen=True)

@@ -32,6 +32,17 @@ def test_wrapping_a_readme_is_cached_between_frames():
     assert font.size_calls == calls_after_first
 
 
+def test_wrapping_without_a_line_cap_keeps_the_whole_bullet():
+    text = " ".join(["word"] * 40)
+    font = CountingFont()
+
+    lines = App._wrap(text, font, 50, None)
+
+    assert " ".join(lines) == text
+    assert len(lines) > 2
+    assert not any(line.endswith("…") for line in lines)
+
+
 def test_wrapping_a_long_readme_stops_after_the_visible_lines():
     text = "description word " * 400
     font = CountingFont()

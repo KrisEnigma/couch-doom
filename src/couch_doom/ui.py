@@ -703,7 +703,7 @@ class App:
         self._fps_hz = 0
         self._presented_at = 0.0
         self._frame_period = 0.0  # learned vblank spacing; 0 until present() has shown what this window actually does
-        self.row_offset: dict[tuple[bool, int], float] = {}
+        self.row_offset: dict[tuple[str, int], float] = {}
 
         self.art_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="titleart")
         self.art_jobs: dict[int, Future] = {}
@@ -3220,8 +3220,9 @@ class App:
 
     @staticmethod
     @lru_cache(maxsize=512)
-    def _wrap(text: str, font: pygame.font.Font, max_w: int, max_lines: int) -> tuple[str, ...]:
+    def _wrap(text: str, font: pygame.font.Font, max_w: int, max_lines: int | None = None) -> tuple[str, ...]:
         # A tuple, because lru_cache hands every caller the same object.
+        # max_lines cuts the rest off with an ellipsis. None keeps the whole text.
         lines, line = [], ""
         for word in text.split():
             trial = f"{line} {word}".strip()
@@ -3230,13 +3231,13 @@ class App:
             else:
                 if line:
                     lines.append(line)
-                    if len(lines) == max_lines:
+                    if max_lines is not None and len(lines) == max_lines:
                         lines[-1] = App._fit(lines[-1] + " …", font, max_w)
                         return tuple(lines)
                 line = word
         if line:
             lines.append(line)
-        if len(lines) > max_lines:
+        if max_lines is not None and len(lines) > max_lines:
             lines = lines[:max_lines]
             lines[-1] = App._fit(lines[-1] + " …", font, max_w)
         return tuple(lines)
@@ -3404,6 +3405,17 @@ class App:
             self.screen.blit(self._text(line, self._font(25), (206, 194, 178)), (m, y))
             y += int(36 * s)
 
+    def _row_slide(self, group: str, preset: int, selected: bool) -> float:
+        """How far this copy of a game sits to the right.
+
+        Recently Played and the game's own group are two rows of the same preset. Each group keeps
+        its own offset, so selecting one does not drag the other along.
+        """
+        target = 16 * self.s if selected else 0.0
+        key = (group, preset)
+        off = self.row_offset[key] = _approach(self.row_offset.get(key, 0.0), target, 16, self.dt)
+        return off
+
     def _draw_list(self, now: float) -> None:
         lr, s = self.list_rect, self.s
         if not self.rows:
@@ -3427,7 +3439,10 @@ class App:
 
         name_font = self._font(33)
         sel_font = self._font(33, bold=True)
+        group = ""
         for i, row in enumerate(self.rows):
+            if row.kind == "header":
+                group = _header_key(row)
             y = lr.y + self.row_y[i] - int(self.scroll)
             h = self.header_h if row.kind == "header" else self.preset_h
             if y + h < lr.y or y > lr.bottom:
@@ -3462,9 +3477,7 @@ class App:
                 continue
 
             selected = i == sel
-            target = 16 * s if selected else 0.0
-            key = (row.fav, row.preset)
-            off = self.row_offset[key] = _approach(self.row_offset.get(key, 0.0), target, 16, self.dt)
+            off = self._row_slide(group, row.preset, selected)
             ok = self.commands[row.preset].ok
             color = TEXT if selected else (MUTED if ok else DIM)
             right_pad = 0
@@ -4034,7 +4047,7 @@ class App:
         notes_font = self._font(23)
         notes: list[str] = []
         for item in info.get("notes", [])[:updates.MAX_NOTES]:
-            wrapped = self._wrap(item, notes_font, inner - int(26 * s), 2)
+            wrapped = self._wrap(item, notes_font, inner - int(26 * s), None)
             notes += [(("•  " if i == 0 else "    ") + line) for i, line in enumerate(wrapped)]
         notes_h = (int(34 * s) + len(notes) * int(32 * s) + int(18 * s)) if notes else 0
         if info.get("more_notes"):
@@ -4121,22 +4134,27 @@ class App:
         inner = width - 2 * pad
         notes_font = self._font(23)
 
-        # Newest release first; whatever doesn't fit the screen is left to CHANGELOG.txt rather than scrolled.
+        # Newest release first. Each bullet is shown whole. Only how many fit is limited: five,
+        # and whatever still doesn't fit the screen is left to CHANGELOG.txt rather than scrolled.
         room = self.h - self.footer_h - 2 * self.margin - 2 * pad - head_h - row_h - more_h
         labelled = len(sections) > 1
         rows: list[tuple[str, str]] = []  # ("label" | "note" | "gap", text)
-        used = hidden = 0
+        used = hidden = shown = 0
         for version, notes in sections:
             block: list[tuple[str, str]] = [("label", tr("whats_new.version", version=version))] if labelled else []
             block_h = label_h if labelled else 0
             for note in notes:
-                wrapped = self._wrap(note, notes_font, inner - int(26 * s), 2)
+                if shown >= updates.MAX_NOTES or hidden:
+                    hidden += 1
+                    continue
+                wrapped = self._wrap(note, notes_font, inner - int(26 * s), None)
                 lines = [("note", ("•  " if i == 0 else "    ") + line) for i, line in enumerate(wrapped)]
-                if hidden or used + block_h + len(lines) * line_h > room:
+                if used + block_h + len(lines) * line_h > room:
                     hidden += 1
                     continue
                 block += lines
                 block_h += len(lines) * line_h
+                shown += 1
             if any(kind == "note" for kind, _ in block):
                 rows += [*block, ("gap", "")]
                 used += block_h + gap_h

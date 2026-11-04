@@ -401,6 +401,22 @@ def _group_of(app, row: int) -> str | None:
     return None
 
 
+def test_selecting_recently_played_does_not_slide_the_same_game_below():
+    app = make_app()
+    app.row_offset = {}
+    app.dt = 1.0
+    app.s = 1.0
+    alpha = 0
+
+    recent = app._row_slide(ui.RECENT_ID, alpha, True)
+    section = app._row_slide("Section A", alpha, False)
+
+    assert recent == 16
+    assert section == 0
+    assert app.row_offset[(ui.RECENT_ID, alpha)] == 16
+    assert app.row_offset[("Section A", alpha)] == 0
+
+
 def test_last_toggles_between_recently_played_and_the_games_own_group():
     app = make_app()
     app.state.last_played = "Gamma"
