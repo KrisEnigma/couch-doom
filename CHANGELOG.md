@@ -9,6 +9,8 @@ Each release's notes on GitHub are its own section below, behind the download in
 - Title music now starts with the artwork instead of trailing behind it. Moving to the next preset starts its music sooner.
 - Presets made of several files show the right art: the title art, logo and description come from the first file that has them, so a mod loaded after a map no longer covers that map's logo.
 - macOS: an Intel copy running on Apple Silicon is offered the native Apple Silicon download, and installing it no longer crashes.
+- The update notice and What's new show each change in full, and list five of them.
+- Selecting a game in Recently Played no longer also slides that game in its own group.
 
 **New in 1.2.5**
 
