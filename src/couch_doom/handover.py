@@ -21,7 +21,7 @@ MACOS = sys.platform == "darwin"
 
 DEFAULT_TIMEOUT = 45.0
 POLL_SECONDS = 0.1  # enumerating windows is not free; ten looks a second is plenty
-FRAME_SECONDS = 1 / 60
+FRAME_SECONDS = 1 / 60  # present interval when the caller does not pass the display rate
 PROCESS_CACHE_SECONDS = 0.5
 
 MIN_WINDOW_W, MIN_WINDOW_H = 160, 120
@@ -43,12 +43,15 @@ class Window:
 
 def hold(poll: Callable[[], int | None], ready: Callable[[], bool], frame: Callable[[], None],
          timeout: float = DEFAULT_TIMEOUT, clock: Callable[[], float] = time.monotonic,
-         sleep: Callable[[float], None] = time.sleep, *, grace_frames: int = 0) -> str:
+         sleep: Callable[[float], None] = time.sleep, *, grace_frames: int = 0,
+         frame_seconds: float = FRAME_SECONDS) -> str:
     """Draw the loading screen until the engine window is ready, the engine exits, or timeout.
 
     Returns "window", "exited" or "timeout". `poll` is the engine's Popen.poll, and the clock and sleep are
-    parameters so the loop can be tested without waiting in real time. `grace_frames` keeps covering the screen
-    for a moment after the window appears, so the first painted frame does not reveal the desktop.
+    parameters so the loop can be tested without waiting in real time. `frame_seconds` is how long one painted
+    frame is held. `grace_frames` is how many of those frames cover the screen after the engine window appears,
+    so the first painted frame does not reveal the desktop. The caller picks the count from a duration, which
+    keeps that cover the same length when the display is faster.
     """
     started = clock()
     next_check = started
@@ -62,13 +65,13 @@ def hold(poll: Callable[[], int | None], ready: Callable[[], bool], frame: Calla
                     if poll() is not None:
                         return "exited"
                     frame()
-                    sleep(FRAME_SECONDS)
+                    sleep(frame_seconds)
                 return "window"
             next_check = now + POLL_SECONDS
         if now - started >= timeout:
             return "timeout"
         frame()
-        sleep(FRAME_SECONDS)
+        sleep(frame_seconds)
 
 
 def available() -> bool:

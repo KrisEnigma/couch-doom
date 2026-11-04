@@ -5,25 +5,49 @@ from couch_doom import music
 from couch_doom.ui import App
 
 
-def test_music_preparation_does_not_start_during_half_second_navigation():
+def music_app():
     app = App.__new__(App)
-    app.music = SimpleNamespace(want=None, update=lambda: None, request=lambda *a, **k: requests.append((a, k)))
     requests = []
+    app.music = SimpleNamespace(want=None, job=None, pending=None, update=lambda: None,
+                                request=lambda *a, **k: requests.append((a, k)),
+                                warm=lambda *a, **k: requests.append(("warm", a, k)))
     app.current = 0
+    app.cur_row = 0
     app._music_sel = 0
     app._music_since = 10.0
     app.state = SimpleNamespace(music=True)
-    app.rows = [object()]
+    app.rows = [SimpleNamespace(kind="preset", preset=0)]
     app.opts = SimpleNamespace(presets=[object()], engine_for=lambda _preset: None)
     app.soundfont_choice = None
     app.soundfont = None
     app._engine_soundfont_for = lambda _engine: None
     app._category_selected = lambda: False
+    app.requests = requests
+    return app
 
-    app._update_music(10.5)
 
-    assert requests == []
-    assert music.DWELL_SECONDS > 0.5
+def test_music_preparation_waits_out_a_held_direction_then_starts_during_the_art_fade():
+    app = music_app()
+
+    app._update_music(10.07)  # one gamepad repeat later: still moving, nothing starts
+
+    assert app.requests == []
+    assert 0.07 < music.DWELL_SECONDS < 0.3  # past a held repeat, inside the 0.3 s art fade
+    assert music.FADE_IN_MS <= 200
+
+    app._update_music(10.0 + music.DWELL_SECONDS + 1e-3)
+    assert app.requests  # settled: the track starts while the art is still fading in
+
+
+def test_a_playing_preset_renders_the_next_ones_track_ahead():
+    app = music_app()
+    app.music.want = 0
+    app.rows = [SimpleNamespace(kind="preset", preset=i) for i in range(3)]
+    app.opts.presets = [object(), object(), object()]
+
+    app._update_music(10.0)
+
+    assert app.requests[0][0] == "warm" and app.requests[0][1][0] == 1  # the row below, first
 
 
 class FakeChannel:
@@ -61,6 +85,34 @@ def playing_player(sig="title"):
     player.playing = sig
     player.streaming = False
     return player
+
+
+def test_a_background_render_becomes_playback_when_that_preset_is_chosen():
+    player = playing_player()
+    player.job = ("next", ("next", None), Future(), None)
+
+    player.request("next", preset=object())
+
+    assert player.want == "next" and player.job[0] == "next"  # kept, not cancelled and started over
+    assert player.channels[0].fades == []  # still playing until the render finishes
+
+
+def test_warming_does_not_touch_playback_and_skips_a_preset_already_known():
+    player = playing_player()
+    player.pool = HeldPool()
+    player.pending = None
+    player.cache = {}
+    player.renderers = {}
+    player.stream_path = None
+
+    player.warm("next", preset=object())
+    assert player.want == "old" and player.playing == "title" and player.channels[0].fades == []
+    assert player.pool.calls and player.job[0] == "next"
+
+    player.job = None
+    player.tracks[("known", None)] = "other"
+    player.warm("known", preset=object())
+    assert len(player.pool.calls) == 1  # identified already: the disk or PCM cache covers it
 
 
 def test_leaving_for_a_preset_known_to_use_another_track_fades_right_away():

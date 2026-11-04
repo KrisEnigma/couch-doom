@@ -18,7 +18,7 @@ from typing import Callable
 
 import pygame
 
-from . import __version__, draw, easter_eggs
+from . import __version__, canvas, draw, easter_eggs
 from . import update as updates
 from . import self_update
 from . import whats_new
@@ -65,10 +65,15 @@ QUIT_CONFIRM_SECONDS = 2.0
 LAUNCH_WIPE_SECONDS = 0.6
 LAUNCH_ART_WAIT_SECONDS = 1.2  # a cold unpack or a slow drive: open on the plain backdrop instead of waiting
 HANDOVER_TIMEOUT_SECONDS = handover.DEFAULT_TIMEOUT
-HANDOVER_GRACE_FRAMES = 4  # ~66 ms: cover the engine's first paint without lingering over the game
+HANDOVER_GRACE_SECONDS = 4 / 60  # cover the engine's first paint; the frame count follows the display
 WINDOW_RETRIES = 20  # half a second apart
 INPUT_COOLDOWN = 0.45
+FALLBACK_FPS = 60  # used only when the display will not report a refresh rate
 HIDDEN_FPS = 10
+WINDOW_EVENTS = {
+    pygame.QUIT, pygame.WINDOWCLOSE, pygame.WINDOWMINIMIZED, pygame.WINDOWHIDDEN, pygame.WINDOWRESTORED,
+    pygame.WINDOWSHOWN, pygame.WINDOWEXPOSED, pygame.WINDOWDISPLAYCHANGED, pygame.RENDER_DEVICE_RESET,
+}
 ART_FADE_SECONDS = 0.3
 ART_CACHE_SIZE = 24
 ART_CACHE_BYTES = 96 * 1024 * 1024  # 24 panels at 1080p, but only ~8 at 4K
@@ -154,6 +159,71 @@ class Hit:
 
 def _lerp(a: float, b: float, k: float) -> float:
     return a + (b - a) * k
+
+
+def _approach(current: float, target: float, rate: float, dt: float) -> float:
+    """Close `rate` of the remaining gap per second.
+
+    A faster display adds frames. It does not shorten the motion: each frame covers a slice of `dt`.
+    """
+    return _lerp(current, target, min(1.0, dt * rate))
+
+
+@lru_cache(maxsize=1)
+def _core_graphics():
+    cg = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+    cg.CGMainDisplayID.restype = ctypes.c_uint32
+    cg.CGDisplayCopyDisplayMode.restype = ctypes.c_void_p
+    cg.CGDisplayCopyDisplayMode.argtypes = [ctypes.c_uint32]
+    cg.CGDisplayModeGetRefreshRate.restype = ctypes.c_double
+    cg.CGDisplayModeGetRefreshRate.argtypes = [ctypes.c_void_p]
+    cg.CGDisplayModeRelease.argtypes = [ctypes.c_void_p]
+    return cg
+
+
+def _macos_refresh_rate() -> int:
+    """Core Graphics' refresh rate for the main display, 0 when unknown.
+
+    pygame.display only knows windows made by display.set_mode. The Mac build uses pygame.Window, which makes
+    that call raise "No open window", so the loop fell back to 60 on a 120 Hz ProMotion panel.
+    """
+    try:
+        cg = _core_graphics()
+        mode = cg.CGDisplayCopyDisplayMode(cg.CGMainDisplayID())
+        if not mode:
+            return 0
+        try:
+            return round(cg.CGDisplayModeGetRefreshRate(mode))
+        finally:
+            cg.CGDisplayModeRelease(mode)
+    except (OSError, AttributeError):
+        return 0
+
+
+def display_refresh_rate() -> int:
+    """Hz of the display the window is on. 60 when nothing can say, so the loop still has a cap."""
+    rate = 0
+    try:
+        rate = pygame.display.get_current_refresh_rate()
+    except pygame.error:
+        pass  # the Mac build's pygame.Window: see _macos_refresh_rate
+    if rate <= 0 and sys.platform == "darwin":
+        rate = _macos_refresh_rate()
+    return rate if rate > 0 else FALLBACK_FPS
+
+
+def use_gpu() -> bool:
+    """Draw through the GPU canvas. On by default on macOS, where it is tested; COUCHDOOM_RENDERER=software or
+    =gpu overrides it. Windows and Linux open their window with display.set_mode, which has no canvas yet."""
+    choice = os.environ.get("COUCHDOOM_RENDERER", "").lower()
+    if choice in ("gpu", "software"):
+        return choice == "gpu"
+    return sys.platform == "darwin"
+
+
+def show_fps() -> bool:
+    """Dev overlay. A release stays clean unless the process was started with COUCHDOOM_SHOW_FPS=1."""
+    return os.environ.get("COUCHDOOM_SHOW_FPS") == "1"
 
 
 def _mb(size: int) -> str:
@@ -501,6 +571,9 @@ _OPAQUE = pygame.Surface((1, 1), 0, 32, (0xFF0000, 0xFF00, 0xFF, 0))
 
 
 class App:
+    screen = None  # set per window; the defaults let window code run before (or without) one
+    refresh_hz = FALLBACK_FPS
+
     def __init__(
         self,
         opts: Options,
@@ -596,6 +669,9 @@ class App:
         self.mouse_pos = (0, 0)
         self.running = True
         self.hidden = False  # minimized or hidden: the loop ticks slowly and skips drawing
+        self.dt = 1 / FALLBACK_FPS  # last frame's duration; draws before the first tick still move at this pace
+        self._fps_clock: pygame.time.Clock | None = None  # set in run() when the dev overlay is on
+        self._fps_hz = 0
         self.row_offset: dict[tuple[bool, int], float] = {}
 
         self.art_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="titleart")
@@ -1072,7 +1148,9 @@ class App:
         if not self.state.music or not self.rows or self._category_selected():
             self.music.request(None)
         elif self.music.want == self.current:
-            pass  # playing, loading, or finished; title tracks play once, like on the engine's title screen
+            # Playing, loading, or finished; title tracks play once, like on the engine's title screen.
+            # Meanwhile render the neighbours, so the next move starts from the cache.
+            self._warm_nearby_music()
         elif now - self._music_since >= DWELL_SECONDS:
             p = self.opts.presets[self.current]
             self.music.request(self.current, soundfont=self._music_font(p), preset=p)
@@ -1081,6 +1159,26 @@ class App:
             # next track's preparation.
             p = self.opts.presets[self.current]
             self.music.leave(self.current, soundfont=self._music_font(p), preset=p)
+
+    def _warm_nearby_music(self) -> None:
+        """One neighbour at a time, the one below the selection first: that is where a held direction goes."""
+        music = self.music
+        if not music or music.job or music.pending or not self.rows:
+            return
+        sel = self._sel_row()
+        if self.rows[sel].kind != "preset":
+            return
+        seen: list[int] = []
+        for row in (*self.rows[sel + 1:], *reversed(self.rows[:sel])):
+            if row.kind == "preset" and row.preset != self.current and row.preset not in seen:
+                seen.append(row.preset)
+            if len(seen) == 2:
+                break
+        for idx in seen:
+            p = self.opts.presets[idx]
+            music.warm(idx, soundfont=self._music_font(p), preset=p)
+            if music.job:
+                return
 
     def _music_font(self, preset: Preset) -> Path | None:
         overrides = (self.soundfont_choice, os.environ.get("DOOMRUNNER_SOUNDFONT"))
@@ -1137,6 +1235,8 @@ class App:
 
     def _close_window(self) -> None:
         """Release Pygame's display surface before destroying its window or video subsystem."""
+        if isinstance(self.screen, canvas.Canvas):
+            self.screen.close()  # textures and renderer first: SDL frees them with the window
         self.screen = None
         if self.window is not None:
             self.window.destroy()
@@ -1158,20 +1258,66 @@ class App:
                     pygame.event.pump()
                     time.sleep(0.01)
                 _disable_macos_fullscreen_shadow()
-            self.screen = self.window.get_surface()
+            self.screen = self._window_target(self.window)
             self.dpi = self.screen.get_width() / self.window.size[0]
             _set_window_icon(self.window)  # Window() just installed pygame's Dock icon
         elif self.windowed:
             self.screen = pygame.display.set_mode(size)
         else:
             self.screen = pygame.display.set_mode(size, pygame.NOFRAME)
+        self.refresh_hz = display_refresh_rate()  # per window: get_current_refresh_rate needs the window to exist
         self._mouse_off()
         pygame.key.start_text_input()
         self._layout()
         _force_foreground()
 
+    @staticmethod
+    def _window_target(window: pygame.Window) -> canvas.Canvas | pygame.Surface:
+        """The GPU canvas when the system has one, else the window's own software surface."""
+        if use_gpu():
+            try:
+                return canvas.Canvas(window)
+            except canvas.ERRORS as exc:
+                log.write("gpu renderer unavailable", f"{exc}\nDrawing in software instead.")
+        return window.get_surface()
+
+    def _frame_cap(self) -> int:
+        """clock.tick's ceiling. On the canvas vsync paces the present, so the cap sits above the display: a
+        reported 119 for a 119.88 Hz mode would otherwise drift a sleep past a vblank about once a second."""
+        if isinstance(self.screen, canvas.Canvas):
+            return round(self.refresh_hz * 1.25)
+        return self.refresh_hz
+
+    def _on_window_event(self, event) -> bool:
+        """Window lifecycle events; True when handled. The canvas's hidden format window is not the app's."""
+        source = getattr(event, "window", None)
+        if isinstance(self.screen, canvas.Canvas) and source is not None and source is self.screen.format_window:
+            return event.type in WINDOW_EVENTS
+        if event.type == pygame.QUIT or event.type == pygame.WINDOWCLOSE:
+            # With the format window open, the close button and Alt+F4 post WINDOWCLOSE and never QUIT.
+            self.running = False
+        elif event.type in (pygame.WINDOWMINIMIZED, pygame.WINDOWHIDDEN):
+            self.hidden = True
+        elif event.type in (pygame.WINDOWRESTORED, pygame.WINDOWSHOWN, pygame.WINDOWEXPOSED):
+            self.hidden = False
+        elif event.type == pygame.WINDOWDISPLAYCHANGED:
+            self.refresh_hz = display_refresh_rate()
+        elif event.type == pygame.RENDER_DEVICE_RESET:
+            # The GPU dropped every texture (driver update, D3D device lost). A new window re-uploads them all.
+            log.write("gpu device reset", "Recreating the window.")
+            self._close_window()
+            pygame.display.init()
+            pygame.display.set_caption("CouchDoom")
+            self._open_window()
+            self.hidden = False
+        else:
+            return False
+        return True
+
     def _flip(self) -> None:
-        if self.window is not None:
+        if isinstance(self.screen, canvas.Canvas):
+            self.screen.present()
+        elif self.window is not None:
             self.window.flip()
         else:
             pygame.display.flip()
@@ -1315,6 +1461,9 @@ class App:
             return
         # Masked overlays share one alpha shape: stacking the new over the old would thicken it mid-fade
         # (it snaps back thin when the fade ends), so mix their colours and keep the alpha as is.
+        if isinstance(self.screen, canvas.Canvas):
+            self.screen.blit_mix(old, surf, self.theme_t, pos)
+            return
         k = int(255 * self.theme_t)
         mixed = old.copy()
         mixed.fill((255 - k, 255 - k, 255 - k, 255), special_flags=pygame.BLEND_RGBA_MULT)
@@ -2628,7 +2777,7 @@ class App:
                 self.screen.blit(final, (0, 0))
                 _reset_alpha(final)
             self._flip()
-            clock.tick(60)
+            clock.tick(self._frame_cap())
         self.screen.blit(final, (0, 0))
         self._flip()
 
@@ -2662,6 +2811,12 @@ class App:
         src = pygame.Rect(math.floor((clip.x - x) / k), math.floor((clip.y - y) / k),
                           math.ceil(clip.w / k) + 2, math.ceil(clip.h / k) + 2).clip(art.get_rect())
         if src.w <= 0 or src.h <= 0:
+            return
+        if isinstance(self.screen, canvas.Canvas):
+            dest = pygame.Rect(round(x + src.x * k), round(y + src.y * k), max(1, round(src.w * k)), max(1, round(src.h * k)))
+            self.screen.set_clip(clip)
+            self.screen.blit_scaled(art, src, dest, alpha)
+            self.screen.set_clip(None)
             return
         part = art.subsurface(src)
         if k != 1.0:
@@ -2697,8 +2852,11 @@ class App:
             pygame.event.pump()  # keep Windows from calling the window unresponsive during a long load
             self._draw_loading(name, time.monotonic() - started)
 
+        hz = self.refresh_hz
+        # The cover is a duration. A 144 Hz display paints more frames in that same span, it does not lift sooner.
         reason = handover.hold(launched.proc.poll, ready, frame, HANDOVER_TIMEOUT_SECONDS,
-                               grace_frames=HANDOVER_GRACE_FRAMES)
+                               grace_frames=max(1, round(HANDOVER_GRACE_SECONDS * hz)),
+                               frame_seconds=1 / hz)
         if reason == "timeout":
             log.write("handover timeout", f"{name}: no engine window after {HANDOVER_TIMEOUT_SECONDS:.0f} seconds")
 
@@ -2993,6 +3151,27 @@ class App:
         elif self.mode == "whatsnew":
             self._draw_whats_new(now)
         self._draw_toast(now)
+        self._draw_fps()
+
+    def _draw_fps(self) -> None:
+        """Presents per second, and the Hz the loop is capped at. Top-right, only for COUCHDOOM_SHOW_FPS=1."""
+        clock = self._fps_clock
+        if clock is None:
+            return
+        fps = clock.get_fps()
+        path = "gpu" if isinstance(self.screen, canvas.Canvas) else "software"
+        text = f"{'—' if fps <= 0 else round(fps):>3} fps · {self._fps_hz} Hz · {path}"
+        surf = self._text(text, self._font(18, mono=True), TEXT)
+        pad = max(6, int(8 * self.s))
+        box = surf.get_rect(topright=(self.w - pad, pad))
+        self.screen.fill((0, 0, 0), box.inflate(pad, pad // 2))
+        self.screen.blit(surf, box)
+
+    def _note_fps_target(self, rate: int) -> None:
+        if self._fps_clock is None or rate == self._fps_hz:
+            return
+        self._fps_hz = rate
+        log.write("fps", f"aiming at {rate} Hz")
 
     def _draw_header(self) -> None:
         s, m = self.s, self.margin
@@ -3004,7 +3183,7 @@ class App:
         baseline = brand_pos[1] + brand_font.get_ascent()
         self.screen.blit(ver, (brand_pos[0] + brand.get_width() + int(10 * s), baseline - self._font(18, bold=True).get_ascent()))
         stripe_y = m + brand.get_height() - int(14 * s)
-        pygame.draw.rect(self.screen, self.theme.accent, (m, stripe_y, int(150 * s), int(7 * s)))
+        canvas.rect(self.screen, self.theme.accent, (m, stripe_y, int(150 * s), int(7 * s)))
         tag = self._tracked(
             tr("header.from_launcher", launcher=self.opts.launcher) if self.opts.launcher else tr("header.couch_launcher"),
             18, self.theme.accent, tracking=0.3)
@@ -3070,7 +3249,7 @@ class App:
             self.screen.blit(self._text(self._fit(str(p), mono, width), mono, TEXT), (m + int(4 * s), y))
             y += int(34 * s)
         y += int(26 * s)
-        pygame.draw.rect(self.screen, self.theme.accent, (m, y, int(56 * s), max(2, int(3 * s))))
+        canvas.rect(self.screen, self.theme.accent, (m, y, int(56 * s), max(2, int(3 * s))))
         y += int(22 * s)
         for line in self._wrap(hint, self._font(25), min(width, int(1100 * s)), 3):
             self.screen.blit(self._text(line, self._font(25), (206, 194, 178)), (m, y))
@@ -3099,7 +3278,6 @@ class App:
 
         name_font = self._font(33)
         sel_font = self._font(33, bold=True)
-        k = min(1.0, (1 / 60) * 16)
         for i, row in enumerate(self.rows):
             y = lr.y + self.row_y[i] - int(self.scroll)
             h = self.header_h if row.kind == "header" else self.preset_h
@@ -3131,13 +3309,13 @@ class App:
                     points = [(marker_x - marker_size, marker_y - marker_size // 2),
                               (marker_x, marker_y + marker_size // 2),
                               (marker_x + marker_size, marker_y - marker_size // 2)]
-                pygame.draw.lines(self.screen, marker_color, False, points, max(1, int(1.5 * s)))
+                canvas.lines(self.screen, marker_color, False, points, max(1, int(1.5 * s)))
                 continue
 
             selected = i == sel
             target = 16 * s if selected else 0.0
             key = (row.fav, row.preset)
-            off = self.row_offset[key] = _lerp(self.row_offset.get(key, 0.0), target, k)
+            off = self.row_offset[key] = _approach(self.row_offset.get(key, 0.0), target, 16, self.dt)
             ok = self.commands[row.preset].ok
             color = TEXT if selected else (MUTED if ok else DIM)
             right_pad = 0
@@ -3160,7 +3338,7 @@ class App:
             if star:
                 self.screen.blit(star, (tx + t.get_width() + int(12 * s), int(y + (h - star.get_height()) / 2)))
 
-        pygame.draw.rect(self.screen, stripe, (bar_x, band_y, int(6 * s), band_h))
+        canvas.rect(self.screen, stripe, (bar_x, band_y, int(6 * s), band_h))
         self.screen.set_clip(prev_clip)
         if self.scroll > 1:
             self._blit_layer("top")
@@ -3215,10 +3393,12 @@ class App:
         return cached[2]
 
     def _blit_detail_panel(self, now: float, panel: pygame.Surface) -> None:
+        """`panel` may be the inked part of a full-size panel (a subsurface); its offset puts it back in place."""
         dr, s = self.detail_rect, self.s
         t = _ease_out((now - self.detail_changed) / 0.3)
+        ox, oy = panel.get_offset()
         panel.set_alpha(int(255 * t))
-        self.screen.blit(panel, (dr.x + int(32 * s * (1 - t)), dr.y))
+        self.screen.blit(panel, (dr.x + ox + int(32 * s * (1 - t)), dr.y + oy))
 
     def _build_detail_panel(self, preset: Preset, cmd, engine, readme, logo: pygame.Surface | None, show_title: bool,
                             show_section: bool = False) -> pygame.Surface:
@@ -3276,11 +3456,12 @@ class App:
 
         total = sum(b.get_height() + gap for b, gap in blocks) - blocks[-1][1]
         panel = pygame.Surface(dr.size, pygame.SRCALPHA)
-        y = max(0, dr.height - total)
+        top = y = max(0, dr.height - total)
         for surf, gap in blocks:
             panel.blit(surf, (0, y))
             y += surf.get_height() + gap
-        return panel
+        # Only the inked rows: the empty top would be uploaded to the GPU on every selection change.
+        return panel.subsurface(pygame.Rect(0, top, dr.width, max(1, min(total, dr.height - top))))
 
     def _draw_category_detail(self, now: float, row: Row) -> None:
         presets = self._category_presets(row)
@@ -3490,7 +3671,7 @@ class App:
             enabled = key != "refresh" or self.reload is not None
             if selected:
                 self.screen.blit(draw.rounded_rect(rect.width, rect.height - int(5 * s), 9 * s, (255, 255, 255, 16)), rect)
-                pygame.draw.rect(self.screen, self.theme.accent,
+                canvas.rect(self.screen, self.theme.accent,
                                  (rect.x, rect.y + int(12 * s), int(5 * s), rect.height - int(29 * s)))
             self.hits.append(Hit(rect, lambda i=index: self._menu_pick(i), lambda i=index: self._menu_hover(i)))
             ink = TEXT if selected and enabled else MUTED if enabled else DIM
@@ -3543,7 +3724,7 @@ class App:
             selected = i == self.picker_sel
             if selected:
                 self.screen.blit(draw.rounded_rect(rect.width, rect.height, 10 * s, (255, 255, 255, 16)), rect)
-                pygame.draw.rect(self.screen, self.theme.accent, (rect.x, rect.y + int(10 * s), int(5 * s), rect.height - int(20 * s)))
+                canvas.rect(self.screen, self.theme.accent, (rect.x, rect.y + int(10 * s), int(5 * s), rect.height - int(20 * s)))
             self.hits.append(Hit(rect, lambda i=i: self._picker_pick(i), lambda i=i: self._picker_hover(i)))
             if choice is None:
                 name, sub, side, side_color = tr("picker.find_myself"), tr("picker.find_sub", program=PROGRAM), "", MUTED
@@ -3625,10 +3806,10 @@ class App:
             selected = index == browser.selected
             if selected:
                 self.screen.blit(draw.rounded_rect(rect.width, rect.height, 9 * s, (255, 255, 255, 18)), rect)
-                pygame.draw.rect(self.screen, self.theme.accent, (rect.x, rect.y + int(8 * s), int(5 * s), rect.height - int(16 * s)))
+                canvas.rect(self.screen, self.theme.accent, (rect.x, rect.y + int(8 * s), int(5 * s), rect.height - int(16 * s)))
             self.hits.append(Hit(rect, lambda i=index: self._browser_pick(i)))
             if offset and shown[offset - 1].launcher and not entry.launcher:
-                pygame.draw.line(self.screen, (44, 37, 34), (x, y - int(2 * s)), (rect.right - int(16 * s), y - int(2 * s)), max(1, int(s)))
+                canvas.line(self.screen, (44, 37, 34), (x, y - int(2 * s)), (rect.right - int(16 * s), y - int(2 * s)), max(1, int(s)))
             label = entry.display_name
             font = self._font(25, bold=selected and not entry.parent_selector)
             chevron = int(6 * s)
@@ -3658,7 +3839,7 @@ class App:
                 d = -1 if entry.parent_selector else 1
                 points = [(cx - d * chevron // 2, rect.centery - chevron), (cx + d * chevron // 2, rect.centery),
                           (cx - d * chevron // 2, rect.centery + chevron)]
-                pygame.draw.lines(self.screen, mark, False, points, max(1, int(2 * s)))
+                canvas.lines(self.screen, mark, False, points, max(1, int(2 * s)))
             y += row_h
         if browser.empty:
             self.screen.blit(self._text(tr("browser.empty"), self._font(22), MUTED), (x, self._text_top(self._font(22), y + row_h // 2)))
@@ -3754,9 +3935,9 @@ class App:
             y += int(34 * s)
             if fraction is not None:
                 bar_h = max(2, int(6 * s))
-                pygame.draw.rect(self.screen, KEY_IDLE, (x, y, inner, bar_h), border_radius=bar_h // 2)
+                canvas.rect(self.screen, KEY_IDLE, (x, y, inner, bar_h), border_radius=bar_h // 2)
                 if fill := int(inner * max(0.0, min(1.0, fraction))):
-                    pygame.draw.rect(self.screen, self.theme.accent, (x, y, fill, bar_h), border_radius=bar_h // 2)
+                    canvas.rect(self.screen, self.theme.accent, (x, y, fill, bar_h), border_radius=bar_h // 2)
                 y += int(20 * s)
         for i, (_, name, sub) in enumerate(choices):
             rect = pygame.Rect(box.x + int(12 * s), y, box.width - int(24 * s), row_h - int(6 * s))
@@ -3764,7 +3945,7 @@ class App:
             installing_row = downloading and choices[i][0] == "install"
             if selected and (cancellable or not installing_row):
                 self.screen.blit(draw.rounded_rect(rect.width, rect.height, 10 * s, (255, 255, 255, 16)), rect)
-                pygame.draw.rect(self.screen, self.theme.accent, (rect.x, rect.y + int(10 * s), int(5 * s), rect.height - int(20 * s)))
+                canvas.rect(self.screen, self.theme.accent, (rect.x, rect.y + int(10 * s), int(5 * s), rect.height - int(20 * s)))
             if not downloading or installing_row and cancellable:
                 self.hits.append(Hit(rect, lambda i=i: self._update_pick(i), lambda i=i: self._update_hover(i)))
             font = sel_font if selected else name_font
@@ -3841,7 +4022,7 @@ class App:
 
         rect = pygame.Rect(box.x + int(12 * s), y, box.width - int(24 * s), row_h - int(6 * s))
         self.screen.blit(draw.rounded_rect(rect.width, rect.height, 10 * s, (255, 255, 255, 16)), rect)
-        pygame.draw.rect(self.screen, self.theme.accent, (rect.x, rect.y + int(10 * s), int(5 * s), rect.height - int(20 * s)))
+        canvas.rect(self.screen, self.theme.accent, (rect.x, rect.y + int(10 * s), int(5 * s), rect.height - int(20 * s)))
         self.hits.append(Hit(rect, self._close_whats_new))
         font = self._font(31, bold=True)
         self.screen.blit(self._text(tr("whats_new.continue"), font, TEXT), (x, self._text_top(font, rect.centery)))
@@ -3893,7 +4074,7 @@ class App:
         report = self._tracked(tr("help.feedback"), 15, TEXT, tracking=0.2)
         report_rect = pygame.Rect(0, 0, report.get_width() + int(26 * s), int(38 * s))
         report_rect.midright = (box.right - int(38 * s), y + title_font.get_height() // 2)
-        pygame.draw.rect(self.screen, self.theme.accent, report_rect, border_radius=int(8 * s))
+        canvas.rect(self.screen, self.theme.accent, report_rect, border_radius=int(8 * s))
         self.screen.blit(report, (report_rect.centerx - report.get_width() // 2, report_rect.centery - report.get_height() // 2))
         self.hits.append(Hit(report_rect, lambda: webbrowser.open(ISSUE_URL)))
 
@@ -3942,7 +4123,7 @@ class App:
         caret = "|" if int(now * 2) % 2 == 0 else " "
         field = self._text(self._fit(self.filter + caret, self._font(34), grid_w), self._font(34), TEXT)
         self.screen.blit(field, (fx, fy + int(22 * s)))
-        pygame.draw.rect(self.screen, self.theme.accent, (fx, fy + field_h - int(12 * s), grid_w, max(2, int(3 * s))))
+        canvas.rect(self.screen, self.theme.accent, (fx, fy + field_h - int(12 * s), grid_w, max(2, int(3 * s))))
 
         gy = fy + field_h
         pop = 1 + 0.07 * _ease_out((now - self.osk_moved) / 0.14)
@@ -4159,6 +4340,8 @@ class App:
 
     def run(self) -> int:
         clock = pygame.time.Clock()
+        self._fps_clock = clock if show_fps() else None
+        self._fps_hz = 0
         last = time.monotonic()
         try:
             while self.running:
@@ -4170,14 +4353,7 @@ class App:
                 last = now
 
                 for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
-                        self.running = False
-                        continue
-                    if event.type in (pygame.WINDOWMINIMIZED, pygame.WINDOWHIDDEN):
-                        self.hidden = True
-                        continue
-                    if event.type in (pygame.WINDOWRESTORED, pygame.WINDOWSHOWN, pygame.WINDOWEXPOSED):
-                        self.hidden = False
+                    if self._on_window_event(event):
                         continue
                     if event.type == pygame.DROPFILE:
                         self._on_drop(Path(event.file))
@@ -4212,9 +4388,10 @@ class App:
                 if self.hidden:
                     clock.tick(HIDDEN_FPS)  # minimized: keep music, art and update checks moving without painting
                     continue
+                self._note_fps_target(self.refresh_hz)  # as many presents as the display takes; motion is in dt
                 self._draw(now)
                 self._flip()
-                clock.tick(60)
+                clock.tick(self._frame_cap())
         finally:
             self.art_pool.shutdown(wait=False, cancel_futures=True)
             if self.update_pool:
@@ -4228,6 +4405,7 @@ class App:
         return 0
 
     def tick(self, now: float, dt: float) -> None:
+        self.dt = dt  # draws read this; the present rate never feeds a motion
         self._poll_whats_new(now)
         self._poll_update(now)
         self._update_art(now)
@@ -4241,7 +4419,7 @@ class App:
             if stick:
                 self.info_view = self.info_scroll
             else:
-                self.info_view = _lerp(self.info_view, self.info_scroll, min(1.0, dt * 18))
+                self.info_view = _approach(self.info_view, self.info_scroll, 18, dt)
         elif self.mode == "help":
             stick = max(self.input.right_y, self.input.left_y, key=abs) if now >= self.ignore_until else 0.0
             if stick:
@@ -4250,7 +4428,7 @@ class App:
             if stick:
                 self.help_view = self.help_scroll
             else:
-                self.help_view = _lerp(self.help_view, self.help_scroll, min(1.0, dt * 18))
+                self.help_view = _approach(self.help_view, self.help_scroll, 18, dt)
         if self.rows:
-            self.scroll = _lerp(self.scroll, self._target_scroll(), min(1.0, dt * 14))
-            self.bar_y = _lerp(self.bar_y, self.row_y[self._sel_row()], min(1.0, dt * 20))
+            self.scroll = _approach(self.scroll, self._target_scroll(), 14, dt)
+            self.bar_y = _approach(self.bar_y, self.row_y[self._sel_row()], 20, dt)

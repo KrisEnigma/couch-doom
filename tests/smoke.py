@@ -113,6 +113,9 @@ from couch_doom.readme import find_readme  # noqa: E402
 from couch_doom.sources import discover, identify, load_choice  # noqa: E402
 from couch_doom.state import State  # noqa: E402
 from couch_doom.ui import App  # noqa: E402
+from couch_doom import canvas  # noqa: E402
+
+canvas.ACCELERATED = -1  # the dummy driver has only SDL's software renderer; let the canvas use it here
 
 found = {c.source.key: c for c in discover()}
 assert {"doomrunner", "zdl"} <= found.keys(), f"launchers not discovered: {sorted(found)}"
@@ -362,6 +365,11 @@ frames = []
 assert handover.hold(lambda: None, lambda: True, lambda: frames.append(1), 10, clock, clock.sleep,
                      grace_frames=2) == "window"
 assert len(frames) == 2  # two more frames cover the engine's first paint
+clock = _Clock()
+frames = []
+assert handover.hold(lambda: None, lambda: True, lambda: frames.append(clock()), 10, clock, clock.sleep,
+                     grace_frames=2, frame_seconds=1 / 120) == "window"
+assert frames == [0.0, 1 / 120]  # the present interval is the display's, not a fixed 60
 polls = []
 
 

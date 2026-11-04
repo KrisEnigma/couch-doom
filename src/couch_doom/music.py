@@ -61,10 +61,11 @@ VOLUME = 0.55  # streamed tracks (OGG, MP3, ...) play as mastered, at this level
 # list sounds even. Matching peaks instead left tracks with one loud hit, like Doom II's title, much quieter.
 MIDI_LOUDNESS_DB = -23.0
 PEAK_TARGET = 0.9  # never louder than this, so nothing clips
-# Just long enough to skip presets flown past while holding a direction (repeat is 70 ms).
-# Avoid starting title-track preparation while the player is moving through the list.
-DWELL_SECONDS = 0.65
-FADE_IN_MS = 500
+# Longer than a held direction (gamepad repeats every 70 ms, the keyboard as fast as every 30 ms), so flying
+# through the list never starts a render, and short enough that a settled preset's track starts while its art
+# is still fading in (the art takes 0.3 s).
+DWELL_SECONDS = 0.12
+FADE_IN_MS = 200
 FADE_OUT_MS = 700
 LEAVE_FADE_MS = 400  # moving off a preset: quick, so its track doesn't trail into the next one
 LEAVE_WAIT_SECONDS = 0.35  # longest the old track plays on while finding out whether the next preset shares it
@@ -724,6 +725,9 @@ class MusicPlayer:
         if key == self.want:
             return
         self._cancel_peek()
+        if key is not None and self.job and self.job[0] == key:
+            self.want = key  # already rendering this preset in the background: play it when it finishes
+            return
         self.want = key
         self._cancel()
         if key is None:
@@ -754,6 +758,29 @@ class MusicPlayer:
         else:
             future = self.pool.submit(_prepare, iwad, list(files or ()), renderer, cancel, dict(self.cache),
                                       None, protected)
+        self.job = (key, ident, future, cancel)
+
+    def warm(self, key: object, soundfont: Path | None = None, preset=None) -> None:
+        """Render `key`'s track into the cache without stopping or replacing what is playing.
+
+        The next move then starts from the cache, during the art fade, instead of after a wad walk and a MIDI
+        render. A preset already identified is left alone: its MIDI is in the cache, or it is a stream that the
+        disk cache opens cheaply at play time.
+        """
+        if self.job or self.pending or key is None or preset is None or key == self.want:
+            return
+        soundfont = soundfont or self.soundfont
+        ident = (key, soundfont)
+        if ident in self.tracks:
+            return
+        cancel = threading.Event()
+        renderer = None
+        if soundfont and self.tsf_available:
+            renderer = self.renderers.get(soundfont)
+            if renderer is None:
+                renderer = self.renderers[soundfont] = MidiRenderer(soundfont)
+        protected = {self.stream_path} if self.stream_path is not None else set()
+        future = self.pool.submit(_prepare_preset, preset, renderer, cancel, dict(self.cache), protected)
         self.job = (key, ident, future, cancel)
 
     def leave(self, key: object, soundfont: Path | None = None, preset=None) -> None:
