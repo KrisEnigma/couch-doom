@@ -11,7 +11,7 @@ import time
 import webbrowser
 from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable
@@ -31,7 +31,7 @@ from .gamepad import Action, Input, keyboard_repeat_timing
 from .glyphs import BUTTON_NAMES, Glyphs
 from .i18n import LANGUAGES, current_language, set_language
 from .i18n import t as tr  # not `t`: draw helpers bind local `t` to ease floats
-from .launch import LaunchCommand, build_command, load_order, presented_files, split_args
+from .launch import LaunchCommand, build_command, load_order, load_rows, presented_files, split_args
 from . import log
 from .log import closed_early, last_line, needs_extract_retry, spawn
 from .launchers import Launchers
@@ -211,6 +211,71 @@ def _reset_alpha(surf: pygame.Surface) -> None:
     surf.set_alpha(255 if surf.get_masks()[3] else None)
 
 
+def _entry_card(preset: Preset, iwad: Path | None, row: list[Path]) -> tuple[Art | None, Readme | None, Art | None] | None:
+    """Art, readme and logo when this one launcher entry has a face of its own.
+
+    A title picture, a logo or a readme counts. The base game's picture does not, so a gameplay
+    mod with none of the three leaves the entry above it on the card.
+    """
+    archives = [path for path in row if path.suffix.lower() != ".dmb"]
+    art = logo = readme = None
+    try:
+        if archives:
+            art = find_title_art(iwad, archives)
+    except Exception:
+        art = None
+    try:
+        if archives:
+            logo = find_logo(iwad, archives)
+    except Exception:
+        logo = None
+    try:
+        # The readme walk takes maps and mods off the preset. This entry's files are the whole list.
+        readme = find_readme(replace(preset, mods=list(row), mappacks=[], load_maps_after_mods=False))
+    except Exception:
+        readme = None
+    if logo is None and readme is None and (art is None or art.fallback):
+        return None
+    if archives and (logo is None or art is None or art.fallback):
+        try:
+            if startup := find_startup(archives):
+                art = startup
+        except Exception:
+            pass
+    return art, readme, logo
+
+
+def _card(preset: Preset, iwad: Path | None, shown: list[Path], files: list[Path]) -> tuple[Art | None, Readme | None, Art | None]:
+    """The card's art, readme and logo.
+
+    The first loaded entry that brings its own face supplies all three. A logo or a readme on an
+    entry lower in the list used to paint over the map above it, because art follows the engine's
+    last-loaded lump and the readme follows the first file that has one.
+    """
+    for row in load_rows(preset):
+        if (card := _entry_card(preset, iwad, row)) is not None:
+            return card
+    try:
+        art = find_title_art(iwad, shown)
+    except Exception:
+        art = None
+    try:
+        logo = find_logo(iwad, files)  # an add-on IWAD is the base game's logo, not a mod's
+    except Exception:
+        logo = None
+    if shown and (logo is None or art is None or art.fallback):
+        try:
+            if startup := find_startup(shown):
+                art = startup
+        except Exception:
+            pass
+    try:
+        readme = find_readme(preset)
+    except Exception:
+        readme = None
+    return art, readme, logo
+
+
 def _load_extras(preset: Preset) -> tuple[Art | None, Readme | None, Endoom | None, Art | None]:
     unpack(preset)
     files = load_order(preset)
@@ -230,7 +295,7 @@ def _load_extras(preset: Preset) -> tuple[Art | None, Readme | None, Endoom | No
                     cached.readme_stamp = ""
                 else:
                     try:
-                        cached.readme = find_readme(preset)
+                        cached.readme = _card(preset, iwad, shown, files)[1]
                     except Exception:
                         stamp = cached.readme_stamp
                     cached.readme_stamp = stamp
@@ -241,24 +306,7 @@ def _load_extras(preset: Preset) -> tuple[Art | None, Readme | None, Endoom | No
             return cached.art, cached.readme, cached.endoom, cached.logo
     except Exception:
         key = None
-    try:
-        art = find_title_art(iwad, shown)
-    except Exception:
-        art = None
-    try:
-        logo = find_logo(iwad, files)  # an add-on IWAD is the base game's logo, not a mod's
-    except Exception:
-        logo = None
-    if shown and (logo is None or art is None or art.fallback):
-        try:
-            if startup := find_startup(shown):
-                art = startup
-        except Exception:
-            pass
-    try:
-        readme = find_readme(preset)
-    except Exception:
-        readme = None
+    art, readme, logo = _card(preset, iwad, shown, files)
     try:
         endoom = find_endoom(files)
     except Exception:

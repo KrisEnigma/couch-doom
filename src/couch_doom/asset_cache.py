@@ -38,7 +38,8 @@ def key_for(preset: Preset, iwad: Path | None, files: list[Path]) -> str:
 
     # The selected entries, not only the expanded files: a bundle and its members added loose can have different
     # readmes. Bump the version when what gets cached changes, so stale results are not reused.
-    parts: list[str] = ["v2", preset.name, preset.section, preset.engine_id or "",
+    parts: list[str] = ["v3", preset.name, preset.section, preset.engine_id or "",
+                        "maps-after-mods" if preset.load_maps_after_mods else "maps-before-mods",
                         *(f"map:{p}" for p in preset.mappacks), *(f"mod:{p}" for p in preset.mods)]
     if iwad:
         try:

@@ -106,16 +106,50 @@ def presented_files(preset: Preset) -> tuple[Path | None, list[Path]]:
     return iwad, files
 
 
+def load_rows(preset: Preset) -> list[list[Path]]:
+    """Checked map packs and mods, in the order the launcher loads them.
+
+    Each entry is its own list, and a bundle stays in that list ahead of the files it names.
+    The preset's face uses the first entry that has one, so a mod lower in DoomRunner's list
+    still launches but doesn't replace the title of the entry above it.
+    """
+    def map_rows() -> list[list[Path]]:
+        rows = []
+        for mp in preset.mappacks:
+            if not mp.exists():
+                continue
+            row: list[Path] = []
+            for f in _expand_mappack(mp):
+                row.append(f)
+                if f.suffix.lower() == ".dmb":
+                    row.extend(_expand_dmb(f, preset=preset.name))
+            if row:
+                rows.append(row)
+        return rows
+
+    def mod_rows() -> list[list[Path]]:
+        rows = []
+        for mod in preset.mods:
+            if mod.suffix.lower() == ".dmb":
+                row = [mod, *_expand_dmb(mod, preset=preset.name)]
+            else:
+                row = _expand_dmb(mod, preset=preset.name)
+            if row:
+                rows.append(row)
+        return rows
+
+    maps, mods = map_rows(), mod_rows()
+    return [*mods, *maps] if preset.load_maps_after_mods else [*maps, *mods]
+
+
 def load_order(preset: Preset) -> list[Path]:
     """Files after the IWAD, in the order the engine loads them, with DoomRunner bundles expanded.
 
     This is the shared list for title art, logos, music and the generic launch path; DoomRunner's own
-    argument builder keeps its special dehacked/custom-argument ordering.
+    argument builder keeps its special dehacked/custom-argument ordering. Bundle paths stay out:
+    the engine never loads a .dmb itself.
     """
-    maps = [entry for mp in preset.mappacks if mp.exists()
-            for f in _expand_mappack(mp) for entry in _expand_dmb(f, preset=preset.name)]
-    mods = [entry for mod in preset.mods for entry in _expand_dmb(mod, preset=preset.name)]
-    return [*mods, *maps] if preset.load_maps_after_mods else [*maps, *mods]
+    return [path for row in load_rows(preset) for path in row if path.suffix.lower() != ".dmb"]
 
 
 def _file_args(files: list[Path]) -> list[str]:
