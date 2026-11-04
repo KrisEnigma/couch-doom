@@ -395,12 +395,18 @@ def test_alt_enter_recreates_the_window_so_borderless_lands_at_the_corner(monkey
     monkeypatch.setattr(ui.pygame.display, "init", lambda: events.append("display-init"))
     monkeypatch.setattr(ui.pygame.display, "set_caption", lambda title: None)
 
+    app._alt_enter_held = True
+    cleared = []
+    app.input = SimpleNamespace(reset=lambda: cleared.append("reset"))
+
     app._toggle_window()
 
     assert events == [("close", True), "display-init", ("open", True)]
     assert app.windowed is True
     assert app.state.windowed is True
     assert app._frame_period == 0.0
+    assert app._alt_enter_held is False
+    assert cleared == ["reset"]
 
 
 @pytest.mark.parametrize("platform", ["win32", "linux"])

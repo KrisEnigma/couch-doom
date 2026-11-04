@@ -480,6 +480,18 @@ def _set_dpi_aware() -> None:
             pass
 
 
+def _release_keyboard() -> None:
+    """Drop keys SDL still has down. Recreating the window swallows their key-up, so Alt stays stuck."""
+    try:
+        if sys.platform == "win32":
+            sdl = ctypes.WinDLL(str(Path(pygame.__file__).resolve().parent / "SDL2.dll"))
+        else:
+            sdl = ctypes.CDLL(None)  # RTLD_DEFAULT: SDL is already loaded
+        sdl.SDL_ResetKeyboard()
+    except (AttributeError, OSError, TypeError, ValueError):
+        pass
+
+
 def _force_foreground(handle: int | None = None) -> None:
     """Bring the launcher in front of the terminal (or the game that just exited). `handle` is the window's own
     HWND from pygame.Window.handle; get_wm_info is only the fallback, since it is empty for a pygame.Window."""
@@ -1329,6 +1341,13 @@ class App:
         save = getattr(getattr(self, "state", None), "set_windowed", None)
         if save is not None:
             save(self.windowed)
+        # The old window is gone before Alt and Enter come up, so SDL still thinks they are held: the next
+        # Enter is another Alt+Enter, and a held Left keeps recreating the window.
+        self._alt_enter_held = False
+        reset = getattr(getattr(self, "input", None), "reset", None)
+        if reset is not None:
+            reset()
+        _release_keyboard()
 
     @staticmethod
     def _window_target(window: pygame.Window) -> canvas.Canvas | pygame.Surface:
@@ -2379,9 +2398,9 @@ class App:
         elif action == Action.DOWN:
             self._move_menu(1, repeat=repeat)
         elif action == Action.LEFT:
-            self._set_menu_option(-1)
+            self._set_menu_option(-1, repeat=repeat)
         elif action == Action.RIGHT:
-            self._set_menu_option(1)
+            self._set_menu_option(1, repeat=repeat)
         elif action == Action.HELP:
             self.mode = "help"
             self.help_scroll = self.help_view = 0.0
@@ -2429,7 +2448,7 @@ class App:
         self._rebuild_rows()
         self._sound("open")
 
-    def _set_menu_option(self, delta: int = 1) -> None:
+    def _set_menu_option(self, delta: int = 1, *, repeat: bool = False) -> None:
         key = self._menu_items()[self.menu_sel][0]
         if key == "music":
             self._set_music(not self.state.music)
@@ -2441,6 +2460,8 @@ class App:
             self._rebuild_rows()
             self._sound("open")
         elif key == "fullscreen":
+            if repeat:
+                return  # one nudge is one toggle; a held key would flip it again every repeat
             self._toggle_window()
             self._sound("open")
         elif key == "colors":

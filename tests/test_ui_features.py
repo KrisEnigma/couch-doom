@@ -719,6 +719,7 @@ def test_menu_full_screen_row_uses_the_same_toggle_as_alt_enter():
     app._menu_pick(index)
     app.menu_sel = index
     app._set_menu_option(-1)
+    app._on_menu_action(Action.RIGHT, repeat=True)
 
     assert calls == ["toggle", "toggle"]
 
