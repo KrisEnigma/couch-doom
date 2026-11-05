@@ -43,6 +43,8 @@ def _warm_app(monkeypatch, *, visible: list[int], total: int):
     monkeypatch.setattr(ui, "_load_extras", lambda preset: None)
     monkeypatch.setattr(asset_cache, "key_for", lambda preset, iwad, files: preset.name)
     monkeypatch.setattr(asset_cache, "get", lambda key: True)
+    monkeypatch.setattr(asset_cache, "load_preset_keys", lambda: {})
+    monkeypatch.setattr(asset_cache, "save_preset_keys", lambda mapping: None)
     monkeypatch.setattr(asset_cache, "prune", lambda: None)
     monkeypatch.setattr(asset_cache, "invalidate_missing", lambda keys: calls.setdefault("assets", keys))
     monkeypatch.setattr(music_cache, "selection_key", lambda key, iwad, files: key)
@@ -137,6 +139,74 @@ def test_a_refresh_shows_the_count_immediately_and_says_refreshed_when_the_walk_
     app._warm_progress = (1, 3)
     app._warm_immediate = True
     assert app._warm_status(app._warm_begun) == "Caching 1/3"
+
+
+def test_a_finished_pass_remembers_each_preset_key(monkeypatch):
+    app, _, _ = _warm_app(monkeypatch, visible=[0], total=2)
+    saved = {}
+    monkeypatch.setattr(asset_cache, "save_preset_keys", lambda mapping: saved.update(mapping))
+
+    app._warm_cache()
+
+    assert saved == {asset_cache.preset_identity(preset): preset.name for preset in app.opts.presets}
+
+
+def test_an_interrupted_pass_does_not_replace_remembered_keys(monkeypatch):
+    app, seen, _ = _warm_app(monkeypatch, visible=[0], total=3)
+    saved = []
+    monkeypatch.setattr(asset_cache, "save_preset_keys", lambda mapping: saved.append(mapping))
+
+    def stop(preset):
+        seen.append(preset.name)
+        app.running = False
+
+    monkeypatch.setattr(ui, "unpack", stop)
+
+    app._warm_cache()
+
+    assert saved == []
+
+
+def test_a_cache_hit_refreshes_the_readme_stamp(monkeypatch):
+    app, _, _ = _warm_app(monkeypatch, visible=[0, 1, 2], total=3)
+    cached = asset_cache.CachedAssets(None, None, None, None, "stamp")
+    synced = []
+    loaded = []
+    monkeypatch.setattr(asset_cache, "get", lambda key: cached)
+    monkeypatch.setattr(ui, "_sync_cached_readme", lambda *args: synced.append(args[0].name))
+    monkeypatch.setattr(ui, "_load_extras", lambda preset: loaded.append(preset.name))
+
+    app._warm_cache()
+
+    assert synced == ["p0", "p1", "p2"]
+    assert loaded == []
+
+
+def test_an_offline_preset_keeps_its_previous_cache_file(monkeypatch):
+    app, seen, calls = _warm_app(monkeypatch, visible=[0], total=1)
+    saved = {}
+    monkeypatch.setattr(asset_cache, "preset_offline", lambda preset: True)
+    monkeypatch.setattr(asset_cache, "load_preset_keys", lambda: {"same": "old-key"})
+    monkeypatch.setattr(asset_cache, "preset_identity", lambda preset: "same")
+    monkeypatch.setattr(asset_cache, "save_preset_keys", lambda mapping: saved.update(mapping))
+
+    app._warm_cache()
+
+    assert calls["assets"] == {"old-key"}
+    assert "music" not in calls
+    assert saved == {"same": "old-key"}
+    assert seen == []
+
+
+def test_an_offline_preset_with_no_memory_does_not_wipe_the_cache(monkeypatch):
+    app, seen, calls = _warm_app(monkeypatch, visible=[0], total=1)
+    monkeypatch.setattr(asset_cache, "preset_offline", lambda preset: True)
+
+    app._warm_cache()
+
+    assert "assets" not in calls
+    assert "music" not in calls
+    assert seen == []
 
 
 def test_a_newer_pass_retires_the_old_one(monkeypatch):

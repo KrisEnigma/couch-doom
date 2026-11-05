@@ -102,6 +102,95 @@ def test_changed_sidecar_readme_replaces_the_cached_one(tmp_path, monkeypatch):
     assert calls["n"] == seen + 1
 
 
+def test_stamp_reread_ignores_a_descriptions_line_that_does_not_apply():
+    old = "/a/b.txt:1:2"
+    added = "/a/b.txt:1:2\ndescriptions.json:3:4"
+
+    assert not readme.stamp_needs_reread(None, "descriptions.json:absent", override_applies=False, from_descriptions=False)
+    assert readme.stamp_needs_reread(None, "descriptions.json:1:2", override_applies=True, from_descriptions=False)
+    assert readme.stamp_needs_reread(None, added, override_applies=False, from_descriptions=False)
+    assert not readme.stamp_needs_reread(old, added, override_applies=False, from_descriptions=False)
+    assert readme.stamp_needs_reread(old, added, override_applies=True, from_descriptions=False)
+    assert readme.stamp_needs_reread(old, "/a/b.txt:9:2\ndescriptions.json:3:4", override_applies=False, from_descriptions=False)
+    assert readme.stamp_needs_reread("descriptions.json:1:1", "descriptions.json:2:2", override_applies=False, from_descriptions=True)
+
+
+def _descriptions(tmp_path, monkeypatch, text="{}"):
+    monkeypatch.setattr(asset_cache, "_assets_dir", lambda: tmp_path / "cache")
+    (tmp_path / "cache").mkdir()
+    desc = tmp_path / "descriptions.json"
+    desc.write_text(text, encoding="utf-8")
+    monkeypatch.setattr(readme, "OVERRIDES_FILE", desc)
+    monkeypatch.setattr(readme, "_overrides", None)
+    return desc
+
+
+def test_an_old_stamp_does_not_reread_when_descriptions_names_nothing(tmp_path, monkeypatch):
+    desc = _descriptions(tmp_path, monkeypatch)
+    _, bundle = _megawad(tmp_path)
+    preset = Preset("p", "s", "e", None, [bundle], mod_entries=[bundle])
+    ui._load_extras(preset)
+    key = asset_cache.key_for(preset, None, load_order(preset))
+    cached = asset_cache.get(key)
+    cached.readme_stamp = readme.stamp_sidecar(cached.readme_stamp)
+    cached.readme = Readme("breach.txt", "Description  : Old blurb.\n", {"description": "Old blurb."})
+    asset_cache.put(key, cached)
+    calls = {"n": 0}
+    real = ui.find_readme
+
+    def counting(preset):
+        calls["n"] += 1
+        return real(preset)
+
+    monkeypatch.setattr(ui, "find_readme", counting)
+    desc.write_text('{"other.wad": {"description": "Nope."}}\n', encoding="utf-8")
+    st = desc.stat()
+    os.utime(desc, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+    readme._overrides = None
+
+    found = ui._load_extras(preset)[1]
+
+    assert calls["n"] == 0
+    assert found and found.text.startswith("Description  : Old blurb.")
+    assert "descriptions.json:" in asset_cache.get(key).readme_stamp
+
+
+def test_descriptions_override_replaces_a_cached_readme(tmp_path, monkeypatch):
+    desc = _descriptions(tmp_path, monkeypatch)
+    _, bundle = _megawad(tmp_path)
+    preset = Preset("p", "s", "e", None, [bundle], mod_entries=[bundle])
+    ui._load_extras(preset)
+    key = asset_cache.key_for(preset, None, load_order(preset))
+    cached = asset_cache.get(key)
+    cached.readme_stamp = readme.stamp_sidecar(cached.readme_stamp)
+    asset_cache.put(key, cached)
+    desc.write_text('{"breach.wad": {"description": "From the player."}}\n', encoding="utf-8")
+    st = desc.stat()
+    os.utime(desc, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+    readme._overrides = None
+
+    found = ui._load_extras(preset)[1]
+
+    assert found and found.source == "descriptions.json" and "From the player." in found.text
+
+
+def test_removing_a_descriptions_override_restores_the_sidecar(tmp_path, monkeypatch):
+    desc = _descriptions(tmp_path, monkeypatch, '{"breach.wad": {"description": "From the player."}}\n')
+    _, bundle = _megawad(tmp_path)
+    preset = Preset("p", "s", "e", None, [bundle], mod_entries=[bundle])
+    ui._load_extras(preset)
+    key = asset_cache.key_for(preset, None, load_order(preset))
+    assert asset_cache.get(key).readme.source == "descriptions.json"
+    desc.write_text("{}\n", encoding="utf-8")
+    st = desc.stat()
+    os.utime(desc, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+    readme._overrides = None
+
+    found = ui._load_extras(preset)[1]
+
+    assert found and found.source == "breach.txt" and "megawad for testing" in found.text
+
+
 def test_legacy_cache_without_a_stamp_rereads_a_different_sidecar(tmp_path, monkeypatch):
     monkeypatch.setattr(readme, "_load_overrides", lambda: {})
     monkeypatch.setattr(asset_cache, "_assets_dir", lambda: tmp_path)

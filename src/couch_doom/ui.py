@@ -39,7 +39,7 @@ from .launchers import Launchers
 from .music import DWELL_SECONDS, MusicPlayer, find_engine_soundfont, find_soundfont
 from .options import Options, OptionsError, Preset, unpack
 from .endoom import COLS, ROWS, Endoom, find_endoom
-from .readme import Readme, beside_stamp, find_readme
+from .readme import Readme, beside_stamp, find_readme, override_applies, stamp_needs_reread
 from .sfx import Sfx
 from .sources import SOURCES, Choice
 from .state import State
@@ -372,6 +372,35 @@ def _card(preset: Preset, iwad: Path | None, shown: list[Path], files: list[Path
     return art, readme, logo
 
 
+def _sync_cached_readme(preset: Preset, cached: asset_cache.CachedAssets, key: str,
+                        iwad: Path | None, shown: list[Path], files: list[Path]) -> None:
+    """Refresh a cached readme when the text beside it, or descriptions.json, changed.
+
+    The asset key ignores both. Opening the wad is reserved for a stamp that actually names this preset.
+    """
+    try:
+        stamp = beside_stamp(preset)
+    except Exception:
+        return
+    if cached.readme_stamp == stamp:
+        return
+    try:
+        applies = override_applies(preset)
+    except Exception:
+        applies = False
+    from_descriptions = bool(cached.readme and cached.readme.source == "descriptions.json")
+    if stamp_needs_reread(cached.readme_stamp, stamp, override_applies=applies, from_descriptions=from_descriptions):
+        try:
+            cached.readme = _card(preset, iwad, shown, files)[1]
+        except Exception:
+            stamp = cached.readme_stamp
+    cached.readme_stamp = stamp
+    try:
+        asset_cache.put(key, cached)
+    except Exception:
+        pass
+
+
 def _load_extras(preset: Preset) -> tuple[Art | None, Readme | None, Endoom | None, Art | None]:
     unpack(preset)
     files = load_order(preset)
@@ -379,26 +408,7 @@ def _load_extras(preset: Preset) -> tuple[Art | None, Readme | None, Endoom | No
     try:
         key = asset_cache.key_for(preset, iwad, files)
         if cached := asset_cache.get(key):
-            # The key ignores a text file beside the wad. A stamp of those files lets an edit refresh the
-            # readme and leave the title art cached. No stamp at all is an older entry: re-read when a text
-            # file is there, and only record the stamp when there is nothing beside the wad to contradict it.
-            try:
-                stamp = beside_stamp(preset)
-            except Exception:
-                stamp = cached.readme_stamp
-            if cached.readme_stamp != stamp:
-                if cached.readme_stamp is None and stamp == "":
-                    cached.readme_stamp = ""
-                else:
-                    try:
-                        cached.readme = _card(preset, iwad, shown, files)[1]
-                    except Exception:
-                        stamp = cached.readme_stamp
-                    cached.readme_stamp = stamp
-                try:
-                    asset_cache.put(key, cached)
-                except Exception:
-                    pass
+            _sync_cached_readme(preset, cached, key, iwad, shown, files)
             return cached.art, cached.readme, cached.endoom, cached.logo
     except Exception:
         key = None
@@ -834,7 +844,7 @@ class App:
             self._notify(tr("toast.still_same", detail=f"{exc.title[0].lower()}{exc.title[1:]}"), ERROR)
             return
         in_menu = self.mode == "menu"
-        self._warm_announce = in_menu  # "Refreshed" waits until the cache walk finishes
+        self._warm_announce = in_menu  # only a refresh from the menu reports done; switching launchers stays quiet
         self._apply(opts, announce=not in_menu)
 
     def _apply(self, opts: Options, *, announce: bool = True) -> None:
@@ -2387,6 +2397,12 @@ class App:
                     lower_current_thread_priority()
                     present_keys = []
                     music_keys = []
+                    previous = asset_cache.load_preset_keys()
+                    fresh: dict[str, str] = {}
+                    held_offline = False
+                    # An offline preset we have never cached while its drive was here has no key we can
+                    # protect. Skipping the sweep keeps every other file; the next online pass can prune.
+                    skip_asset_invalidate = False
                     rows = self._preset_rows()
                     sel = self._sel_row()
                     if sel in rows:
@@ -2426,15 +2442,31 @@ class App:
                             break
                         try:
                             preset = opts.presets[idx]
-                            unpack(preset)
-                            files = load_order(preset)
-                            iwad, shown = presented_files(preset)
-                            key = asset_cache.key_for(preset, iwad, files)
-                            present_keys.append(key)
-                            from . import music_cache
-                            music_keys.append(music_cache.selection_key(key, iwad, shown))
-                            if idx not in self.art_cache and idx not in self.art_jobs and not asset_cache.get(key):
-                                _load_extras(preset)
+                            ident = asset_cache.preset_identity(preset)
+                            if asset_cache.preset_offline(preset):
+                                # The drive is gone, so size and time can't be read. A new key would look
+                                # like a different preset, and the finished pass would delete the good file.
+                                held_offline = True
+                                old = previous.get(ident)
+                                if old:
+                                    present_keys.append(old)
+                                    fresh[ident] = old
+                                else:
+                                    skip_asset_invalidate = True
+                            else:
+                                unpack(preset)
+                                files = load_order(preset)
+                                iwad, shown = presented_files(preset)
+                                key = asset_cache.key_for(preset, iwad, files)
+                                present_keys.append(key)
+                                fresh[ident] = key
+                                from . import music_cache
+                                music_keys.append(music_cache.selection_key(key, iwad, shown))
+                                cached = asset_cache.get(key)
+                                if isinstance(cached, asset_cache.CachedAssets):
+                                    _sync_cached_readme(preset, cached, key, iwad, shown, files)
+                                elif not cached and idx not in self.art_cache and idx not in self.art_jobs:
+                                    _load_extras(preset)
                         except Exception:
                             pass
                         # A cache hit still counts. A newer pass, or quitting, owns the counter from here.
@@ -2446,8 +2478,13 @@ class App:
                     try:
                         from . import music_cache
                         asset_cache.prune()
-                        asset_cache.invalidate_missing(set(present_keys))
-                        music_cache.invalidate_selections(set(music_keys))
+                        if not skip_asset_invalidate:
+                            asset_cache.invalidate_missing(set(present_keys))
+                        # Music keys include file times. An offline preset's old music key can't be rebuilt,
+                        # so leave that cache until a pass where every preset is on a drive we can see.
+                        if not held_offline:
+                            music_cache.invalidate_selections(set(music_keys))
+                        asset_cache.save_preset_keys(fresh)
                     except Exception:
                         pass
                     if self._warm_generation == generation:

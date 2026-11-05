@@ -167,6 +167,106 @@ def put(key: str, assets: CachedAssets) -> None:
             pass
 
 
+def _preset_index_path() -> Path:
+    return cache_dir() / "preset_keys.json"
+
+
+def load_preset_keys() -> dict[str, str]:
+    """Last cache key for each preset, remembered without file times.
+
+    A missing drive changes the live key, and the old file can only be kept if we still know its name."""
+    try:
+        data = json.loads(_preset_index_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): v for k, v in data.items() if isinstance(v, str)}
+
+
+def save_preset_keys(mapping: dict[str, str]) -> None:
+    path = _preset_index_path()
+    tmp: Path | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"preset_keys.{os.getpid()}-{threading.get_ident()}.tmp")
+        tmp.write_text(json.dumps(mapping), encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception:
+        if tmp is not None:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def preset_identity(preset: Preset) -> str:
+    """Identity that stays put when a drive is unplugged. Names are not unique; the paths tell them apart."""
+    import hashlib
+
+    iwad = getattr(preset, "iwad", None)
+    maps = getattr(preset, "mappacks", None) or []
+    mods = getattr(preset, "mods", None) or []
+    parts = [
+        getattr(preset, "name", "") or "",
+        getattr(preset, "section", "") or "",
+        getattr(preset, "engine_id", "") or "",
+        "maps-after-mods" if getattr(preset, "load_maps_after_mods", False) else "maps-before-mods",
+        str(iwad or ""),
+        *(str(p) for p in maps),
+        *(str(p) for p in mods),
+    ]
+    return hashlib.sha256("\x00".join(parts).encode("utf-8", "replace")).hexdigest()
+
+
+def _path_exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
+def volume_unavailable(path: Path) -> bool:
+    """The file's volume isn't mounted. A deleted file on a mounted drive is a real change, not this.
+
+    exists() on a UNC path can sit for half a minute when the server is down, so those are left alone.
+    """
+    drive = path.drive
+    if drive.startswith("\\\\") or drive.startswith("//"):
+        return False
+    if len(drive) == 2 and drive[1] == ":":
+        return not _path_exists(Path(drive + "\\"))
+    text = path.as_posix()
+    if not text.startswith("/"):
+        return False
+    # (prefix, how many path parts name the volume itself). A file directly in /mnt is not a volume.
+    for root, depth in (("/run/media/", 2), ("/Volumes/", 1), ("/mnt/", 1), ("/media/", 1)):
+        if not text.startswith(root):
+            continue
+        parts = [part for part in text[len(root):].split("/") if part]
+        if len(parts) <= depth:
+            return False
+        return not _path_exists(Path(root + "/".join(parts[:depth])))
+    return False
+
+
+def configured_paths(preset: Preset) -> list[Path]:
+    """Paths the preset names, including ones load_order skips because the file is missing."""
+    paths: list[Path] = []
+    iwad = getattr(preset, "iwad", None)
+    if isinstance(iwad, Path):
+        paths.append(iwad)
+    for attr in ("mappacks", "mods"):
+        for item in getattr(preset, attr, None) or []:
+            if isinstance(item, Path):
+                paths.append(item)
+    return paths
+
+
+def preset_offline(preset: Preset) -> bool:
+    return any(volume_unavailable(path) for path in configured_paths(preset))
+
+
 def invalidate_missing(present_keys: set[str]) -> None:
     try:
         d = _assets_dir()

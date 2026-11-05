@@ -277,7 +277,8 @@ def _embedded(path: Path) -> Readme | None:
 
 
 OVERRIDES_FILE = STATE_DIR / "descriptions.json"
-_overrides: tuple[float, dict] | None = None  # (file mtime, parsed): presets are listed often, the file rarely changes
+_overrides: tuple[int, dict] | None = None  # (file mtime_ns, parsed): presets are listed often, the file rarely changes
+_DESC_PREFIX = "descriptions.json:"
 
 
 def _load_overrides(path: Path | None = None) -> dict[str, dict]:
@@ -285,7 +286,7 @@ def _load_overrides(path: Path | None = None) -> dict[str, dict]:
     global _overrides
     path = path or OVERRIDES_FILE
     try:
-        mtime = path.stat().st_mtime
+        mtime = path.stat().st_mtime_ns  # seconds would miss a second save in the same second
     except OSError:
         return {}
     if _overrides and _overrides[0] == mtime and path == OVERRIDES_FILE:
@@ -328,11 +329,20 @@ def _readme_files(preset: Preset) -> list[Path]:
     return out
 
 
+def _descriptions_token() -> str:
+    """The player's descriptions.json. It outranks the wad text, and it is not part of the file key."""
+    try:
+        st = OVERRIDES_FILE.stat()
+    except OSError:
+        return f"{_DESC_PREFIX}absent"
+    return f"{_DESC_PREFIX}{st.st_mtime_ns}:{st.st_size}"
+
+
 def beside_stamp(preset: Preset) -> str:
-    """Size and modified time of text files beside the preset's maps and mods.
+    """Size and modified time of text files beside the preset's maps and mods, plus descriptions.json.
 
     The asset key ignores those files, so a cache hit can see that one of them changed without opening the wad."""
-    parts = []
+    parts = [_descriptions_token()]
     for path in _readme_files(preset):
         for candidate in (_beside(path), _beside_fuzzy(path)):
             if candidate is None:
@@ -343,6 +353,49 @@ def beside_stamp(preset: Preset) -> str:
                 continue
             parts.append(f"{candidate.resolve()}:{st.st_mtime_ns}:{st.st_size}")
     return "\n".join(sorted(set(parts)))
+
+
+def stamp_sidecar(stamp: str | None) -> str:
+    """The stamp without the descriptions.json line. Older cache files don't have that line."""
+    if not stamp:
+        return ""
+    return "\n".join(line for line in stamp.split("\n") if not line.startswith(_DESC_PREFIX))
+
+
+def _descriptions_line(stamp: str | None) -> str | None:
+    if not stamp:
+        return None
+    for line in stamp.split("\n"):
+        if line.startswith(_DESC_PREFIX):
+            return line
+    return None
+
+
+def override_applies(preset: Preset) -> bool:
+    """True when descriptions.json has an entry for one of this preset's files."""
+    table = _load_overrides()
+    if not table:
+        return False
+    files = _readme_files(preset)
+    if preset.iwad:
+        files = [*files, preset.iwad]
+    return _override_readme(files, table) is not None
+
+
+def stamp_needs_reread(old: str | None, new: str, *, override_applies: bool, from_descriptions: bool) -> bool:
+    """Whether the cached readme text is stale.
+
+    A descriptions.json line showing up on an old stamp is not a reason to open the wad, unless that
+    file actually names one of the preset's files (or the cached text came from it and the entry is gone).
+    """
+    if old == new:
+        return False
+    old_side, new_side = stamp_sidecar(old), stamp_sidecar(new)
+    if (old is None and new_side != "") or old_side != new_side:
+        return True
+    if _descriptions_line(old) != _descriptions_line(new) and (override_applies or from_descriptions):
+        return True
+    return False
 
 
 def _find_readme(preset: Preset) -> Readme | None:
