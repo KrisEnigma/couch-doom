@@ -48,3 +48,32 @@ class TinysoundfontPatchTests(unittest.TestCase):
             with patch.object(install_tinysoundfont.subprocess, "run", run):
                 install_tinysoundfont.install(sys.executable, wheel_dir)
         self.assertEqual(seen, [[sys.executable, "-m", "pip", "install", "--no-deps", str(wheel)]])
+
+    def test_store_wheel_compiles_copies_and_installs(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp_wheel, tempfile.TemporaryDirectory() as tmp_src:
+            wheel_dir = Path(tmp_wheel)
+            source_dir = Path(tmp_src)
+            (source_dir / "pyproject.toml").write_text("", encoding="utf-8")
+            old_wheel = wheel_dir / f"tinysoundfont-{install_tinysoundfont.VERSION}-old.whl"
+            old_wheel.write_bytes(b"old")
+            seen: list[list[str]] = []
+
+            def run(cmd, check=False):
+                seen.append(list(cmd))
+                if cmd[1:4] == ["-m", "pip", "wheel"]:
+                    out_idx = cmd.index("-w") + 1
+                    out_dir = Path(cmd[out_idx])
+                    target = out_dir / f"tinysoundfont-{install_tinysoundfont.VERSION}-cp314-cp314-test.whl"
+                    target.write_bytes(b"new")
+                return subprocess.CompletedProcess(cmd, 0)
+
+            with patch.object(install_tinysoundfont, "_run", run):
+                install_tinysoundfont._store_wheel(sys.executable, source_dir, wheel_dir)
+
+            expected_stored = wheel_dir / f"tinysoundfont-{install_tinysoundfont.VERSION}-cp314-cp314-test.whl"
+            self.assertTrue(expected_stored.is_file())
+            self.assertFalse(old_wheel.exists())
+            self.assertEqual(seen[-1], [sys.executable, "-m", "pip", "install", "--no-deps", str(expected_stored)])
+

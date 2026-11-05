@@ -2,6 +2,10 @@
 
 Each release's notes on GitHub are its own section below, behind the download instructions in `packaging/release-header.md`. Keep the `**New in X.Y.Z**` heading format: the release workflow and the in-app update notice both look for it.
 
+**New in 1.2.8**
+
+- Title music is back. The 1.2.7 downloads were built without the MIDI player.
+
 **New in 1.2.7**
 
 - The window can be resized, and it opens at the size you left it.

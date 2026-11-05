@@ -24,7 +24,7 @@ source /tmp/venv/bin/activate
 python -m pip install --quiet -r requirements.txt pyinstaller pillow
 # The published wheel still crashes on quit. This builds the patched source, or reuses the wheel a previous
 # run of this container left in $COUCHDOOM_WHEEL_DIR.
-python packaging/install_tinysoundfont.py || echo "No tinysoundfont for this platform: MIDI title music is left out"
+python packaging/install_tinysoundfont.py
 
 python -m PyInstaller --noconfirm --clean --distpath dist --workpath build packaging/CouchDoom.spec
 

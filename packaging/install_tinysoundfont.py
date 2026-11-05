@@ -86,7 +86,10 @@ def _store_wheel(python: str, source: Path, wheel_dir: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="tinysoundfont-wheel-") as tmp:
         out = Path(tmp)
         _run([python, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation", "-w", str(out), str(source)])
-        built = next(cached_wheels(out))
+        candidates = cached_wheels(out)
+        if not candidates:
+            raise RuntimeError(f"No tinysoundfont wheel built in {out}")
+        built = candidates[0]
         for old in cached_wheels(wheel_dir):
             old.unlink()
         stored = wheel_dir / built.name
