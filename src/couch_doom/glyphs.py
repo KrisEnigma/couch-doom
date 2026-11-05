@@ -1,6 +1,8 @@
 """Controller button and keycap glyphs.
 
-Uses Kenney's Input Prompts (CC0, assets/prompts); falls back to vector drawing if an SVG is missing.
+Uses Kenney's Input Prompts (CC0). Regular keycaps and Xbox, PlayStation, and Switch
+buttons are vendored in third_party/kenney-input-prompts. assets/prompts is the
+subset the release ships. Missing files fall back to vector drawing.
 """
 from __future__ import annotations
 
@@ -58,6 +60,7 @@ _KEY_FILES = {
     "F2": "keyboard_mouse/keyboard_f2",
     "F3": "keyboard_mouse/keyboard_f3",
     "F4": "keyboard_mouse/keyboard_f4",
+    "F5": "keyboard_mouse/keyboard_f5",
     "BKSP": "keyboard_mouse/keyboard_backspace_icon",
     "CTRL": "keyboard_mouse/keyboard_ctrl",
     "A-Z": "keyboard_mouse/keyboard_a",

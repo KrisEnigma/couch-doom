@@ -1,11 +1,14 @@
 from collections import OrderedDict
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pygame
 
 from couch_doom import gamepad, i18n, ui
 from couch_doom.gamepad import Action
 from couch_doom.theme import theme_for_palette
+from couch_doom.ui import update_choices
 
 
 def make_app(sections=("Section A", "Section B"), collapsed=(), filter_text=""):
@@ -45,6 +48,7 @@ def make_app(sections=("Section A", "Section B"), collapsed=(), filter_text=""):
     app.free_scroll = None
     app.collapsed_sections = set(collapsed)
     app.s = 1
+    app.update_offer = None
     app.header_h = 36
     app.preset_h = 48
     app.problem = None
@@ -192,6 +196,25 @@ def test_backspace_is_consumed_by_overlays_but_reaches_the_filter_in_list_mode()
     assert app.filter == "ab"
 
 
+def test_shipped_prompts_are_a_subset_of_the_vendored_kenney_pack():
+    from couch_doom.glyphs import ASSET_DIR, _KEY_FILES, _PAD_FILES
+
+    vendor = Path(__file__).resolve().parents[1] / "third_party" / "kenney-input-prompts"
+    f5 = vendor / "Keyboard & Mouse" / "Vector" / "keyboard_f5.svg"
+    assert (vendor / "License.txt").is_file()
+    assert f5.is_file()
+    assert (ASSET_DIR / f"{_KEY_FILES['F5']}.svg").read_bytes() == f5.read_bytes()
+    folders = {p.name for p in vendor.iterdir() if p.is_dir()}
+    assert folders == {"Keyboard & Mouse", "Xbox Series", "PlayStation Series", "Nintendo Switch"}
+    vendor_names = {p.name for p in vendor.rglob("*.svg")}
+    assert vendor_names
+    assert not any("outline" in name or name.startswith("controller_") for name in vendor_names)
+    rels = list(_KEY_FILES.values())
+    rels += [rel for family in _PAD_FILES.values() for rel in family.values()]
+    assert {Path(rel).name + ".svg" for rel in rels} <= vendor_names
+    assert all((ASSET_DIR / f"{rel}.svg").is_file() for rel in rels)
+
+
 def test_ctrl_jumps_to_the_last_played_game_and_a_chord_does_not():
     from couch_doom.glyphs import ASSET_DIR, _KEY_FILES
     from couch_doom.i18n import t as tr
@@ -323,6 +346,29 @@ def test_menu_cycles_global_colors_with_left_right_and_enter():
     assert app.theme == theme_for_palette("red")
 
 
+def test_help_can_open_an_update_the_player_asked_not_to_hear_about():
+    from couch_doom.i18n import t as tr
+
+    app = make_app()
+    app.mode = "help"
+    app.force_update = False
+    info = {"version": "1.2.7", "remind": False, "url": "https://github.com/KrisEnigma/couch-doom/releases/tag/v1.2.7"}
+    opened = []
+    app._open_update = lambda offer: opened.append(offer)
+    app._sound = lambda _name: None
+
+    assert not any(label == tr("help.update", version="1.2.7") for spec, label, _ in app._help_buttons())
+    app._accept_update(info)
+    assert app.update_offer is info and opened == []
+    buttons = app._help_buttons()
+    assert any(spec == "KEY:ENTER" and label == tr("help.update", version="1.2.7") for spec, label, _ in buttons)
+    assert not any(label == tr("hint.update") for _, label, _ in app._footer_hints())
+
+    app._on_help_action(Action.CONFIRM)
+    assert opened == [info]
+    assert app.mode == "help"
+
+
 def test_f1_opens_separate_help_and_info_button_keeps_readme_default():
     app = make_app()
     help_action = gamepad.Input.__new__(gamepad.Input)
@@ -399,6 +445,33 @@ def _group_of(app, row: int) -> str | None:
         if app.rows[i].kind == "header":
             return app.rows[i].group_id or app.rows[i].text
     return None
+
+
+def test_force_update_starts_the_download_when_the_notice_opens():
+    app = ui.App.__new__(ui.App)
+    app.force_update = True
+    app._sound = lambda _name: None
+    started = []
+    app._start_update_install = lambda: started.append(True)
+    info = {"version": "1.2.6", "asset": object()}
+
+    with patch.object(ui.sys, "frozen", True, create=True):
+        app._open_update(info)
+
+    assert app.mode == "update"
+    assert started == [True]
+    assert update_choices(app.update, True)[app.update_sel][0] == "install"
+
+    started.clear()
+    app.force_update = False
+    with patch.object(ui.sys, "frozen", True, create=True):
+        app._open_update(info)
+    assert started == []
+    assert update_choices(app.update, True)[app.update_sel][0] == "install"
+
+    with patch.object(ui.sys, "frozen", False, create=True):
+        app._open_update({"version": "1.2.7", "url": "https://example.test"})
+    assert update_choices(app.update, False)[app.update_sel][0] == "open"
 
 
 def test_selecting_recently_played_does_not_slide_the_same_game_below():
@@ -515,7 +588,7 @@ def test_help_scroll_actions_move_by_lines_and_keep_a_smooth_view_target():
     assert app.help_view == 0
 
 
-def test_controller_y_opens_the_bug_report_and_footer_shows_it(monkeypatch):
+def test_controller_y_opens_the_bug_report_from_the_help_button(monkeypatch):
     app = make_app()
     app.mode = "help"
     app.input.pad_mode = True
@@ -524,10 +597,10 @@ def test_controller_y_opens_the_bug_report_and_footer_shows_it(monkeypatch):
 
     from couch_doom.i18n import t as tr
 
-    hints = app._footer_hints()
     app._on_action(Action.SEARCH, 0.0)
 
-    assert any("Y" in glyphs and label == tr("hint.help_feedback") for glyphs, label, _ in hints)
+    assert any(spec == "Y" and label == tr("help.feedback") for spec, label, _ in app._help_buttons())
+    assert not any(label == tr("help.feedback") for _, label, _ in app._footer_hints())
     assert opened == [ui.ISSUE_URL]
     assert ui.ISSUE_URL.endswith("/issues")
 
@@ -567,8 +640,10 @@ def test_keyboard_footer_separates_help_and_info_and_has_feedback_shortcut():
     assert any("KEY:ESC" in glyphs and label == tr("hint.menu") for glyphs, label, _ in hints)
 
     app.mode = "help"
+    assert any(spec == "KEY:F5" and label == tr("help.feedback") for spec, label, _ in app._help_buttons())
     hints = app._footer_hints()
-    assert any("KEY:F5" in glyphs and label == tr("hint.help_feedback") for glyphs, label, _ in hints)
+    assert not any("KEY:F5" in glyphs or label == tr("help.feedback") for glyphs, label, _ in hints)
+    assert any("KEY:ESC" in glyphs and label == tr("hint.close") for glyphs, label, _ in hints)
 
 
 def test_collapsed_sections_keep_their_header_and_hide_their_presets():

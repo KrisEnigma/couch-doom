@@ -80,7 +80,7 @@ MIDI playback support from source also needs tinysoundfont, installed with `pyth
 | — | Alt+Enter | Switch between the full screen and a window |
 | Back / View | F1 | Quick help |
 | Start | Esc | Open the menu |
-| — | F5 | Help & feedback |
+| — | F5 | Open CouchDoom's GitHub issues |
 | X | Tab | Readme and ENDOOM info; on a group heading, expand or collapse every group |
 | Y | / or type | Search |
 | R3 | F3 | Add or remove a favorite |
@@ -116,15 +116,15 @@ B closes an open panel and does nothing on the main selector. Mouse and keyboard
 
 ## A few extras
 
-- CouchDoom checks GitHub once after startup for updates. Packaged builds can install an update; source builds use the release page. Turn the check off with the `update_check` setting in `last_played.json` or by setting `COUCHDOOM_NO_UPDATE_CHECK`. Leftover folders from an interrupted update are cleaned up on the next launch.
+- CouchDoom checks GitHub once after startup for updates. Packaged builds can install an update; source builds use the release page. "Don't remind me again" hides that release from the startup notice; Help has an Update button next to GITHUB that brings the window back. Turn the check off with the `update_check` setting in `last_played.json` or by setting `COUCHDOOM_NO_UPDATE_CHECK`. Leftover folders from an interrupted update are cleaned up on the next launch.
 - Favorites, language, colors, full screen or a window, Recently Played, and other preferences are saved locally. The troubleshooting log can include file paths and launch output, so review it before sharing.
-- From source, `--windowed` opens a window, `--dry-run` prints launch commands, `--options` opens a settings file or supported port, and `--soundfont` selects MIDI music playback.
+- From source, `--windowed` opens a window, `--dry-run` prints launch commands, `--options` opens a settings file or supported port, and `--soundfont` selects MIDI music playback. `--force-update` downloads and installs the latest release even when this copy is already that version.
 
 ## Credits and license
 
 CouchDoom is MIT licensed; see [LICENSE](LICENSE).
 
 - **Fonts:** [Barlow](https://github.com/jpt/barlow) and [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono), both SIL Open Font License.
-- **Controller icons:** [Kenney's Input Prompts](https://kenney.nl/assets/input-prompts), CC0.
+- **Controller icons:** [Kenney's Input Prompts](https://kenney.nl/assets/input-prompts), CC0. `third_party/kenney-input-prompts/` keeps the regular keycaps and the regular Xbox, PlayStation, and Switch buttons. The release only ships the glyphs the UI draws, under `src/couch_doom/assets/prompts/`.
 - **Menu sounds:** [Freedoom](https://github.com/freedoom/freedoom), modified BSD license. See the bundled [notice](src/couch_doom/assets/freedoom/THIRD-PARTY-NOTICES.txt).
 - **MIDI SoundFont:** [UZDoom](https://github.com/UZDoom/UZDoom).

@@ -51,6 +51,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="Print launch commands and exit")
     ap.add_argument("--preset", help="With --dry-run: only presets whose name contains this text")
     ap.add_argument("--soundfont", help="SoundFont (.sf2/.sf3) for MIDI title music; overrides auto-detection")
+    ap.add_argument("--force-update", action="store_true",
+                    help="Download and install the latest release even when this copy is already that version")
     args = ap.parse_args(raw_argv)
 
     state = State(STATE_FILE)
@@ -85,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from .ui import App
 
-    app = App(opts, state, windowed=args.windowed or state.windowed, soundfont=args.soundfont, problem=problem, launchers=launchers, pick=pick)
+    app = App(opts, state, windowed=args.windowed or state.windowed, soundfont=args.soundfont, problem=problem, launchers=launchers, pick=pick, force_update=args.force_update)
     return app.run()
 
 

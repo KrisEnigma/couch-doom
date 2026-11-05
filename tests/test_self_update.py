@@ -45,6 +45,40 @@ class ReleaseTargetTests(unittest.TestCase):
         self.assertIsNone(urlopen.call_args_list[1].kwargs["context"])
         bundled.assert_called_once()
 
+    def test_a_skipped_release_stays_available_without_the_startup_notice(self):
+        data = {
+            "tag_name": "v2.0.0",
+            "html_url": "https://github.com/KrisEnigma/couch-doom/releases/tag/v2.0.0",
+            "body": "**New in 2.0.0**\n\n- Still here.\n",
+            "assets": [],
+        }
+        with patch.object(update, "_fetch_latest", return_value=data), \
+                patch.object(update, "process_is_translated", return_value=False):
+            held = update.check("1.0.0", "2.0.0")
+            loud = update.check("1.0.0")
+        self.assertFalse(held["remind"])
+        self.assertEqual(held["notes"], ["Still here."])
+        self.assertTrue(loud["remind"])
+
+    def test_force_offers_the_installed_version_again_and_refuses_a_downgrade(self):
+        same = {
+            "tag_name": "v1.2.6",
+            "html_url": "https://github.com/KrisEnigma/couch-doom/releases/tag/v1.2.6",
+            "body": "**New in 1.2.6**\n\n- Again.\n",
+            "assets": [],
+        }
+        with patch.object(update, "_fetch_latest", return_value=same), \
+                patch.object(update, "process_is_translated", return_value=False), \
+                patch.dict(os.environ, {"COUCHDOOM_NO_UPDATE_CHECK": "1"}):
+            forced = update.check("1.2.6", "1.2.6", force=True)
+            self.assertIsNone(update.check("1.2.6"))
+        self.assertEqual(forced["version"], "1.2.6")
+        self.assertEqual(forced["notes"], ["Again."])
+        older = {**same, "tag_name": "v1.2.5", "html_url": "https://github.com/KrisEnigma/couch-doom/releases/tag/v1.2.5"}
+        with patch.object(update, "_fetch_latest", return_value=older), \
+                patch.object(update, "process_is_translated", return_value=False):
+            self.assertIsNone(update.check("1.2.6", force=True))
+
     def test_current_release_check_records_success_in_local_log(self):
         data = {
             "tag_name": "v1.0.0",
@@ -124,7 +158,9 @@ class ReleaseTargetTests(unittest.TestCase):
         self.assertEqual(info["native_label"], "Apple Silicon")
         self.assertEqual(info["running_label"], "Intel")
         self.assertEqual(info["asset"].target, "macos-arm64")
-        self.assertIsNone(skipped)
+        self.assertTrue(info["remind"])
+        self.assertFalse(skipped["remind"])
+        self.assertEqual(skipped["asset"].target, "macos-arm64")
 
     def test_release_notes_keep_five_bullets_and_say_when_more_exist(self):
         bullets = "\n".join(f"- Change number {i} stays whole." for i in range(7))

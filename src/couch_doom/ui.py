@@ -109,6 +109,12 @@ def _help_facts() -> dict[str, str]:
     return {"version": __version__, "log": log.display_path()}
 
 
+def update_title(info: dict) -> str:
+    if info.get("arch_switch"):
+        return tr("update.native", kind=info.get("native_label", ""))
+    return tr("update.out", version=info.get("version", ""))
+
+
 def update_choices(info: dict | None, packaged: bool) -> tuple[tuple[str, str, str], ...]:
     # "later" stays index 1 among the base trio because B and a click outside both mean it;
     # insert install at 0 when available so later shifts with the list.
@@ -612,6 +618,7 @@ class App:
         reload: Callable[[], Options] | None = None,
         launchers: Launchers | None = None,
         pick: bool = False,
+        force_update: bool = False,
     ):
         self.opts = opts
         self.state = state
@@ -628,6 +635,7 @@ class App:
         self.browser_scroll = 0
         # A newer release, shown once as a notice: {"version", "current", "notes": [str], "url"}.
         self.update: dict | None = None
+        self.update_offer: dict | None = None  # a release the player asked not to be reminded about; Help can still install it
         self.update_sel = 1
         self.update_opened = 0.0
         self.update_choice: str | None = None
@@ -644,6 +652,7 @@ class App:
         self.whats_new_opened = 0.0
         if state.seen_version != __version__:
             state.set_seen_version(__version__)
+        self.force_update = force_update
         self.soundfont_choice = soundfont
         self._engine_soundfonts: dict[tuple, Path | None] = {}
 
@@ -862,6 +871,8 @@ class App:
         """Open once the list is showing, so the launcher picker or a problem screen comes first."""
         if not self.whats_new or self.mode != "list":
             return
+        if self.force_update and self.update_job is not None:
+            return
         if self.blocked or now < self.ignore_until:
             return
         self.whats_new_opened = now
@@ -876,12 +887,16 @@ class App:
 
     def _open_update(self, info: dict) -> None:
         self.update = info
-        choices = update_choices(info, bool(getattr(sys, "frozen", False)))
-        self.update_sel = next(i for i, item in enumerate(choices) if item[0] == "later")
+        packaged = bool(getattr(sys, "frozen", False))
+        choices = update_choices(info, packaged)
+        # First row is the update itself: install when this build can, otherwise open the release.
+        self.update_sel = next(i for i, item in enumerate(choices) if item[0] in ("install", "open"))
         self.update_choice = None
         self.update_opened = time.monotonic()
         self.mode = "update"
         self._sound("open")
+        if self.force_update and packaged and info.get("asset"):
+            self._start_update_install()
 
     def _update_cancellable(self) -> bool:
         return self.update_install_job is not None and self.update_progress[0] != "preparing"
@@ -932,6 +947,7 @@ class App:
             # Counts as "later": if they don't update, the notice returns next launch.
         elif self.update_choice == "skip" and info.get("version"):
             self.state.skip_update(info["version"])
+            self.update_offer = {**info, "remind": False}
         self._close_overlay()
 
     def _start_update_install(self) -> None:
@@ -959,11 +975,11 @@ class App:
             platform=asset.target, progress=progress, cancel=self.update_cancel)
 
     def _start_update_check(self, now: float) -> None:
-        if not self.state.update_check or updates.disabled():
+        if not self.force_update and (not self.state.update_check or updates.disabled()):
             return
         self.update_started = now
         self.update_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="update")  # apart from the art pool: a slow network must not stall title art
-        self.update_job = self.update_pool.submit(updates.check, __version__, self.state.update_skip)
+        self.update_job = self.update_pool.submit(updates.check, __version__, self.state.update_skip, force=self.force_update)
 
     def _poll_update(self, now: float) -> None:
         """Show the notice once, a few seconds in, and only from the plain list so it never interrupts anything."""
@@ -999,15 +1015,23 @@ class App:
         job = self.update_job
         if job is None or not job.done() or now - self.update_started < UPDATE_DELAY_SECONDS:
             return
-        if self.mode != "list" or now < self.ignore_until:
-            return
-        self.update_job = None
         try:
             info = job.result()
         except Exception:
             info = None
-        if info:
+        # A skipped release can be stored while Help is open. A startup notice waits for the list.
+        quiet = bool(info) and not info.get("remind", True) and not self.force_update
+        if not quiet and (self.mode != "list" or now < self.ignore_until):
+            return
+        self.update_job = None
+        self._accept_update(info)
+
+    def _accept_update(self, info: dict | None) -> None:
+        if info and (info.get("remind", True) or self.force_update):
+            self.update_offer = None
             self._open_update(info)
+        elif info:
+            self.update_offer = info
 
     def _report_update_result(self) -> None:
         result = self_update.take_result(config.STATE_DIR / self_update.RESULT_FILE)
@@ -2524,6 +2548,15 @@ class App:
         self.info_opened = now
         self._sound("open")
 
+    def _help_buttons(self) -> list[tuple[str, str, Callable]]:
+        """Header chips: glyph, label, click. The footer does not repeat these."""
+        pad = self.input.pad_mode
+        buttons: list[tuple[str, str, Callable]] = []
+        if self.update_offer:
+            buttons.append(("A" if pad else "KEY:ENTER", tr("help.update", version=self.update_offer.get("version", "")), lambda: self._open_update(self.update_offer)))
+        buttons.append(("Y" if pad else "KEY:F5", tr("help.feedback"), lambda: webbrowser.open(ISSUE_URL)))
+        return buttons
+
     def _on_help_action(self, action: Action) -> None:
         if action in (Action.UP, Action.DOWN) and self.input.left_y:
             return  # analog scrolling is handled smoothly in tick()
@@ -2534,6 +2567,8 @@ class App:
             _, body, _, _, _ = self._help_metrics()
             page = max(self._help_line_h(), body.height - 2 * self._help_line_h())
             self.help_scroll = max(0, min(self._help_max_scroll(), self.help_scroll + (-page if action == Action.PAGE_UP else page)))
+        elif action == Action.CONFIRM and self.update_offer:
+            self._open_update(self.update_offer)
         elif action in (Action.SEARCH, Action.ISSUES):
             webbrowser.open(ISSUE_URL)
         elif action in (Action.BACK, Action.ALT, Action.HELP):
@@ -3699,9 +3734,10 @@ class App:
             return [(("A",) if pad else ("KEY:ENTER",), tr("hint.choose"), (A.CONFIRM,)),
                     (("B",) if pad else ("KEY:ESC",), tr("hint.close"), (A.BACK,))]
         if self.mode == "help":
+            # Update and GITHUB wear their glyphs on the header buttons.
             if pad:
-                return [(("RS",), tr("hint.scroll"), ()), (("Y",), tr("hint.help_feedback"), (A.SEARCH,)), (("B",), tr("hint.close"), (A.BACK,))]
-            return [(("KEY:UP", "KEY:DOWN"), tr("hint.scroll"), (A.UP, A.DOWN)), (("KEY:F5",), tr("hint.help_feedback"), (A.ISSUES,)), (("KEY:ESC",), tr("hint.close"), (A.BACK,))]
+                return [(("RS",), tr("hint.scroll"), ()), (("B",), tr("hint.close"), (A.BACK,))]
+            return [(("KEY:UP", "KEY:DOWN"), tr("hint.scroll"), (A.UP, A.DOWN)), (("KEY:ESC",), tr("hint.close"), (A.BACK,))]
         if self.blocked:
             picking = self.launchers is not None and self.launchers.must_pick
             reload = [(("A",) if pad else ("KEY:ENTER",), tr("hint.choose") if picking else tr("hint.reload"), (A.CONFIRM,))]
@@ -4068,11 +4104,10 @@ class App:
         self.hits.append(Hit(box, lambda: None))
 
         x, y = box.x + pad, box.y + pad
+        title = update_title(info)
         if info.get("arch_switch"):
-            title = tr("update.native", kind=info.get("native_label", ""))
             subtitle = tr("update.native_sub", other=info.get("running_label", ""))
         else:
-            title = tr("update.out", version=info.get("version", ""))
             subtitle = tr("update.youre_on", current=info.get("current", __version__))
         title_font = self._font(40, bold=True)
         self.screen.blit(self._text(self._fit(title, title_font, inner), title_font, TEXT), (x, y))
@@ -4242,13 +4277,30 @@ class App:
 
         x, y = box.x + int(38 * s), box.y + int(34 * s)
         title_font = self._font(40, bold=True)
-        self.screen.blit(self._text(tr("help.how_to"), title_font, TEXT), (x, y))
-        report = self._tracked(tr("help.feedback"), 15, TEXT, tracking=0.2)
-        report_rect = pygame.Rect(0, 0, report.get_width() + int(26 * s), int(38 * s))
-        report_rect.midright = (box.right - int(38 * s), y + title_font.get_height() // 2)
-        canvas.rect(self.screen, self.theme.accent, report_rect, border_radius=int(8 * s))
-        self.screen.blit(report, (report_rect.centerx - report.get_width() // 2, report_rect.centery - report.get_height() // 2))
-        self.hits.append(Hit(report_rect, lambda: webbrowser.open(ISSUE_URL)))
+        gap, inner, glyph_gap = int(12 * s), int(12 * s), int(8 * s)
+        placed: list[tuple[pygame.Rect, pygame.Surface, pygame.Surface, Callable]] = []
+        right = box.right - int(38 * s)
+        title_cy = y + title_font.get_height() // 2
+        for spec, text, click in reversed(self._help_buttons()):
+            glyph = self.glyphs.get(spec)
+            label = self._tracked(text, 15, TEXT, tracking=0.2)
+            rect = pygame.Rect(
+                0, 0,
+                inner + glyph.get_width() + glyph_gap + label.get_width() + inner,
+                max(glyph.get_height(), label.get_height()) + int(12 * s),
+            )
+            rect.midright = (right, title_cy)
+            right = rect.left - gap
+            placed.append((rect, glyph, label, click))
+        buttons_left = placed[-1][0].left
+        title = self._fit(tr("help.how_to"), title_font, max(int(40 * s), buttons_left - x - int(16 * s)))
+        self.screen.blit(self._text(title, title_font, TEXT), (x, y))
+        for rect, glyph, label, click in placed:
+            canvas.rect(self.screen, self.theme.accent, rect, border_radius=int(8 * s))
+            gx = rect.x + inner
+            self.screen.blit(glyph, (gx, rect.centery - glyph.get_height() // 2))
+            self.screen.blit(label, (gx + glyph.get_width() + glyph_gap, rect.centery - label.get_height() // 2))
+            self.hits.append(Hit(rect, click))
 
         old_clip = self.screen.get_clip()
         self.screen.set_clip(body)

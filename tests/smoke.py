@@ -200,7 +200,7 @@ assert upd.check("0.1.0") is None  # disabled by the env var set above
 
 state = State(root / "state.json")
 check_started = threading.Event()
-def fake_update_check(*args):
+def fake_update_check(*args, **kwargs):
     check_started.set()
     return None
 with patch.object(upd, "disabled", return_value=False), patch.object(upd, "check", side_effect=fake_update_check):
@@ -210,10 +210,11 @@ app._draw_loading("Handover", 0.5)  # the splash keeps drawing on the dummy disp
 now = time.monotonic()
 app._open_update({"version": "9.9.9", "current": "0.6.0", "url": "https://github.com/KrisEnigma/couch-doom/releases", "notes": ["x"]})
 app._draw(now)
-assert app.mode == "update" and app.update_sel == 1
+assert app.mode == "update" and app.update_sel == 0
 app._on_action(Action.BACK, now)
 assert app.mode == "list" and app.update_choice == "later" and state.update_skip is None
 app._open_update({"version": "9.9.9", "current": "0.6.0", "url": "", "notes": []})
+app._on_action(Action.DOWN, now)
 app._on_action(Action.DOWN, now)
 app._on_action(Action.CONFIRM, now)
 assert app.mode == "list" and state.update_skip == "9.9.9" and State(root / "state.json").update_skip == "9.9.9"

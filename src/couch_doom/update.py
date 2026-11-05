@@ -126,9 +126,13 @@ def process_is_translated() -> bool:
     return bool(native) and native != _platform.machine()
 
 
-def check(current: str, skipped: str | None = None, *, platform: str | None = None) -> dict | None:
-    """Release metadata, including whether the displayed notes omit extra entries."""
-    if disabled():
+def check(current: str, skipped: str | None = None, *, platform: str | None = None, force: bool = False) -> dict | None:
+    """Release metadata, including whether the displayed notes omit extra entries.
+
+    `force` offers the latest release again when it matches `current`. A newer local build is left alone.
+    A release the player skipped is returned with remind set false, so Help can still install it.
+    """
+    if disabled() and not force:
         return None
     try:
         data = _fetch_latest()
@@ -139,25 +143,30 @@ def check(current: str, skipped: str | None = None, *, platform: str | None = No
         log.write("update check failed", f"{type(exc).__name__}: {exc}")
         return None
     version = tag.lstrip("vV")
-    if version == skipped:
+    # A skipped release is still returned, so Help can install it. The startup notice stays quiet.
+    held = version == skipped and not force
+    if held:
         log.write("update check", f"Latest release {version} was skipped.")
-        return None
     if not url.startswith("https://github.com/"):
         return None
     # `platform` is a test override. Only a real translated process may replace its own version:
     # an Intel 1.2.5 on Apple Silicon is not newer than 1.2.5, but it is the wrong download,
     # and Rosetta retranslates that whole app the first time the new files run.
     target = platform or asset_for_platform(sys.platform, native_machine())
-    switching = platform is None and process_is_translated() and parse_version(version) == parse_version(current)
-    if not is_newer(version, current) and not switching:
-        log.write("update check", f"Current version {current}; latest release is {version}.")
+    same = parse_version(version) == parse_version(current)
+    switching = platform is None and process_is_translated() and same
+    if not is_newer(version, current) and not switching and not (force and same):
+        if not held:
+            log.write("update check", f"Current version {current}; latest release is {version}.")
         return None
+    if force and same and not switching:
+        log.write("update check", f"Reinstalling {version}.")
     if switching:
         log.write("update check", f"This {_platform.machine()} build is running on {native_machine()}; offering {target} of {version}.")
     notes = whats_new(body, version)
     native_arm = (target or "").endswith("arm64")
     return {"version": version, "current": current, "notes": notes[:MAX_NOTES],
-            "more_notes": len(notes) > MAX_NOTES, "url": url, "arch_switch": switching,
+            "more_notes": len(notes) > MAX_NOTES, "url": url, "remind": not held, "arch_switch": switching,
             "native_label": "Apple Silicon" if native_arm else "Intel",
             "running_label": "Intel" if native_arm else "Apple Silicon",
             "asset": _release_asset(data, tag, target)}

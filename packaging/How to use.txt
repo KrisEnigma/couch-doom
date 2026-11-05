@@ -66,7 +66,7 @@ Add or remove favorite: R3 (press the right stick)
 Page up / down: LT/RT (Xbox), L2/R2 (PlayStation), ZL/ZR (Switch)
 
 Keyboard: arrows to move, Enter to play, Esc for the menu, Tab for info, F1 for
-help, F3 for favorite, F5 for Help & Feedback, Page Up and Page Down to page,
+help, F3 for favorite, F5 for GitHub, Page Up and Page Down to page,
 Home and End for the ends of the list or browser, or type to search.
 
 Mouse: click once to select a preset and again to play. The wheel scrolls,
@@ -123,6 +123,12 @@ UPDATES
 
 Packaged builds check GitHub once after startup and can install an update from
 inside the app, then restart. Source builds open the release page instead.
+
+To install the latest release again, even when the version already matches,
+start CouchDoom with --force-update. The download begins on its own.
+
+Choosing "Don't remind me again" leaves that release out of the startup notice.
+Help shows an Update button next to GITHUB, which brings that window back.
 
 TROUBLESHOOTING AND LOGS
 ------------------------
