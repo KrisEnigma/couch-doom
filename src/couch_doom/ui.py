@@ -72,10 +72,14 @@ INPUT_COOLDOWN = 0.45
 FALLBACK_FPS = 60  # used only when the display will not report a refresh rate
 HIDDEN_FPS = 10
 VSYNC_MARGIN = 0.002  # wake this long before the vblank; Windows' sleep overshoots by up to ~1 ms
-WINDOWED_SIZE = (1440, 810)  # Alt+Enter and --windowed; the other mode is borderless at the desktop size
+WINDOWED_SIZE = (1440, 810)  # first window, until the player drags or snaps one
+# Low enough that a third of a 1366-wide screen can still snap. The layout scale is height / 1080.
+WINDOWED_MIN = (400, 240)
+WINDOW_SIZE_SAVE_DELAY = 0.4  # a drag emits a size per move; write the file once it settles
 WINDOW_EVENTS = {
     pygame.QUIT, pygame.WINDOWCLOSE, pygame.WINDOWMINIMIZED, pygame.WINDOWHIDDEN, pygame.WINDOWRESTORED,
     pygame.WINDOWSHOWN, pygame.WINDOWEXPOSED, pygame.WINDOWDISPLAYCHANGED, pygame.RENDER_DEVICE_RESET,
+    pygame.WINDOWRESIZED, pygame.WINDOWSIZECHANGED,
 }
 ART_FADE_SECONDS = 0.3
 ART_CACHE_SIZE = 24
@@ -624,6 +628,9 @@ class App:
         self.state = state
         set_language(state.language)
         self.windowed = windowed
+        self._saved_window_size = state.window_size
+        self._pending_window_size: tuple[int, int] | None = None
+        self._pending_window_size_at = 0.0
         self._alt_enter_held = False  # key repeat would flip the window every tick while Alt+Enter is held
         self.problem = problem  # options.json missing/unreadable: the notice screen replaces the list
         self.launchers = launchers
@@ -1302,12 +1309,12 @@ class App:
 
     def _create_window(self) -> None:
         _set_window_icon()  # display.quit() after a game forgets it
-        size = WINDOWED_SIZE if self.windowed else pygame.display.get_desktop_sizes()[0]
+        size = self._windowed_size() if self.windowed else pygame.display.get_desktop_sizes()[0]
         self.window = None
         self.dpi = 1.0
         if sys.platform == "darwin":
             # display.set_mode renders in points and macOS upscales it on Retina; draw at backing pixels instead.
-            self.window = pygame.Window("CouchDoom", size, allow_high_dpi=True)
+            self.window = pygame.Window("CouchDoom", size, allow_high_dpi=True, resizable=self.windowed)
             if not self.windowed:
                 # A borderless window sits under the menu bar and Dock; fullscreen hides them.
                 self.window.set_fullscreen(desktop=True)
@@ -1315,15 +1322,18 @@ class App:
                     pygame.event.pump()
                     time.sleep(0.01)
                 _disable_macos_fullscreen_shadow()
+            self._arm_window_resize()
             self.screen = self._window_target(self.window)
             self.dpi = self.screen.get_width() / self.window.size[0]
             _set_window_icon(self.window)  # Window() just installed pygame's Dock icon
         else:
             # Windows and Linux get a pygame.Window too, so the canvas can draw into it. Borderless at the desktop's
             # size, not exclusive fullscreen: that would change the display mode, and the window should track the
-            # desktop's refresh the way a normal one does. --windowed is a normal window.
+            # desktop's refresh the way a normal one does. The windowed one has a resize frame, so it can snap.
             self.window = pygame.Window("CouchDoom", size, allow_high_dpi=True, borderless=not self.windowed,
+                                        resizable=self.windowed,
                                         position=pygame.WINDOWPOS_UNDEFINED if self.windowed else (0, 0))
+            self._arm_window_resize()
             self.screen = self._window_target(self.window)
             self.dpi = self.screen.get_width() / self.window.size[0]
             _set_window_icon(self.window)  # the taskbar shows pygame's logo otherwise
@@ -1334,17 +1344,107 @@ class App:
         self._layout()
         _force_foreground(self.window.handle or None)
 
+    def _desktop_size(self) -> tuple[int, int] | None:
+        try:
+            sizes = pygame.display.get_desktop_sizes()
+        except pygame.error:
+            return None
+        if not sizes or sizes[0][0] < 1 or sizes[0][1] < 1:
+            return None
+        return sizes[0]
+
+    def _windowed_minimum(self) -> tuple[int, int]:
+        desktop = self._desktop_size()
+        if desktop is None:
+            return WINDOWED_MIN
+        return (min(WINDOWED_MIN[0], desktop[0]), min(WINDOWED_MIN[1], desktop[1]))
+
+    def _windowed_size(self) -> tuple[int, int]:
+        """The size to open a window at: the last one the player left, else 1440×810, kept on the desktop."""
+        saved = getattr(getattr(self, "state", None), "window_size", None)
+        width, height = WINDOWED_SIZE if saved is None else (int(saved[0]), int(saved[1]))
+        least = self._windowed_minimum()
+        width, height = max(width, least[0]), max(height, least[1])
+        desktop = self._desktop_size()
+        if desktop is not None:
+            width, height = min(width, desktop[0]), min(height, desktop[1])
+        return (width, height)
+
+    def _arm_window_resize(self) -> None:
+        """A resize frame only on the windowed mode. Borderless stays pinned to the desktop."""
+        if self.window is None:
+            return
+        self.window.resizable = bool(self.windowed)
+        if self.windowed:
+            self.window.minimum_size = self._windowed_minimum()
+
+    def _note_window_size(self) -> None:
+        window = getattr(self, "window", None)
+        if window is None or not getattr(self, "windowed", False):
+            return
+        raw = window.size
+        size = (int(raw[0]), int(raw[1]))
+        if size[0] < 1 or size[1] < 1:
+            return
+        if size == getattr(self, "_saved_window_size", None):
+            self._pending_window_size = None
+            return
+        self._pending_window_size = size
+        self._pending_window_size_at = time.monotonic()
+
+    def _flush_window_size(self, now: float | None = None, force: bool = False) -> None:
+        """Write the windowed size once a drag has paused. Forcing it covers Alt+Enter and quit."""
+        if force and getattr(self, "windowed", False):
+            self._note_window_size()
+        pending = getattr(self, "_pending_window_size", None)
+        if pending is None:
+            return
+        if not force:
+            noted = getattr(self, "_pending_window_size_at", 0.0)
+            clock = time.monotonic() if now is None else now
+            if clock - noted < WINDOW_SIZE_SAVE_DELAY:
+                return
+        self._pending_window_size = None
+        if pending == getattr(self, "_saved_window_size", None):
+            return
+        # The default size is what a missing value already means. Keep an untouched file untouched.
+        if pending == WINDOWED_SIZE and getattr(self, "_saved_window_size", None) is None:
+            return
+        self._saved_window_size = pending
+        save = getattr(getattr(self, "state", None), "set_window_size", None)
+        if save is not None:
+            save(pending)
+
+    def _on_window_resized(self) -> None:
+        """Drag, snap, or maximize. Draw at the new size. Remember it only while windowed, so a
+        borderless display change does not become the next window."""
+        screen = self.screen
+        if screen is None:
+            return
+        size = screen.get_size()
+        if size == getattr(self, "_size", None) or size[0] < 1 or size[1] < 1:
+            return
+        if isinstance(screen, canvas.Canvas):
+            screen.set_clip(None)  # a clip saved at the old size would keep painting into that corner
+        self._layout()
+        if self.windowed:
+            self._note_window_size()
+
     def _toggle_window(self) -> None:
-        """Alt+Enter. Borderless at the desktop size, or the 1440×810 window. Not exclusive fullscreen:
+        """Alt+Enter. Borderless at the desktop size, or a resizable window. Not exclusive fullscreen:
         that changes the display mode and its refresh."""
         if self.window is None:
             return
+        if self.windowed:
+            self._flush_window_size(force=True)  # the window is about to be replaced or filled
         self.windowed = not self.windowed
         if sys.platform == "darwin":
             if self.windowed:
+                self._arm_window_resize()
                 self.window.set_windowed()
-                self.window.size = WINDOWED_SIZE
+                self.window.size = self._windowed_size()
             else:
+                self.window.resizable = False
                 self.window.size = pygame.display.get_desktop_sizes()[0]
                 self.window.set_fullscreen(desktop=True)
                 _disable_macos_fullscreen_shadow()
@@ -1408,6 +1508,8 @@ class App:
         elif event.type == pygame.WINDOWDISPLAYCHANGED:
             self.refresh_hz = display_refresh_rate()
             self._frame_period = 0.0  # the new panel's vblank is learned again; the old period would oversleep it
+        elif event.type in (pygame.WINDOWRESIZED, pygame.WINDOWSIZECHANGED):
+            self._on_window_resized()
         elif event.type == pygame.RENDER_DEVICE_RESET:
             # The GPU dropped every texture (driver update, D3D device lost). A new window re-uploads them all.
             log.write("gpu device reset", "Recreating the window.")
@@ -4619,6 +4721,7 @@ class App:
                 self._flip()
                 clock.tick(self._frame_cap())
         finally:
+            self._flush_window_size(force=True)
             self.art_pool.shutdown(wait=False, cancel_futures=True)
             if self.update_pool:
                 self.update_pool.shutdown(wait=False, cancel_futures=True)
@@ -4632,6 +4735,7 @@ class App:
 
     def tick(self, now: float, dt: float) -> None:
         self.dt = dt  # draws read this; the present rate never feeds a motion
+        self._flush_window_size(now)
         self._poll_whats_new(now)
         self._poll_update(now)
         self._update_art(now)

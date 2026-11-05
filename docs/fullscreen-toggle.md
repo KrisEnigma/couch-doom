@@ -10,12 +10,16 @@ A bug found in that check is fixed in the working tree and not committed: recrea
 
 ## What it is
 
-`WINDOWED_SIZE` is `(1440, 810)`. The other mode is borderless at `pygame.display.get_desktop_sizes()[0]`, placed at `(0, 0)`. Not exclusive fullscreen. Exclusive fullscreen changes the display mode and its refresh. Do not "fix" it to that.
+`WINDOWED_SIZE` is `(1440, 810)`, the size of a window that has never been dragged. The other mode is borderless at `pygame.display.get_desktop_sizes()[0]`, placed at `(0, 0)`. Not exclusive fullscreen. Exclusive fullscreen changes the display mode and its refresh. Do not "fix" it to that.
+
+The windowed frame is `resizable=True`, with `minimum_size` at `WINDOWED_MIN` `(400, 240)` (or the desktop, when that is smaller). That thick frame is what Windows snap needs. Dragging, snapping, and the maximize button all change the client size. `_on_window_resized` runs `_layout()` when the drawable size changes, and clears a canvas clip so the new area is not left black. Text scale stays `h / 1080`. The borderless window stays `resizable=False`.
+
+The size written to `state` is `window.size` (the units passed back to `pygame.Window`), under `window_size`. A drag emits a size per move, so the file is written after `WINDOW_SIZE_SAVE_DELAY` (0.4 s), or immediately when Alt+Enter leaves the window or the app quits. The default 1440×810 is not written while `window_size` is still missing. A saved size is clamped into the desktop on the next open. A borderless size change is laid out and not stored.
 
 | | Windows and Linux | Mac |
 | --- | --- | --- |
-| Full screen | `pygame.Window(..., borderless=True, position=(0, 0))` at the desktop size | `set_fullscreen(desktop=True)`, then `_disable_macos_fullscreen_shadow()` |
-| Window | normal window, `WINDOWPOS_UNDEFINED`, 1440×810 | `set_windowed()`, then `size = WINDOWED_SIZE` |
+| Full screen | `pygame.Window(..., borderless=True, resizable=False, position=(0, 0))` at the desktop size | `resizable=False`, `set_fullscreen(desktop=True)`, then `_disable_macos_fullscreen_shadow()` |
+| Window | normal resizable window, `WINDOWPOS_UNDEFINED`, saved size or 1440×810 | `resizable=True`, `set_windowed()`, then `size = _windowed_size()` |
 | Toggle | `_close_window` + `_open_window`. A new HWND. | resize in place. Same window. |
 
 X11 ignores a move on a window that already exists, so growing one in place leaves it centred and off the screen. That is why Windows and Linux recreate. Do not switch them back to a resize. The canvas and its textures die with the old window; `_open_window` builds them again. The log gains another `gpu renderer` / `display refresh` pair per toggle. Two pairs for one toggle is the recreate. A stream of them is the bug below.
@@ -28,7 +32,7 @@ X11 ignores a move on a window that already exists, so growing one in place leav
 
 Row order from `_menu_items`: Back to list, Refresh list, Title music, Menu sounds, Recently played group, **Full screen**, Colors, Language, then Choose launcher when any launcher is known, Help, Quit. Full screen is the item after Recently played. Five Downs from the top land on it.
 
-The badge is `not self.windowed`: **On** is borderless, **Off** is the 1440×810 window. Enter / A calls `_menu_pick`. Left / Right call `_set_menu_option`. Both call `_toggle_window`. A repeated Left/Right must not. `repeat=True` returns before the toggle. Colors and Language still repeat.
+The badge is `not self.windowed`: **On** is borderless, **Off** is the window. Enter / A calls `_menu_pick`. Left / Right call `_set_menu_option`. Both call `_toggle_window`. A repeated Left/Right must not. `repeat=True` returns before the toggle. Colors and Language still repeat.
 
 Escape opens the menu only from the list. On the launcher picker, Escape is Back. On What's new, Escape closes that screen and a second Escape opens the menu. Alt+Enter is handled in `_on_key` before any of that, in every mode, including search, and it does not also confirm. A held Alt+Enter toggles once (`_alt_enter_held`, cleared on Return key-up).
 
@@ -38,7 +42,7 @@ The menu panel is `(18, 14, 13)`. The selected row is a 16/255 white wash over t
 
 Aware of per-monitor DPI (`SetProcessDpiAwareness(2)`). An unaware process on this display virtualizes the same window to an outer size of about 1166×686. Do not judge 1440×810 from an unaware process.
 
-Windowed, caption on, thick frame off, popup off, style `0x16CA0000`:
+Windowed, on 4 Nov 2026, before the resize frame. Caption on, thick frame off, popup off, style `0x16CA0000`. The current windowed style is `0x16CF0000`. See the probe notes below.
 
 - Client `(1440, 810)`. That is the pygame size. The outer rect was `(551, 277, 1458, 857)`: the caption and borders add about 18×47.
 - `GetDpiForWindow` was 120.
@@ -117,7 +121,9 @@ There are two top-level windows titled CouchDoom. The canvas format window is 1�
 
 `EnumWindows` gives a 64-bit HWND. Calling `GetWindowThreadProcessId` / `GetWindowRect` / `IsWindowVisible` without `argtypes` truncates it to 32 bits, the pid never matches, and the probe reports no window while the log already shows a renderer. Set `argtypes` on every user32 call that takes an HWND. `GetWindowLongW` is fine for `GWL_STYLE` (-16) once the HWND is passed intact. Style values that passed: windowed `0x16CA0000`, borderless `0x96020000`.
 
-Set the probe DPI-aware before measuring. Compare the client rect to 1440×810, and the borderless window rect to the monitor from `MonitorFromWindow` + `GetMonitorInfoW`, within a few pixels. Caption present vs absent is the other half of the check (`WS_CAPTION = 0x00C00000`).
+Set the probe DPI-aware before measuring. A fresh window's client rect is 1440×810, or `window_size` when that is set. The borderless window rect matches the monitor from `MonitorFromWindow` + `GetMonitorInfoW`, within a few pixels. Caption present vs absent is the other half of the check (`WS_CAPTION = 0x00C00000`).
+
+Style values: windowed `0x16CF0000` (the old `0x16CA0000` plus `WS_THICKFRAME` `0x00040000` and `WS_MAXIMIZEBOX` `0x00010000`), borderless `0x96020000`. The thick frame is the resize and snap handle. A probe that still expects `0x16CA0000` is looking at the fixed window from before this.
 
 ### Sending keys
 

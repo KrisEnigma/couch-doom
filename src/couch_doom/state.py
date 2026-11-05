@@ -19,6 +19,7 @@ class State:
         self.menu_sounds = True
         self.recent_group = False
         self.windowed = False  # last Alt+Enter or menu choice; fullscreen unless the player picked a window
+        self.window_size: tuple[int, int] | None = None  # last dragged or snapped size; None keeps the default
         self.favorites: list[str] = []
         self.launcher: tuple[str, str] | None = None  # (source key, settings path) the player last picked
         self.added: list[tuple[str, str]] = []  # launchers dropped onto the window, kept for the picker
@@ -50,6 +51,7 @@ class State:
             self.menu_sounds = bool(data.get("menu_sounds", True))
             self.recent_group = bool(data.get("recent_group", False))
             self.windowed = data.get("windowed") is True
+            self.window_size = _window_size(data.get("window_size"))
             self.favorites = [f for f in data.get("favorites") or [] if isinstance(f, str)]
             if (pick := _pair(data.get("launcher"))) is not None:
                 self.launcher = pick
@@ -108,6 +110,10 @@ class State:
         self.windowed = on
         self._save()
 
+    def set_window_size(self, size: tuple[int, int]) -> None:
+        self.window_size = (int(size[0]), int(size[1]))
+        self._save()
+
     def set_color_palette(self, palette: str) -> None:
         self.color_palette = palette if palette in MANUAL_PALETTE_KEYS else "auto"
         self._save()
@@ -144,6 +150,7 @@ class State:
             "menu_sounds": self.menu_sounds,
             "recent_group": self.recent_group,
             "windowed": self.windowed,
+            "window_size": list(self.window_size) if self.window_size else None,
             "favorites": self.favorites,
             "launcher": {"source": self.launcher[0], "path": self.launcher[1]} if self.launcher else None,
             "added_launchers": [{"source": k, "path": p} for k, p in self.added],
@@ -160,6 +167,21 @@ class State:
             tmp.replace(self.path)
         except OSError as exc:
             log.write("settings not saved", f"{self.path}: {exc}")
+
+
+def _window_size(value) -> tuple[int, int] | None:
+    """A saved width and height. Anything else, including a zero, is the default size."""
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    width, height = value
+    if isinstance(width, bool) or isinstance(height, bool):
+        return None
+    if not isinstance(width, (int, float)) or not isinstance(height, (int, float)):
+        return None
+    width, height = int(width), int(height)
+    if width < 1 or height < 1:
+        return None
+    return (width, height)
 
 
 def _pair(item) -> tuple[str, str] | None:

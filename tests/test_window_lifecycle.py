@@ -156,7 +156,10 @@ def test_the_hidden_format_window_never_counts_as_the_app():
     app = window_app(screen)
     assert app._on_window_event(SimpleNamespace(type=ui.pygame.WINDOWHIDDEN, window=helper))
     assert app._on_window_event(SimpleNamespace(type=ui.pygame.WINDOWCLOSE, window=helper))
-    assert app.hidden is False and app.running is True
+    layouts = []
+    app._layout = lambda: layouts.append("layout")
+    assert app._on_window_event(SimpleNamespace(type=ui.pygame.WINDOWSIZECHANGED, window=helper))
+    assert app.hidden is False and app.running is True and layouts == []
 
 
 def test_moving_displays_forgets_the_learned_period(monkeypatch):
@@ -340,6 +343,8 @@ class _ToggleWindow:
         self.size = size
         self.borderless = borderless
         self.position = (0, 0)
+        self.resizable = False
+        self.minimum_size = (0, 0)
         self.calls = []
 
     def set_windowed(self):
@@ -377,6 +382,19 @@ def test_the_window_mode_is_remembered(tmp_path):
     assert State(path).windowed is True
     State(path).set_windowed(False)
     assert State(path).windowed is False
+
+
+def test_the_window_size_is_remembered_and_garbage_is_ignored(tmp_path):
+    from couch_doom.state import State
+
+    path = tmp_path / "state.json"
+    assert State(path).window_size is None
+    State(path).set_window_size((1600, 900))
+    assert State(path).window_size == (1600, 900)
+    path.write_text('{"windowed": true, "window_size": "big"}', encoding="utf-8")
+    assert State(path).window_size is None
+    path.write_text('{"window_size": [0, 900]}', encoding="utf-8")
+    assert State(path).window_size is None
 
 
 @pytest.mark.parametrize("platform", ["win32", "linux"])
@@ -439,7 +457,54 @@ def test_borderless_window_is_created_at_the_desktop_corner(monkeypatch, platfor
     size, kwargs = created[0]
     assert size == (2560, 1440)
     assert kwargs["borderless"] is True
+    assert kwargs["resizable"] is False
     assert kwargs["position"] == (0, 0)
+
+
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_windowed_window_opens_resizable_at_the_saved_size(monkeypatch, platform):
+    monkeypatch.setattr(ui.sys, "platform", platform)
+    monkeypatch.setattr(ui.pygame.display, "get_desktop_sizes", lambda: [(2560, 1440)])
+    monkeypatch.setattr(ui, "display_refresh_rate", lambda: 170)
+    monkeypatch.setattr(ui, "_set_window_icon", lambda window=None: None)
+    monkeypatch.setattr(ui, "_force_foreground", lambda handle=None: None)
+    monkeypatch.setattr(ui.log, "write", lambda *a: None)
+    monkeypatch.setattr(ui.pygame.key, "start_text_input", lambda: None)
+    created = []
+
+    class FakeWindow:
+        handle = 0
+        minimum_size = (0, 0)
+
+        def __init__(self, title, size, **kwargs):
+            created.append((size, kwargs))
+            self.size = size
+
+    monkeypatch.setattr(ui.pygame, "Window", FakeWindow)
+    app = window_app()
+    app.windowed = True
+    app.state = SimpleNamespace(window_size=(1700, 1000))
+    app._window_target = lambda window: SimpleNamespace(get_width=lambda: 1700)
+    app._mouse_off = lambda: None
+    app._layout = lambda: None
+
+    app._create_window()
+
+    size, kwargs = created[0]
+    assert size == (1700, 1000)
+    assert kwargs["borderless"] is False
+    assert kwargs["resizable"] is True
+    assert kwargs["position"] == ui.pygame.WINDOWPOS_UNDEFINED
+    assert app.window.minimum_size == ui.WINDOWED_MIN
+
+
+def test_a_saved_window_size_stays_on_screen(monkeypatch):
+    monkeypatch.setattr(ui.pygame.display, "get_desktop_sizes", lambda: [(1280, 800)])
+    app = window_app()
+    app.state = SimpleNamespace(window_size=(4000, 50))
+    assert app._windowed_size() == (1280, ui.WINDOWED_MIN[1])
+    app.state.window_size = None
+    assert app._windowed_size() == (1280, 800)
 
 
 def test_alt_enter_on_mac_uses_desktop_fullscreen_not_a_mode_change(monkeypatch):
@@ -453,6 +518,8 @@ def test_alt_enter_on_mac_uses_desktop_fullscreen_not_a_mode_change(monkeypatch)
     assert app.windowed is True
     assert app.window.calls == ["windowed"]
     assert app.window.size == ui.WINDOWED_SIZE
+    assert app.window.resizable is True
+    assert app.window.minimum_size == ui.WINDOWED_MIN
     assert shadows == []
 
     app._toggle_window()
@@ -460,7 +527,79 @@ def test_alt_enter_on_mac_uses_desktop_fullscreen_not_a_mode_change(monkeypatch)
     assert app.windowed is False
     assert app.window.calls == ["windowed", ("fullscreen", True)]
     assert app.window.size == (2560, 1440)
+    assert app.window.resizable is False
     assert shadows == ["shadow"]
+
+
+def test_resizing_relayouts_and_remembers_the_size_after_a_pause(monkeypatch):
+    app = window_app()
+    app.windowed = True
+    app.window = SimpleNamespace(size=(1280, 720))
+    app._size = (1440, 810)
+    app.screen = SimpleNamespace(get_size=lambda: (1280, 720))
+    layouts = []
+
+    def layout():
+        app._size = app.screen.get_size()
+        layouts.append(app._size)
+
+    app._layout = layout
+    saved = []
+    app.state = SimpleNamespace(set_window_size=lambda size: saved.append(size))
+    now = [10.0]
+    monkeypatch.setattr(ui.time, "monotonic", lambda: now[0])
+    event = SimpleNamespace(type=ui.pygame.WINDOWSIZECHANGED, window=object(), x=1280, y=720)
+
+    assert app._on_window_event(event) is True
+    assert layouts == [(1280, 720)]
+    app._flush_window_size(now[0])
+    assert saved == []  # a drag writes once it settles, not on every size event
+    now[0] += ui.WINDOW_SIZE_SAVE_DELAY
+    app._flush_window_size(now[0])
+    assert saved == [(1280, 720)]
+
+    assert app._on_window_event(event) is True
+    assert layouts == [(1280, 720)]  # the same size does not rebuild the layout
+
+
+def test_a_borderless_resize_does_not_become_the_window_size(monkeypatch):
+    app = window_app()
+    app.windowed = False
+    app.window = SimpleNamespace(size=(2560, 1440))
+    app._size = (1440, 810)
+    app.screen = SimpleNamespace(get_size=lambda: (2560, 1440))
+    layouts = []
+    app._layout = lambda: layouts.append("layout") or setattr(app, "_size", (2560, 1440))
+    saved = []
+    app.state = SimpleNamespace(set_window_size=lambda size: saved.append(size))
+    monkeypatch.setattr(ui.time, "monotonic", lambda: 0.0)
+
+    app._on_window_event(SimpleNamespace(type=ui.pygame.WINDOWRESIZED, window=object()))
+    app._flush_window_size(force=True)
+
+    assert layouts == ["layout"]
+    assert saved == []
+
+
+def test_leaving_the_window_saves_its_size_before_the_recreate(monkeypatch):
+    monkeypatch.setattr(ui.sys, "platform", "win32")
+    app = window_app()
+    app.window = SimpleNamespace(size=(1100, 700))
+    app.windowed = True
+    app.state = SimpleNamespace(windowed=True, window_size=None)
+    saved = []
+    app.state.set_windowed = lambda on: setattr(app.state, "windowed", on)
+    app.state.set_window_size = lambda size: saved.append(size)
+    app._close_window = lambda: None
+    app._open_window = lambda: None
+    monkeypatch.setattr(ui.pygame.display, "init", lambda: None)
+    monkeypatch.setattr(ui.pygame.display, "set_caption", lambda title: None)
+    app.input = SimpleNamespace(reset=lambda: None)
+
+    app._toggle_window()
+
+    assert saved == [(1100, 700)]
+    assert app.windowed is False
 
 
 def test_alt_enter_is_consumed_and_a_held_key_toggles_once():
