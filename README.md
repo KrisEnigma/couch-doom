@@ -114,6 +114,25 @@ B closes an open panel and does nothing on the main selector. Mouse and keyboard
   <img src="docs/screenshots/endoom.jpg" width="49%" alt="Ancient Aliens' ENDOOM screen in the info sheet">
 </p>
 
+To write your own title, author, year, or description, add `descriptions.json` in the state folder. The key is the file name (`breach.wad`, `brutality.pk3`), and capitals don't matter. CouchDoom uses your text instead of that file's readme. Every field is optional. Refresh list picks up an edit here, and also a text file you change beside the game.
+
+- macOS: `~/Library/Application Support/CouchDoom/state/descriptions.json`
+- Windows: `%LOCALAPPDATA%\CouchDoom\state\descriptions.json`
+- Linux: `~/.local/share/couch-doom/state/descriptions.json`
+
+A source checkout uses `state/descriptions.json` in the project folder.
+
+```json
+{
+  "breach.wad": {
+    "title": "Breach",
+    "author": "someone",
+    "year": "2024",
+    "description": "A megawad."
+  }
+}
+```
+
 ## A few extras
 
 - CouchDoom checks GitHub once after startup for updates. Packaged builds can install an update; source builds use the release page. "Don't remind me again" hides that release from the startup notice; Help has an Update button next to GITHUB that brings the window back. Turn the check off with the `update_check` setting in `last_played.json` or by setting `COUCHDOOM_NO_UPDATE_CHECK`. Leftover folders from an interrupted update are cleaned up on the next launch.

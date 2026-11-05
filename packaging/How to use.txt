@@ -130,6 +130,28 @@ start CouchDoom with --force-update. The download begins on its own.
 Choosing "Don't remind me again" leaves that release out of the startup notice.
 Help shows an Update button next to GITHUB, which brings that window back.
 
+YOUR OWN DESCRIPTIONS
+---------------------
+
+To give a game your own title, author, year, or description, create
+descriptions.json in the state folder. The key is the file name, and capitals
+don't matter. CouchDoom uses your text instead of that file's readme. Every
+field is optional. Refresh list picks up an edit here, and also a text file
+you change beside the game.
+
+macOS:  ~/Library/Application Support/CouchDoom/state/descriptions.json
+Windows: %LOCALAPPDATA%\CouchDoom\state\descriptions.json
+Linux:  ~/.local/share/couch-doom/state/descriptions.json
+
+{
+  "breach.wad": {
+    "title": "Breach",
+    "author": "someone",
+    "year": "2024",
+    "description": "A megawad."
+  }
+}
+
 TROUBLESHOOTING AND LOGS
 ------------------------
 
