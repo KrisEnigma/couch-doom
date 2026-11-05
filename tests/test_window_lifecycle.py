@@ -162,6 +162,35 @@ def test_the_hidden_format_window_never_counts_as_the_app():
     assert app.hidden is False and app.running is True and layouts == []
 
 
+def test_moving_a_borderless_window_fills_the_monitor_it_landed_on(monkeypatch):
+    app = window_app()
+    app.windowed = False
+    app.window = SimpleNamespace(handle=7, position=(2560, 360), size=(2560, 1440))
+    app.screen = SimpleNamespace(get_size=lambda: tuple(app.window.size))
+    app._size = (2560, 1440)
+    layouts = []
+    app._layout = lambda: layouts.append(app.screen.get_size()) or setattr(app, "_size", app.screen.get_size())
+    monkeypatch.setattr(ui, "_monitor_bounds", lambda handle: ((2560, 360), (1920, 1080)) if handle == 7 else None)
+
+    assert app._on_window_event(SimpleNamespace(type=ui.pygame.WINDOWMOVED, window=object(), x=2560, y=360))
+
+    assert app.window.position == (2560, 360)
+    assert app.window.size == (1920, 1080)
+    assert layouts == [(1920, 1080)]
+
+
+def test_moving_a_windowed_window_does_not_snap_it_to_the_monitor(monkeypatch):
+    app = window_app()
+    app.windowed = True
+    app.window = SimpleNamespace(handle=7, position=(2800, 500), size=(1440, 810))
+    monkeypatch.setattr(ui, "_monitor_bounds", lambda handle: ((2560, 360), (1920, 1080)))
+
+    app._on_window_event(SimpleNamespace(type=ui.pygame.WINDOWMOVED, window=object()))
+
+    assert app.window.position == (2800, 500)
+    assert app.window.size == (1440, 810)
+
+
 def test_moving_displays_forgets_the_learned_period(monkeypatch):
     app = window_app()
     app._frame_period = 1 / 60
@@ -397,8 +426,53 @@ def test_the_window_size_is_remembered_and_garbage_is_ignored(tmp_path):
     assert State(path).window_size is None
 
 
-@pytest.mark.parametrize("platform", ["win32", "linux"])
-def test_alt_enter_recreates_the_window_so_borderless_lands_at_the_corner(monkeypatch, platform):
+def test_alt_enter_on_linux_recreates_the_window_so_borderless_lands_at_the_corner(monkeypatch):
+    _assert_recreate(monkeypatch, "linux")
+
+
+def test_alt_enter_on_windows_keeps_the_window_and_a_held_alt(monkeypatch):
+    monkeypatch.setattr(ui.sys, "platform", "win32")
+    released = []
+    monkeypatch.setattr(ui, "_release_keyboard", lambda: released.append("keys"))
+    app = _toggle_app((2560, 1440), windowed=False, monkeypatch=monkeypatch)
+    app._alt_enter_held = True
+    cleared = []
+    app.input = SimpleNamespace(reset=lambda: cleared.append("reset"))
+    same = app.window
+
+    app._toggle_window()
+
+    assert app.window is same
+    assert app.windowed is True
+    assert app.window.borderless is False
+    assert app.window.resizable is True
+    assert app.window.size == ui.WINDOWED_SIZE
+    assert app.window.minimum_size == ui.WINDOWED_MIN
+    assert app.window.position == ((2560 - 1440) // 2, (1440 - 810) // 2)
+    assert app._alt_enter_held is True
+    assert cleared == [] and released == []
+
+    app.window.position = (300, 120)
+    app.window.handle = 1
+    monkeypatch.setattr(ui, "_monitor_bounds", lambda handle: ((2560, 360), (1920, 1080)))
+    app._toggle_window()
+
+    assert app.window is same
+    assert app.window.borderless is True
+    assert app.window.resizable is False
+    assert app.window.position == (2560, 360)
+    assert app.window.size == (1920, 1080)
+    assert app._windowed_position == (300, 120)
+    assert app._alt_enter_held is True
+
+    app._toggle_window()
+
+    assert app.window.borderless is False
+    assert app.window.position == (300, 120)
+    assert app.window.size == ui.WINDOWED_SIZE
+
+
+def _assert_recreate(monkeypatch, platform):
     # X11 ignores a position request on a window that already exists, so growing one in place leaves a
     # borderless window centred and off the screen. A new window takes its position at creation.
     monkeypatch.setattr(ui.sys, "platform", platform)
@@ -581,25 +655,24 @@ def test_a_borderless_resize_does_not_become_the_window_size(monkeypatch):
     assert saved == []
 
 
-def test_leaving_the_window_saves_its_size_before_the_recreate(monkeypatch):
+def test_leaving_the_window_on_windows_saves_its_size_without_a_new_window(monkeypatch):
     monkeypatch.setattr(ui.sys, "platform", "win32")
-    app = window_app()
-    app.window = SimpleNamespace(size=(1100, 700))
-    app.windowed = True
-    app.state = SimpleNamespace(windowed=True, window_size=None)
+    app = _toggle_app((1100, 700), windowed=True, monkeypatch=monkeypatch)
+    app.state.window_size = None
     saved = []
-    app.state.set_windowed = lambda on: setattr(app.state, "windowed", on)
     app.state.set_window_size = lambda size: saved.append(size)
-    app._close_window = lambda: None
-    app._open_window = lambda: None
-    monkeypatch.setattr(ui.pygame.display, "init", lambda: None)
-    monkeypatch.setattr(ui.pygame.display, "set_caption", lambda title: None)
-    app.input = SimpleNamespace(reset=lambda: None)
+    closed = []
+    app._close_window = lambda: closed.append("close")
+    same = app.window
 
     app._toggle_window()
 
     assert saved == [(1100, 700)]
+    assert closed == []
+    assert app.window is same
     assert app.windowed is False
+    assert app.window.borderless is True
+    assert app.window.position == (0, 0)
 
 
 def test_alt_enter_is_consumed_and_a_held_key_toggles_once():

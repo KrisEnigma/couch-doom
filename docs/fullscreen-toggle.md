@@ -16,13 +16,15 @@ The windowed frame is `resizable=True`, with `minimum_size` at `WINDOWED_MIN` `(
 
 The size written to `state` is `window.size` (the units passed back to `pygame.Window`), under `window_size`. A drag emits a size per move, so the file is written after `WINDOW_SIZE_SAVE_DELAY` (0.4 s), or immediately when Alt+Enter leaves the window or the app quits. The default 1440×810 is not written while `window_size` is still missing. A saved size is clamped into the desktop on the next open. A borderless size change is laid out and not stored.
 
-| | Windows and Linux | Mac |
-| --- | --- | --- |
-| Full screen | `pygame.Window(..., borderless=True, resizable=False, position=(0, 0))` at the desktop size | `resizable=False`, `set_fullscreen(desktop=True)`, then `_disable_macos_fullscreen_shadow()` |
-| Window | normal resizable window, `WINDOWPOS_UNDEFINED`, saved size or 1440×810 | `resizable=True`, `set_windowed()`, then `size = _windowed_size()` |
-| Toggle | `_close_window` + `_open_window`. A new HWND. | resize in place. Same window. |
+| | Windows | Linux | Mac |
+| --- | --- | --- | --- |
+| Full screen | same window, `borderless=True`, the monitor the window is already on | new `pygame.Window(..., borderless=True, position=(0, 0))` | `set_fullscreen(desktop=True)`, then `_disable_macos_fullscreen_shadow()` |
+| Window | same window, `borderless=False`, saved size, resize frame on | new resizable window, `WINDOWPOS_UNDEFINED` | `set_windowed()`, then `size = _windowed_size()` |
+| Toggle | resize in place. Same HWND. | `_close_window` + `_open_window`. A new window. | resize in place. Same window. |
 
-X11 ignores a move on a window that already exists, so growing one in place leaves it centred and off the screen. That is why Windows and Linux recreate. Do not switch them back to a resize. The canvas and its textures die with the old window; `_open_window` builds them again. The log gains another `gpu renderer` / `display refresh` pair per toggle. Two pairs for one toggle is the recreate. A stream of them is the bug below.
+Moving that borderless window onto another monitor, such as with Win+Shift+Arrow, resizes it to the monitor it landed on. A captioned window is left at the size you dragged. Windows keeps the window so Enter's key-up still arrives. The "already toggling" latch clears on that key-up, and Alt stays down, so a second Alt+Enter while Alt is held toggles again. Do not recreate it, and do not call `SDL_ResetKeyboard` on this path: that call forgets a held Alt.
+
+X11 ignores a move on a window that already exists, so Linux still recreates. A borderless window grown in place stays centred and runs off the screen. The new window is placed at creation. Its canvas and textures die with the old one. The log gains another `gpu renderer` / `display refresh` pair per toggle. Two pairs for one toggle is the recreate. A stream of them is the bug below. Linux is also the path that still clears the latch and calls `SDL_ResetKeyboard`, because the key-up was delivered to a window that no longer exists.
 
 `App.__init__` takes `windowed=args.windowed or state.windowed`. `--windowed` forces a window for this run and does not write the file. The file changes only in `_toggle_window`, via `state.set_windowed`. A fresh data dir still saves `windowed: false` during language detection, while the on-screen flag is true because of `--windowed`. The next save is the first toggle.
 
@@ -88,7 +90,8 @@ Eight tests, all passing after the fix:
 
 - `test_menu_full_screen_row_uses_the_same_toggle_as_alt_enter` — Enter and Left both call `_toggle_window`. A `repeat=True` Right does not add a third call.
 - `test_the_window_mode_is_remembered` — the JSON flag round-trips.
-- `test_alt_enter_recreates_the_window_so_borderless_lands_at_the_corner` — win32 and linux: close, `display.init`, open, flag saved, latch cleared, `input.reset` called.
+- `test_alt_enter_on_linux_recreates_the_window_so_borderless_lands_at_the_corner` — close, `display.init`, open, flag saved, latch cleared, `input.reset` called.
+- `test_alt_enter_on_windows_keeps_the_window_and_a_held_alt` — same window, borderless at `(0, 0)`, captioned window restored to where it sat. The latch stays set and the keyboard is not reset.
 - `test_borderless_window_is_created_at_the_desktop_corner` — size is the desktop, `borderless=True`, `position=(0, 0)`.
 - `test_alt_enter_on_mac_uses_desktop_fullscreen_not_a_mode_change` — `set_windowed` / `set_fullscreen(desktop=True)`, not a mode change. Shadow helper runs only on the way into full screen.
 - `test_alt_enter_is_consumed_and_a_held_key_toggles_once` — Return and keypad Enter, with either Alt bit. A second event while the latch is set does not toggle again. A bare Return is not consumed.

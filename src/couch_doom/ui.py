@@ -78,8 +78,8 @@ WINDOWED_MIN = (400, 240)
 WINDOW_SIZE_SAVE_DELAY = 0.4  # a drag emits a size per move; write the file once it settles
 WINDOW_EVENTS = {
     pygame.QUIT, pygame.WINDOWCLOSE, pygame.WINDOWMINIMIZED, pygame.WINDOWHIDDEN, pygame.WINDOWRESTORED,
-    pygame.WINDOWSHOWN, pygame.WINDOWEXPOSED, pygame.WINDOWDISPLAYCHANGED, pygame.RENDER_DEVICE_RESET,
-    pygame.WINDOWRESIZED, pygame.WINDOWSIZECHANGED,
+    pygame.WINDOWSHOWN, pygame.WINDOWEXPOSED, pygame.WINDOWDISPLAYCHANGED, pygame.WINDOWMOVED,
+    pygame.RENDER_DEVICE_RESET, pygame.WINDOWRESIZED, pygame.WINDOWSIZECHANGED,
 }
 ART_FADE_SECONDS = 0.3
 ART_CACHE_SIZE = 24
@@ -478,6 +478,43 @@ def _wrap_mono(text: str, per_line: int) -> list[str]:
     return out
 
 
+def _monitor_bounds(handle) -> tuple[tuple[int, int], tuple[int, int]] | None:
+    """(origin, size) of the monitor a window is on, taskbar included. None when it can't be asked.
+    get_desktop_sizes()[0] is only the primary, so a window on another screen would otherwise go fullscreen there."""
+    if sys.platform != "win32" or not handle:
+        return None
+    try:
+        user32 = ctypes.windll.user32
+        # A 64-bit HWND passed without argtypes is truncated and never matches a monitor.
+        user32.MonitorFromWindow.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        user32.MonitorFromWindow.restype = ctypes.c_void_p
+        user32.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        user32.GetMonitorInfoW.restype = ctypes.c_int
+
+        class _Info(ctypes.Structure):
+            _fields_ = [
+                ("cb", ctypes.c_ulong),
+                ("rc", ctypes.wintypes.RECT),
+                ("work", ctypes.wintypes.RECT),
+                ("flags", ctypes.c_ulong),
+            ]
+
+        monitor = user32.MonitorFromWindow(int(handle), 2)  # MONITOR_DEFAULTTONEAREST
+        if not monitor:
+            return None
+        info = _Info()
+        info.cb = ctypes.sizeof(_Info)
+        if not user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+            return None
+        rect = info.rc
+        width, height = int(rect.right - rect.left), int(rect.bottom - rect.top)
+        if width < 1 or height < 1:
+            return None
+        return (int(rect.left), int(rect.top)), (width, height)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return None
+
+
 def _set_dpi_aware() -> None:
     if sys.platform != "win32":
         return
@@ -628,6 +665,7 @@ class App:
         self.state = state
         set_language(state.language)
         self.windowed = windowed
+        self._windowed_position: tuple[int, int] | None = None  # where the captioned window sat before borderless
         self._saved_window_size = state.window_size
         self._pending_window_size: tuple[int, int] | None = None
         self._pending_window_size_at = 0.0
@@ -1430,48 +1468,101 @@ class App:
         if self.windowed:
             self._note_window_size()
 
+    def _centered_window_position(self) -> tuple[int, int]:
+        desktop = self._desktop_size()
+        width, height = self._windowed_size()
+        if desktop is None:
+            return (80, 48)
+        return (max(0, (desktop[0] - width) // 2), max(0, (desktop[1] - height) // 2))
+
+    def _place_windows_window(self) -> None:
+        """Same HWND. A new window would eat Enter's key-up and the keyboard reset would forget a held Alt,
+        so a second Alt+Enter would arrive as a plain Enter."""
+        if self.windowed:
+            self.window.borderless = False
+            self._arm_window_resize()
+            self.window.size = self._windowed_size()
+            self.window.position = getattr(self, "_windowed_position", None) or self._centered_window_position()
+        else:
+            self._windowed_position = (int(self.window.position[0]), int(self.window.position[1]))
+            bounds = _monitor_bounds(getattr(self.window, "handle", None))
+            origin, size = bounds if bounds is not None else ((0, 0), pygame.display.get_desktop_sizes()[0])
+            # Move onto that monitor before the resize, or Windows clamps the new size to the old one.
+            self.window.resizable = False
+            self.window.position = origin
+            self.window.borderless = True
+            self.window.size = size
+            self.window.position = origin
+
+    def _fit_borderless_to_monitor(self) -> None:
+        """Win+Shift+Arrow moves a borderless window and leaves its old size. Fill the monitor it landed on."""
+        window = getattr(self, "window", None)
+        if window is None or getattr(self, "windowed", True) or sys.platform != "win32":
+            return
+        bounds = _monitor_bounds(getattr(window, "handle", None))
+        if bounds is None:
+            return
+        origin, size = bounds
+        current = (int(window.position[0]), int(window.position[1]))
+        current_size = (int(window.size[0]), int(window.size[1]))
+        if current == origin and current_size == size:
+            return
+        window.position = origin
+        window.size = size
+        window.position = origin
+        if getattr(self, "screen", None) is not None:
+            self._on_window_resized()
+
+    def _sync_resized_window(self) -> None:
+        self._frame_period = 0.0
+        self.refresh_hz = display_refresh_rate()
+        self.dpi = self.screen.get_width() / (self.window.size[0] or 1)
+        self.screen.set_clip(None)  # a clip saved at the old size would keep painting into that corner
+        self._layout()
+
+    def _forget_keys_lost_with_the_window(self) -> None:
+        """The replacement window never receives the key-up. Drop SDL's stuck keys, or the next Enter is
+        another Alt+Enter and a held direction keeps recreating the window."""
+        self._alt_enter_held = False
+        reset = getattr(getattr(self, "input", None), "reset", None)
+        if reset is not None:
+            reset()
+        _release_keyboard()
+
     def _toggle_window(self) -> None:
         """Alt+Enter. Borderless at the desktop size, or a resizable window. Not exclusive fullscreen:
         that changes the display mode and its refresh."""
         if self.window is None:
             return
         if self.windowed:
-            self._flush_window_size(force=True)  # the window is about to be replaced or filled
+            self._flush_window_size(force=True)  # the size is about to be replaced by the desktop
         self.windowed = not self.windowed
-        if sys.platform == "darwin":
-            if self.windowed:
-                self._arm_window_resize()
-                self.window.set_windowed()
-                self.window.size = self._windowed_size()
-            else:
-                self.window.resizable = False
-                self.window.size = pygame.display.get_desktop_sizes()[0]
-                self.window.set_fullscreen(desktop=True)
-                _disable_macos_fullscreen_shadow()
-            self._frame_period = 0.0
-            self.refresh_hz = display_refresh_rate()
-            self.dpi = self.screen.get_width() / (self.window.size[0] or 1)
-            self.screen.set_clip(None)  # a clip saved at the old size would keep painting into that corner
-            self._layout()
-        else:
-            # Recreate rather than resize: X11 ignores a position request on a window that already exists, so a
-            # borderless window grown in place stays centred and runs off the screen. A new window is placed at
-            # creation, the same way startup places it. The canvas and its textures go with the old window.
+        if sys.platform == "linux":
+            # X11 ignores a move on a window that already exists, so a borderless window grown in place
+            # stays centred and runs off the screen. A new window is placed at creation.
             self._close_window()
             pygame.display.init()
             pygame.display.set_caption("CouchDoom")
             self._open_window()
             self._frame_period = 0.0
+            self._forget_keys_lost_with_the_window()
+        else:
+            if sys.platform == "darwin":
+                if self.windowed:
+                    self._arm_window_resize()
+                    self.window.set_windowed()
+                    self.window.size = self._windowed_size()
+                else:
+                    self.window.resizable = False
+                    self.window.size = pygame.display.get_desktop_sizes()[0]
+                    self.window.set_fullscreen(desktop=True)
+                    _disable_macos_fullscreen_shadow()
+            else:
+                self._place_windows_window()
+            self._sync_resized_window()
         save = getattr(getattr(self, "state", None), "set_windowed", None)
         if save is not None:
             save(self.windowed)
-        # The old window is gone before Alt and Enter come up, so SDL still thinks they are held: the next
-        # Enter is another Alt+Enter, and a held Left keeps recreating the window.
-        self._alt_enter_held = False
-        reset = getattr(getattr(self, "input", None), "reset", None)
-        if reset is not None:
-            reset()
-        _release_keyboard()
 
     @staticmethod
     def _window_target(window: pygame.Window) -> canvas.Canvas | pygame.Surface:
@@ -1508,6 +1599,9 @@ class App:
         elif event.type == pygame.WINDOWDISPLAYCHANGED:
             self.refresh_hz = display_refresh_rate()
             self._frame_period = 0.0  # the new panel's vblank is learned again; the old period would oversleep it
+            self._fit_borderless_to_monitor()
+        elif event.type == pygame.WINDOWMOVED:
+            self._fit_borderless_to_monitor()
         elif event.type in (pygame.WINDOWRESIZED, pygame.WINDOWSIZECHANGED):
             self._on_window_resized()
         elif event.type == pygame.RENDER_DEVICE_RESET:
