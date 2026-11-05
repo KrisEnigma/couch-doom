@@ -1,3 +1,4 @@
+# Personal build: docs/building.md
 # PyInstaller build: pyinstaller packaging/CouchDoom.spec
 #   Windows/Linux -> dist/CouchDoom/ (CouchDoom.exe or CouchDoom)   macOS -> dist/CouchDoom.app
 # One folder rather than one file: starts instantly (no unpack to %TEMP%) and trips fewer antivirus heuristics.

@@ -133,7 +133,7 @@ A synthesized Alt+F4 does not reach the borderless window. `PostMessage(hwnd, WM
 
 ## Leave alone
 
-- Borderless-at-desktop-size on Windows and Linux, and `set_fullscreen(desktop=True)` on Mac. The GPU handoff (`docs/gpu-canvas-handoff.md`) has the same rule, plus the vblank sleep. This toggle recreates the window, which already zeros `_frame_period` so the new panel's vblank is learned again.
+- Borderless-at-desktop-size on Windows and Linux, and `set_fullscreen(desktop=True)` on Mac. The GPU canvas (`docs/gpu-canvas.md`) has the same rule, plus the vblank sleep. This toggle recreates the window, which already zeros `_frame_period` so the new panel's vblank is learned again.
 - The one-toggle latch on Alt+Enter. A held chord must not flip every repeat.
 - The repeat guard on the menu row. Taking it off brings back the recreate loop.
 - `_release_keyboard`. The unit tests do not prove it; the live Enter-after-Alt+Enter case does.
