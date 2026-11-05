@@ -45,6 +45,7 @@ def _warm_app(monkeypatch, *, visible: list[int], total: int):
     monkeypatch.setattr(asset_cache, "get", lambda key: True)
     monkeypatch.setattr(asset_cache, "load_preset_keys", lambda: {})
     monkeypatch.setattr(asset_cache, "save_preset_keys", lambda mapping: None)
+    monkeypatch.setattr(asset_cache, "name_cache_file", lambda key, label: None)
     monkeypatch.setattr(asset_cache, "prune", lambda: None)
     monkeypatch.setattr(asset_cache, "invalidate_missing", lambda keys: calls.setdefault("assets", keys))
     monkeypatch.setattr(music_cache, "selection_key", lambda key, iwad, files: key)
@@ -180,6 +181,18 @@ def test_a_cache_hit_refreshes_the_readme_stamp(monkeypatch):
 
     assert synced == ["p0", "p1", "p2"]
     assert loaded == []
+
+
+def test_a_cache_hit_names_the_file_after_the_preset(monkeypatch):
+    app, _, _ = _warm_app(monkeypatch, visible=[0], total=1)
+    app.opts.presets[0] = SimpleNamespace(name="Doom 64", section="Maps")
+    named = []
+    monkeypatch.setattr(asset_cache, "name_cache_file", lambda key, label: named.append((key, label)))
+    monkeypatch.setattr(asset_cache, "get", lambda key: asset_cache.CachedAssets(None, None, None, None, "stamp"))
+
+    app._warm_cache()
+
+    assert named == [("Doom 64", "Doom 64 (Maps)")]
 
 
 def test_an_offline_preset_keeps_its_previous_cache_file(monkeypatch):

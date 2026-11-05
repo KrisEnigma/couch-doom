@@ -408,6 +408,7 @@ def _load_extras(preset: Preset) -> tuple[Art | None, Readme | None, Endoom | No
     try:
         key = asset_cache.key_for(preset, iwad, files)
         if cached := asset_cache.get(key):
+            asset_cache.name_cache_file(key, asset_cache.cache_label(preset))
             _sync_cached_readme(preset, cached, key, iwad, shown, files)
             return cached.art, cached.readme, cached.endoom, cached.logo
     except Exception:
@@ -423,7 +424,8 @@ def _load_extras(preset: Preset) -> tuple[Art | None, Readme | None, Endoom | No
                 stamp = beside_stamp(preset)
             except Exception:
                 stamp = None
-            asset_cache.put(key, asset_cache.CachedAssets(art, readme, endoom, logo, stamp))
+            asset_cache.put(key, asset_cache.CachedAssets(art, readme, endoom, logo, stamp),
+                            label=asset_cache.cache_label(preset))
     except Exception:
         pass
     return art, readme, endoom, logo
@@ -2464,6 +2466,7 @@ class App:
                                 music_keys.append(music_cache.selection_key(key, iwad, shown))
                                 cached = asset_cache.get(key)
                                 if isinstance(cached, asset_cache.CachedAssets):
+                                    asset_cache.name_cache_file(key, asset_cache.cache_label(preset))
                                     _sync_cached_readme(preset, cached, key, iwad, shown, files)
                                 elif not cached and idx not in self.art_cache and idx not in self.art_jobs:
                                     _load_extras(preset)

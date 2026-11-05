@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import threading
 import time
 from dataclasses import asdict
@@ -30,6 +31,111 @@ def _assets_dir() -> Path:
     d = cache_dir() / "assets"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+_INDEX_LOCK = threading.Lock()
+_index: dict[str, Path] | None = None
+_index_dir: Path | None = None
+_INVALID_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_SLUG_LIMIT = 80
+
+
+def cache_label(preset: Preset) -> str:
+    """The name a person would look for. The section splits presets that share a name."""
+    name = getattr(preset, "name", "") or ""
+    section = getattr(preset, "section", "") or ""
+    if name and section:
+        return f"{name} ({section})"
+    return name or section
+
+
+def _slug(label: str) -> str:
+    text = _INVALID_FILENAME.sub(" ", label)
+    text = re.sub(r"\s+", " ", text).strip().rstrip(". ")
+    if len(text) > _SLUG_LIMIT:
+        text = text[:_SLUG_LIMIT].rstrip(". ")
+    return text
+
+
+def _key_from_filename(name: str) -> str:
+    stem = name[:-5] if name.lower().endswith(".json") else name
+    # The hash is the last part, so a preset name that itself contains "--" still resolves.
+    if "--" in stem:
+        return stem.rsplit("--", 1)[-1]
+    return stem
+
+
+def _clear_index() -> None:
+    global _index, _index_dir
+    _index = None
+    _index_dir = None
+
+
+def _paths_by_key() -> dict[str, Path]:
+    """Caller holds _INDEX_LOCK. One listing serves the whole refresh."""
+    global _index, _index_dir
+    d = _assets_dir()
+    if _index is not None and _index_dir == d:
+        return _index
+    found: dict[str, Path] = {}
+    try:
+        for path in d.glob("*.json"):
+            if path.is_file():
+                found[_key_from_filename(path.name)] = path
+    except OSError:
+        pass
+    _index = found
+    _index_dir = d
+    return found
+
+
+def _asset_path(key: str) -> Path | None:
+    with _INDEX_LOCK:
+        path = _paths_by_key().get(key)
+        if path is None:
+            return None
+        try:
+            if path.is_file():
+                return path
+        except OSError:
+            pass
+        _clear_index()
+        return None
+
+
+def _drop_other_copies(key: str, keep: Path) -> None:
+    d = _assets_dir()
+    candidates = [d / f"{key}.json"]
+    try:
+        candidates.extend(d.glob(f"*--{key}.json"))
+    except OSError:
+        return
+    for path in candidates:
+        if path == keep:
+            continue
+        try:
+            if path.is_file():
+                path.unlink()
+        except OSError:
+            pass
+
+
+def name_cache_file(key: str, label: str) -> None:
+    """Rename a hash-only file to start with the preset name. The cached bytes stay as they are."""
+    slug = _slug(label)
+    if not slug:
+        return
+    dest = _assets_dir() / f"{slug}--{key}.json"
+    current = _asset_path(key)
+    if current is None or current == dest:
+        return
+    try:
+        current.replace(dest)
+    except OSError:
+        return
+    _drop_other_copies(key, keep=dest)
+    with _INDEX_LOCK:
+        _clear_index()
 
 
 def key_for(preset: Preset, iwad: Path | None, files: list[Path]) -> str:
@@ -126,9 +232,9 @@ class CachedAssets:
 
 
 def get(key: str) -> CachedAssets | None:
-    path = _assets_dir() / f"{key}.json"
+    path = _asset_path(key)
     try:
-        if not path.exists():
+        if path is None:
             return None
         data = json.loads(path.read_text(encoding="utf-8"))
         art = _art_from_dict(data.get("art"))
@@ -145,10 +251,12 @@ def get(key: str) -> CachedAssets | None:
         return None
 
 
-def put(key: str, assets: CachedAssets) -> None:
-    path = _assets_dir() / f"{key}.json"
+def put(key: str, assets: CachedAssets, label: str | None = None) -> None:
+    slug = _slug(label) if label else ""
+    current = None if slug else _asset_path(key)
+    path = _assets_dir() / (f"{slug}--{key}.json" if slug else (current.name if current else f"{key}.json"))
     # The art pool and the cache warmer can write the same key at once; each writes its own file and swaps it in.
-    tmp = path.with_name(f"{key}.{os.getpid()}-{threading.get_ident()}.tmp")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}-{threading.get_ident()}.tmp")
     try:
         data = {
             "art": _art_to_dict(assets.art),
@@ -160,6 +268,10 @@ def put(key: str, assets: CachedAssets) -> None:
         }
         tmp.write_text(json.dumps(data), encoding="utf-8")
         os.replace(tmp, path)
+        if slug:
+            _drop_other_copies(key, keep=path)
+        with _INDEX_LOCK:
+            _clear_index()
     except Exception:
         try:
             tmp.unlink(missing_ok=True)
@@ -271,11 +383,13 @@ def invalidate_missing(present_keys: set[str]) -> None:
     try:
         d = _assets_dir()
         for p in d.glob("*.json"):
-            if p.stem not in present_keys:
+            if _key_from_filename(p.name) not in present_keys:
                 try:
                     p.unlink()
                 except OSError:
                     pass
+        with _INDEX_LOCK:
+            _clear_index()
     except Exception:
         pass
 
@@ -300,5 +414,7 @@ def prune(max_bytes: int = 512 * 1024 * 1024) -> None:
                 total -= sz
             except OSError:
                 pass
+        with _INDEX_LOCK:
+            _clear_index()
     except Exception:
         pass

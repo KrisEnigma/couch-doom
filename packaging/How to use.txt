@@ -118,6 +118,18 @@ Linux:  $XDG_CACHE_HOME/couch-doom/music (or ~/.cache/couch-doom/music)
 Close CouchDoom before clearing this folder; the cache is recreated as tracks
 are played.
 
+TITLE ART CACHE
+---------------
+
+Title art, logos and readmes are cached in an "assets" folder next to the music
+cache. Each file starts with the preset's name, then a code. Two presets can
+share a name; the code tells them apart. Delete one file and use Refresh list
+to rebuild that preset. The others stay as they are.
+
+macOS:  ~/Library/Caches/CouchDoom/assets
+Windows: %LOCALAPPDATA%\CouchDoom\cache\assets
+Linux:  $XDG_CACHE_HOME/couch-doom/assets (or ~/.cache/couch-doom/assets)
+
 UPDATES
 -------
 

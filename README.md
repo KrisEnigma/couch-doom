@@ -104,7 +104,7 @@ B closes an open panel and does nothing on the main selector. Mouse and keyboard
 
 ## What you'll see and hear
 
-- Each preset can show its title screen, logo, title music and readme. ENDOOM appears when the preset includes one.
+- Each preset can show its title screen, logo, title music and readme. ENDOOM appears when the preset includes one. Title art and readmes are cached in a file named after the preset. Delete that file and refresh the list to rebuild one preset.
 - Mods without their own title art can use their loading screen instead.
 - Menu sounds come from a Doom-family IWAD when available, or from bundled Freedoom sounds when they aren't.
 - WAD, PK3 and IPK3 files are supported; PK7 isn't.
