@@ -5,10 +5,10 @@ Each release's notes on GitHub are its own section below, behind the download in
 **New in 1.2.7**
 
 - The window can be resized, and it opens at the size you left it.
-- On Windows, moving the full-screen window to another monitor fills that screen.
-- Refresh list shows how many games it has saved.
-- A text file beside a game, or descriptions.json, updates when you refresh.
-- Cache files are named after the game.
+- On Windows, moving a full-screen window to another monitor corrects its size and resolution to fit that monitor.
+- A release you chose not to be reminded about can still be installed from Help. `--force-update` reinstalls the latest release.
+- Refresh list counts the games it is caching, picks up edits to a text file beside a game or to descriptions.json, and says Refreshed when it finishes.
+- Cache files are named after the preset.
 
 **New in 1.2.6**
 
