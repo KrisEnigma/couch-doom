@@ -4,10 +4,7 @@ Each release's notes on GitHub are its own section below, behind the download in
 
 **New in 1.2.8**
 
-- Title music is back. The 1.2.7 downloads were built without the MIDI player.
-
-**New in 1.2.7**
-
+- Title music is back. The earlier 1.2.7 downloads were built without the MIDI player.
 - The window can be resized, and it opens at the size you left it.
 - On Windows, moving a full-screen window to another monitor corrects its size and resolution to fit that monitor.
 - A release you chose not to be reminded about can still be installed from Help. `--force-update` reinstalls the latest release.
