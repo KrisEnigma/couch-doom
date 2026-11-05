@@ -696,7 +696,8 @@ def flaky_create() -> None:
 
 app._create_window = flaky_create
 app._open_window()  # a window that only opens on the third try still opens
-assert fails[0] == 0 and app.screen.get_size() == (1440, 810)
+desk_w, desk_h = ui_mod.pygame.display.get_desktop_sizes()[0]  # windowed size is kept on the desktop
+assert fails[0] == 0 and app.screen.get_size() == (min(1440, desk_w), min(810, desk_h)), app.screen.get_size()
 ui_size = app.screen.get_size()  # read before the launch-order test destroys the window
 del app._create_window
 ui_mod.time.sleep, ui_mod.log.write = real_sleep, real_log

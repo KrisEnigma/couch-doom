@@ -163,6 +163,7 @@ def test_the_hidden_format_window_never_counts_as_the_app():
 
 
 def test_moving_a_borderless_window_fills_the_monitor_it_landed_on(monkeypatch):
+    monkeypatch.setattr(ui.sys, "platform", "win32")  # the refit is Windows-only; Linux and macOS CI run this too
     app = window_app()
     app.windowed = False
     app.window = SimpleNamespace(handle=7, position=(2560, 360), size=(2560, 1440))
