@@ -2,6 +2,14 @@
 
 Each release's notes on GitHub are its own section below, behind the download instructions in `packaging/release-header.md`. Keep the `**New in X.Y.Z**` heading format: the release workflow and the in-app update notice both look for it.
 
+**New in 1.2.7**
+
+- The window can be resized, and it opens at the size you left it.
+- On Windows, moving the full-screen window to another monitor fills that screen.
+- Refresh list shows how many games it has saved.
+- A text file beside a game, or descriptions.json, updates when you refresh.
+- Cache files are named after the game.
+
 **New in 1.2.6**
 
 - The 60 frames-per-second cap is gone. CouchDoom now draws through your graphics card on Mac, Windows and Linux, and scrolling keeps up with the display, including high refresh rate screens.
