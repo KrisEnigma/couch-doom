@@ -12,6 +12,7 @@
   "menu.quit": "Quitter",
   "menu.title": "Menu",
   "menu.refreshed": "Actualisé",
+  "warm.progress": "Mise en cache {done}/{total}",
   "menu.on": "Oui",
   "menu.off": "Non",
 

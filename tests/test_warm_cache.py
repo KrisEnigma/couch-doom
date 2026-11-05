@@ -3,9 +3,9 @@ import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
-from couch_doom import asset_cache, music_cache, ui
+from couch_doom import asset_cache, i18n, music_cache, ui
 from couch_doom.options import Preset, unpack
-from couch_doom.ui import App, Row
+from couch_doom.ui import WARM_PROGRESS_DELAY, App, Row
 
 
 class InlineThread:
@@ -27,6 +27,10 @@ def _warm_app(monkeypatch, *, visible: list[int], total: int):
     app._warm_generation = 0
     app._warm_allowed = threading.Event()
     app._warm_allowed.set()
+    app._warm_announce = False
+    app._warm_immediate = False
+    app.menu_status = ""
+    app.menu_status_at = 0.0
     app._preset_rows = lambda: list(range(len(app.rows)))
     app._sel_row = lambda: 0
 
@@ -70,6 +74,69 @@ def test_an_interrupted_pass_never_invalidates_caches(monkeypatch):
 
     assert seen == ["p0"]
     assert calls == {}
+
+
+def test_a_finished_pass_counts_each_preset_then_clears_the_count(monkeypatch):
+    app, _, _ = _warm_app(monkeypatch, visible=[0], total=3)
+    seen_counts = []
+    real_unpack = ui.unpack
+
+    def note(preset):
+        real_unpack(preset)
+        seen_counts.append(app._warm_progress)
+
+    monkeypatch.setattr(ui, "unpack", note)
+
+    app._warm_cache()
+
+    assert seen_counts == [(0, 3), (1, 3), (2, 3)]  # the counter moves after the previous preset
+    assert app._warm_progress is None
+
+
+def test_a_retired_pass_leaves_the_new_count_alone(monkeypatch):
+    app, _, _ = _warm_app(monkeypatch, visible=[0], total=3)
+    real_unpack = ui.unpack
+
+    def hand_off(preset):
+        real_unpack(preset)
+        app._warm_generation += 1
+        app._warm_progress = (4, 9)
+
+    monkeypatch.setattr(ui, "unpack", hand_off)
+
+    app._warm_cache()
+
+    assert app._warm_progress == (4, 9)
+
+
+def test_the_count_stays_hidden_until_the_walk_has_lasted_a_second():
+    i18n.set_language("en")
+    app = App.__new__(App)
+    app._warm_begun = 10.0
+    app._warm_progress = (2, 9)
+    app._warm_immediate = False
+
+    assert app._warm_status(10.0 + WARM_PROGRESS_DELAY - 0.01) is None
+    assert app._warm_status(10.0 + WARM_PROGRESS_DELAY) == "Caching 2/9"
+    app._warm_progress = None
+    assert app._warm_status(12.0) is None
+    app._warm_progress = (0, 0)
+    assert app._warm_status(12.0) is None
+
+
+def test_a_refresh_shows_the_count_immediately_and_says_refreshed_when_the_walk_ends(monkeypatch):
+    i18n.set_language("en")
+    app, _, _ = _warm_app(monkeypatch, visible=[0], total=3)
+    app._warm_announce = True
+
+    app._warm_cache()
+
+    assert app._warm_immediate is False
+    assert app._warm_progress is None
+    assert app.menu_status == "Refreshed"
+    app._warm_progress = (1, 3)
+    app._warm_immediate = True
+    assert app._warm_status(app._warm_begun) == "Caching 1/3"
 
 
 def test_a_newer_pass_retires_the_old_one(monkeypatch):

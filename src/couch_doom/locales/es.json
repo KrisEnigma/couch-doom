@@ -12,6 +12,7 @@
   "menu.quit": "Salir",
   "menu.title": "Menú",
   "menu.refreshed": "Actualizado",
+  "warm.progress": "Guardando {done}/{total}",
   "menu.on": "Sí",
   "menu.off": "No",
 

@@ -12,6 +12,7 @@
   "menu.quit": "Beenden",
   "menu.title": "Menü",
   "menu.refreshed": "Aktualisiert",
+  "warm.progress": "Speichere {done}/{total}",
   "menu.on": "An",
   "menu.off": "Aus",
 

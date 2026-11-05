@@ -63,7 +63,7 @@ MIDI_LOUDNESS_DB = -23.0
 PEAK_TARGET = 0.9  # never louder than this, so nothing clips
 # Longer than a held direction (gamepad repeats every 70 ms, the keyboard as fast as every 30 ms), so flying
 # through the list never starts a render, and short enough that a settled preset's track starts while its art
-# is still fading in (the art takes 0.3 s).
+# is still fading in (the art takes 0.15 s).
 DWELL_SECONDS = 0.12
 FADE_IN_MS = 200
 FADE_OUT_MS = 700

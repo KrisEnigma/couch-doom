@@ -141,4 +141,4 @@ After a PyInstaller build on Windows, confirm both `couch_doom.canvas` in the PY
 
 ## Music, so you don't chase it
 
-Not part of this port. Title music starts after the art is on screen because of timers, not rendering. A settled preset starts its track after `DWELL_SECONDS` (0.12 s, just past a held repeat) and fades in over `FADE_IN_MS` (200), while the art fades in over 0.3 s. The presets above and below are rendered ahead into the cache. Do not change `DWELL_SECONDS`, `FADE_IN_MS`, or `MusicPlayer.warm` in this port. `tests/test_music_dwell.py` locks the timing.
+Not part of this port. Title music starts after the art is on screen because of timers, not rendering. A settled preset starts its track after `DWELL_SECONDS` (0.12 s, just past a held repeat) and fades in over `FADE_IN_MS` (200), while the art fades in over 0.15 s. The presets above and below are rendered ahead into the cache. Do not change `DWELL_SECONDS`, `FADE_IN_MS`, or `MusicPlayer.warm` in this port. `tests/test_music_dwell.py` locks the timing.

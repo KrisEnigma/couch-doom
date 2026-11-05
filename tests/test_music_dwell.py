@@ -2,7 +2,7 @@ from concurrent.futures import Future
 from types import SimpleNamespace
 
 from couch_doom import music
-from couch_doom.ui import App
+from couch_doom.ui import ART_FADE_SECONDS, App
 
 
 def music_app():
@@ -32,7 +32,7 @@ def test_music_preparation_waits_out_a_held_direction_then_starts_during_the_art
     app._update_music(10.07)  # one gamepad repeat later: still moving, nothing starts
 
     assert app.requests == []
-    assert 0.07 < music.DWELL_SECONDS < 0.3  # past a held repeat, inside the 0.3 s art fade
+    assert 0.07 < music.DWELL_SECONDS < ART_FADE_SECONDS  # past a held repeat, while the art is still fading in
     assert music.FADE_IN_MS <= 200
 
     app._update_music(10.0 + music.DWELL_SECONDS + 1e-3)

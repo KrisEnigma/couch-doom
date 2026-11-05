@@ -81,7 +81,8 @@ WINDOW_EVENTS = {
     pygame.WINDOWSHOWN, pygame.WINDOWEXPOSED, pygame.WINDOWDISPLAYCHANGED, pygame.WINDOWMOVED,
     pygame.RENDER_DEVICE_RESET, pygame.WINDOWRESIZED, pygame.WINDOWSIZECHANGED,
 }
-ART_FADE_SECONDS = 0.3
+ART_FADE_SECONDS = 0.15
+WARM_PROGRESS_DELAY = 1.0  # a walk that finishes sooner stays quiet
 ART_CACHE_SIZE = 24
 ART_CACHE_BYTES = 96 * 1024 * 1024  # 24 panels at 1080p, but only ~8 at 4K
 # Each theme holds a full-screen background plus an art-panel veil (~11 MB at 1080p, ~45 MB at 4K).
@@ -784,6 +785,10 @@ class App:
         self._warm_generation = 0  # bumped per cache-warming pass; older workers stop when it moves on
         self._warm_allowed = threading.Event()  # cleared while a game runs
         self._warm_allowed.set()
+        self._warm_begun = 0.0
+        self._warm_progress: tuple[int, int] | None = None  # (done, total) while a pass is walking presets
+        self._warm_immediate = False  # a refresh shows the count at once; a startup walk waits
+        self._warm_announce = False  # this pass should say "Refreshed" when it finishes
 
         self.rows: list[Row] = []
         self.collapsed_sections: set[str] = set()
@@ -829,10 +834,8 @@ class App:
             self._notify(tr("toast.still_same", detail=f"{exc.title[0].lower()}{exc.title[1:]}"), ERROR)
             return
         in_menu = self.mode == "menu"
+        self._warm_announce = in_menu  # "Refreshed" waits until the cache walk finishes
         self._apply(opts, announce=not in_menu)
-        if in_menu:
-            self.menu_status = tr("menu.refreshed")
-            self.menu_status_at = time.monotonic()
 
     def _apply(self, opts: Options, *, announce: bool = True) -> None:
         """Show a freshly loaded set of presets: a reload, or another launcher picked."""
@@ -2359,9 +2362,25 @@ class App:
         pos = rows.index(sel)
         return [self.rows[rows[p]].preset for p in (pos - 1, pos + 1) if 0 <= p < len(rows)]
 
+    def _warm_status(self, now: float) -> str | None:
+        """The walk's count. A refresh shows it at once; a startup walk waits, so a fast one stays quiet."""
+        progress = self._warm_progress
+        if progress is None or (not self._warm_immediate and now - self._warm_begun < WARM_PROGRESS_DELAY):
+            return None
+        done, total = progress
+        if total <= 0:
+            return None
+        return tr("warm.progress", done=done, total=total)
+
     def _warm_cache(self) -> None:
         self._warm_generation += 1
         generation = self._warm_generation
+        announce = self._warm_announce
+        self._warm_announce = False
+        self._warm_immediate = announce
+        self._warm_begun = time.monotonic()
+        # The count is visible on this frame. A retired worker must not clear a newer pass's count.
+        self._warm_progress = (0, len(self.opts.presets)) if self.opts.presets else None
         try:
             def worker():
                 try:
@@ -2395,8 +2414,12 @@ class App:
                     targets = list(dict.fromkeys(self.rows[rows[p]].preset for p in order))
                     visible = set(targets)
                     targets += [i for i in range(len(opts.presets)) if i not in visible]
+                    if self._warm_generation != generation:
+                        return
+                    total = len(targets)
+                    self._warm_progress = (0, total)  # a slow first preset still counts as started
                     completed = True
-                    for idx in targets:
+                    for n, idx in enumerate(targets, 1):
                         self._warm_allowed.wait()  # paused while a game runs, so it can have the disk and CPU
                         if not self.running or self._warm_generation != generation:
                             completed = False
@@ -2410,14 +2433,14 @@ class App:
                             present_keys.append(key)
                             from . import music_cache
                             music_keys.append(music_cache.selection_key(key, iwad, shown))
-                            if idx in self.art_cache or idx in self.art_jobs:
-                                continue
-                            if asset_cache.get(key):
-                                continue
-                            # load and cache raw assets
-                            _load_extras(preset)
+                            if idx not in self.art_cache and idx not in self.art_jobs and not asset_cache.get(key):
+                                _load_extras(preset)
                         except Exception:
-                            continue
+                            pass
+                        # A cache hit still counts. A newer pass, or quitting, owns the counter from here.
+                        if self._warm_generation != generation or not self.running:
+                            return
+                        self._warm_progress = (n, total)
                     if not completed:
                         return  # a partial pass would mistake every unvisited preset for a removed one
                     try:
@@ -2427,6 +2450,12 @@ class App:
                         music_cache.invalidate_selections(set(music_keys))
                     except Exception:
                         pass
+                    if self._warm_generation == generation:
+                        self._warm_progress = None
+                        self._warm_immediate = False
+                        if announce:
+                            self.menu_status = tr("menu.refreshed")
+                            self.menu_status_at = time.monotonic()
                 except Exception:
                     pass
 
@@ -3507,7 +3536,7 @@ class App:
         self._update_theme(now)
         self._blit_layer("bg")
         self._draw_art(now)
-        self._draw_header()
+        self._draw_header(now)
         if self.blocked:
             self._draw_notice()
         else:
@@ -3554,7 +3583,7 @@ class App:
         self._fps_hz = rate
         log.write("fps", f"aiming at {rate} Hz")
 
-    def _draw_header(self) -> None:
+    def _draw_header(self, now: float) -> None:
         s, m = self.s, self.margin
         brand_font = self._font(88, bold=True)
         brand = self._shadowed("COUCH DOOM", brand_font, TEXT)  # brand stays English
@@ -3580,6 +3609,9 @@ class App:
         # Leading space and one tracking gap: the count reads as the same line, not a second label.
         self.screen.blit(self._tracked(f" · {count}", 18, MUTED, tracking=0.3),
                          (tag_pos[0] + tag.get_width() + round(18 * s * 0.3), tag_pos[1]))
+        if status := self._warm_status(now):
+            surf = self._text(status, self._font(18), MUTED)
+            self.screen.blit(surf, (self.list_rect.right - surf.get_width(), tag_pos[1]))
         if self.filter or self.mode == "search":
             fy = self.list_rect.top - int(64 * s)
             lab = self._tracked(tr("header.filter"), 17, self.theme.label, tracking=0.3)
@@ -3788,7 +3820,7 @@ class App:
     def _blit_detail_panel(self, now: float, panel: pygame.Surface) -> None:
         """`panel` may be the inked part of a full-size panel (a subsurface); its offset puts it back in place."""
         dr, s = self.detail_rect, self.s
-        t = _ease_out((now - self.detail_changed) / 0.3)
+        t = _ease_out((now - self.detail_changed) / ART_FADE_SECONDS)
         ox, oy = panel.get_offset()
         panel.set_alpha(int(255 * t))
         self.screen.blit(panel, (dr.x + ox + int(32 * s * (1 - t)), dr.y + oy))
@@ -4072,10 +4104,12 @@ class App:
             row_font = selected_font if selected else font
             self.screen.blit(self._text(name, row_font, ink),
                              (x + int(12 * s), self._text_top(row_font, rect.centery)))
-            if key == "refresh" and self.menu_status and now - self.menu_status_at < 2.0:
-                age = max(0.0, now - self.menu_status_at)
-                status = self._text(self.menu_status, self._font(16), self.theme.label)
-                status.set_alpha(int(255 * max(0.0, 1.0 - age / 2.0)))
+            if key == "refresh" and (live := self._warm_status(now) or (
+                    self.menu_status if self.menu_status and now - self.menu_status_at < 2.0 else "")):
+                status = self._text(live, self._font(16), self.theme.label)
+                if live == self.menu_status:
+                    age = max(0.0, now - self.menu_status_at)
+                    status.set_alpha(int(255 * max(0.0, 1.0 - age / 2.0)))
                 self.screen.blit(status, (rect.right - status.get_width() - int(22 * s), rect.centery - status.get_height() // 2))
             value, on = None, False
             if key in ("music", "sounds", "recent", "fullscreen"):
