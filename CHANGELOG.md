@@ -2,11 +2,15 @@
 
 Each release's notes on GitHub are its own section below, behind the download instructions in `packaging/release-header.md`. Keep the `**New in X.Y.Z**` heading format: the release workflow and the in-app update notice both look for it.
 
+**New in 1.2.9**
+
+- macOS: drag the window's edges to resize it. It minimizes while a game runs, so the loading screen doesn't stay up when you switch desktops.
+- The caching count shows after Refresh list, not every time CouchDoom opens.
+
 **New in 1.2.8**
 
 - Title music is back. The earlier 1.2.7 downloads were built without the MIDI player.
 - The window can be resized, and it opens at the size you left it.
-- macOS: the window can be resized by dragging its edges, and it minimizes while a game runs, so switching desktops no longer leaves the loading screen up.
 - On Windows, moving a full-screen window to another monitor corrects its size and resolution to fit that monitor.
 - A release you chose not to be reminded about can still be installed from Help. `--force-update` reinstalls the latest release.
 - Refresh list counts the games it is caching, picks up edits to a text file beside a game or to descriptions.json, and says Refreshed when it finishes. Cache files are named after the preset.
