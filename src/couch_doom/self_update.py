@@ -371,16 +371,27 @@ def _wait_for_exit(pid: int, timeout: float = 120) -> None:
     raise UpdateError("CouchDoom did not exit in time to apply the update.")
 
 
-def _rename_when_free(source: Path, destination: Path, timeout: float = 10) -> None:
+def _rename_timeout() -> float:
+    # Windows often holds the install folder longer (Explorer, AV, cache junctions into the tree).
+    return 45.0 if os.name == "nt" else 10.0
+
+
+def _rename_when_free(source: Path, destination: Path, timeout: float | None = None) -> None:
     """Windows keeps a just-exited program's files busy for a moment, and antivirus may scan them; retry briefly."""
+    if timeout is None:
+        timeout = _rename_timeout()
     deadline = time.monotonic() + timeout
     while True:
         try:
             source.rename(destination)
             return
-        except PermissionError:
+        except PermissionError as exc:
             if time.monotonic() >= deadline:
-                raise
+                raise UpdateError(
+                    "Could not replace the install folder (it stayed locked). "
+                    "Close File Explorer windows on that folder, pause antivirus briefly, "
+                    "and do not junction the CouchDoom cache into the install folder."
+                ) from exc
             time.sleep(0.25)
 
 
@@ -388,11 +399,14 @@ def _rename_when_free(source: Path, destination: Path, timeout: float = 10) -> N
 # state and soundfonts are always theirs, even when a build also ships a copy.
 # Any other top-level name the new build does not contain (a note, the installer)
 # comes along too. A name the new build ships is replaced, so the program itself updates.
+# Top-level "cache" is AppData-owned (or a mistaken junction into the install); never carry it.
 _PLAYER_DIRS = ("state", "soundfonts")
 
 
 def _carry_player_files(install_path: Path, staged_app: Path) -> None:
     for source in install_path.iterdir():
+        if source.name == "cache":
+            continue
         destination = staged_app / source.name
         if source.name not in _PLAYER_DIRS and destination.exists():
             continue

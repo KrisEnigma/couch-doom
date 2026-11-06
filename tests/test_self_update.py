@@ -666,6 +666,37 @@ class InstallFlowTests(unittest.TestCase):
             self.assertEqual(len(calls), 3)
             self.assertTrue(destination.is_dir())
 
+    def test_rename_timeout_raises_a_clear_update_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source, destination = Path(temp) / "CouchDoom", Path(temp) / ".CouchDoom.old-1"
+            source.mkdir()
+
+            def always_busy(path, target):
+                raise PermissionError(32, "in use")
+
+            with patch.object(Path, "rename", always_busy), patch.object(self_update.time, "sleep"), \
+                    self.assertRaises(self_update.UpdateError) as raised:
+                self_update._rename_when_free(source, destination, timeout=0.01)
+            message = str(raised.exception)
+            self.assertIn("install folder", message)
+            self.assertIn("junction", message)
+            self.assertIsInstance(raised.exception.__cause__, PermissionError)
+
+    def test_carry_player_files_skips_top_level_cache(self):
+        with tempfile.TemporaryDirectory() as temp:
+            install, staged = Path(temp) / "CouchDoom", Path(temp) / "new" / "CouchDoom"
+            install.mkdir()
+            staged.mkdir(parents=True)
+            (install / "state").mkdir()
+            (install / "state" / "last_played.json").write_text("saved")
+            (install / "cache").mkdir()
+            (install / "cache" / "selection.json").write_text("cached")
+            (install / "notes.txt").write_text("keep")
+            self_update._carry_player_files(install, staged)
+            self.assertEqual((staged / "state" / "last_played.json").read_text(), "saved")
+            self.assertEqual((staged / "notes.txt").read_text(), "keep")
+            self.assertFalse((staged / "cache").exists())
+
 
 class ResultFileTests(unittest.TestCase):
     def _swap(self, base: Path, popen_effect=None):
