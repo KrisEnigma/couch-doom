@@ -6,8 +6,8 @@ Each release's notes on GitHub are its own section below, behind the download in
 
 - Windows: when an update can't replace the CouchDoom folder because another program still has it open, CouchDoom waits longer and explains what went wrong more clearly.
 - Windows: title music keeps caching even if the old cache folder was moved or deleted.
-- Mac, Windows, and Linux: settings are stored in `state/settings.ini`, with comments for each option. If you still have `last_played.json`, CouchDoom converts it on first launch.
-- Mac, Windows, and Linux: art and music cache normally live in your user folder. Set `cache_dir` in that settings file if you want them somewhere else, such as next to CouchDoom.
+- Settings are stored in `state/settings.ini`, with comments for each option. If you still have `last_played.json`, CouchDoom converts it on first launch.
+- Art and music cache normally live in your user folder. Set `cache_dir` in that settings file if you want them somewhere else, such as next to CouchDoom.
 
 **New in 1.2.9**
 
