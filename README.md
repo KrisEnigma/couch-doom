@@ -135,8 +135,8 @@ A source checkout uses `state/descriptions.json` in the project folder.
 
 ## A few extras
 
-- CouchDoom checks GitHub once after startup for updates. Packaged builds can install an update; source builds use the release page. "Don't remind me again" hides that release from the startup notice; Help has an Update button next to GITHUB that brings the window back. Turn the check off with the `update_check` setting in `state/settings.ini` or by setting `COUCHDOOM_NO_UPDATE_CHECK`. Leftover folders from an interrupted update are cleaned up on the next launch.
-- An optional `cache_dir` in `state/settings.ini` (absolute, or relative to the CouchDoom data folder) sets where art and music cache live; leave it blank for the platform default. `COUCHDOOM_CACHE_DIR` still overrides that for tests and advanced setups. The settings file includes comments; older `last_played.json` is converted on first launch.
+- CouchDoom checks GitHub once after startup for updates. Packaged builds can install an update; source builds use the release page. "Don't remind me again" hides that release from the startup notice; Help has an Update button next to GITHUB that brings the window back. Turn the check off with `update_check` in `state/settings.ini`. Leftover folders from an interrupted update are cleaned up on the next launch.
+- Art and music cache normally live in your user folder. Set `cache_dir` in `state/settings.ini` if you want them somewhere else, such as next to CouchDoom. The file has a short comment on each option. If you still have `last_played.json`, CouchDoom converts it on first launch.
 - Favorites, language, colors, full screen or a window, Recently Played, and other preferences are saved locally. The troubleshooting log can include file paths and launch output, so review it before sharing.
 - From source, `--windowed` opens a window, `--dry-run` prints launch commands, `--options` opens a settings file or supported port, and `--soundfont` selects MIDI music playback. `--force-update` downloads and installs the latest release even when this copy is already that version.
 
