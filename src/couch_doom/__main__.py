@@ -5,8 +5,8 @@ import sys
 import traceback
 from pathlib import Path
 
-from . import log
-from .config import FROZEN, STATE_FILE
+from . import cache_paths, log
+from .config import FROZEN, STATE_FILE, migrate_legacy_state_file
 from .i18n import set_language
 from .launch import build_command
 from .launchers import Launchers
@@ -55,7 +55,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="Download and install the latest release even when this copy is already that version")
     args = ap.parse_args(raw_argv)
 
+    migrate_legacy_state_file()
     state = State(STATE_FILE)
+    cache_paths.configure(state.cache_dir)
     set_language(state.language)
     explicit = Choice(*plan(args.options, args.launcher)[0]) if args.options else None
     launchers = Launchers(state, args.launcher, explicit)

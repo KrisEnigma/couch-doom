@@ -1,4 +1,4 @@
-"""cache_dir env override and healing of a non-directory occupant."""
+"""cache_dir env override, settings configure, and healing of a non-directory occupant."""
 from __future__ import annotations
 
 import os
@@ -8,14 +8,41 @@ from unittest.mock import patch
 
 import pytest
 
-from couch_doom.cache_paths import cache_dir
+from couch_doom.cache_paths import cache_dir, configure
+
+
+@pytest.fixture(autouse=True)
+def _reset_settings_cache_dir():
+    configure(None)
+    yield
+    configure(None)
 
 
 def test_cache_dir_env_override_wins(tmp_path, monkeypatch):
     target = tmp_path / "custom-cache"
+    settings_target = tmp_path / "from-settings"
+    configure(str(settings_target))
     monkeypatch.setenv("COUCHDOOM_CACHE_DIR", str(target))
     assert cache_dir() == target
     assert target.is_dir()
+
+
+def test_cache_dir_settings_wins_over_platform_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("COUCHDOOM_CACHE_DIR", raising=False)
+    target = tmp_path / "settings-cache"
+    configure(str(target))
+    assert cache_dir() == target
+    assert target.is_dir()
+
+
+def test_cache_dir_relative_settings_resolves_against_data_dir(tmp_path, monkeypatch):
+    monkeypatch.delenv("COUCHDOOM_CACHE_DIR", raising=False)
+    data = tmp_path / "data"
+    data.mkdir()
+    configure("cache")
+    with patch("couch_doom.config.DATA_DIR", data):
+        assert cache_dir() == data / "cache"
+    assert (data / "cache").is_dir()
 
 
 def test_cache_dir_replaces_a_file_occupying_the_path(tmp_path, monkeypatch):

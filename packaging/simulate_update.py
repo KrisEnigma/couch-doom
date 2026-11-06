@@ -38,9 +38,12 @@ def _settings(seen: str | None) -> dict:
     """Your own settings file, minus the version it last saw (that's what the simulation sets)."""
     data: dict = {}
     try:
-        data = json.loads((ROOT / "state" / "last_played.json").read_text(encoding="utf-8"))
+        data = json.loads((ROOT / "state" / "settings.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        data = {"language": "en", "language_source": "menu"}  # still a returning player, just without your list
+        try:
+            data = json.loads((ROOT / "state" / "last_played.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {"language": "en", "language_source": "menu"}  # still a returning player, just without your list
     data.pop("seen_version", None)
     if seen:
         data["seen_version"] = seen
@@ -49,7 +52,7 @@ def _settings(seen: str | None) -> dict:
 
 def _write_state(state_dir: Path, seen: str | None) -> None:
     state_dir.mkdir(parents=True, exist_ok=True)
-    (state_dir / "last_played.json").write_text(json.dumps(_settings(seen), indent=2), encoding="utf-8")
+    (state_dir / "settings.json").write_text(json.dumps(_settings(seen), indent=2), encoding="utf-8")
 
 
 def quick(sandbox: Path, previous: str) -> None:

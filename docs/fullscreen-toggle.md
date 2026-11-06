@@ -4,7 +4,7 @@
 
 On `main`. Alt+Enter and the menu row shipped with the GPU window (changelog **New in 1.2.6**). `__version__` is still `1.2.5`, so the log header says 1.2.5 until that moves.
 
-Live check on the PC, 4 Nov 2026: 2560×1440, 125% scaling (120 dpi), 170 Hz, Direct3D 11, pygame-ce 2.5.8 (SDL 2.32.10). A throwaway `COUCHDOOM_DATA_DIR` was used. Kris's real `state/last_played.json` was not touched.
+Live check on the PC, 4 Nov 2026: 2560×1440, 125% scaling (120 dpi), 170 Hz, Direct3D 11, pygame-ce 2.5.8 (SDL 2.32.10). A throwaway `COUCHDOOM_DATA_DIR` was used. Kris's real `state/settings.json` was not touched.
 
 A bug found in that check is fixed in the working tree and not committed: recreating the window swallowed the key-up. See [Key-up lost on recreate](#key-up-lost-on-recreate).
 
@@ -110,7 +110,7 @@ $env:PYTHONPATH = 'src'
 .\.venv\Scripts\python -m couch_doom --windowed --options 'D:\Standalone\UZDoom\DoomRunner\options.json'
 ```
 
-`--options` skips the picker, so Escape opens the menu. `COUCHDOOM_NO_UPDATE_CHECK` skips the update notice. An empty data dir is a first run (`returning` is false), so What's new stays closed. Writing a `last_played.json` before launch makes `returning` true and What's new opens; the first Escape then closes that, and only the second opens the menu.
+`--options` skips the picker, so Escape opens the menu. `COUCHDOOM_NO_UPDATE_CHECK` skips the update notice. An empty data dir is a first run (`returning` is false), so What's new stays closed. Writing a `settings.json` before launch makes `returning` true and What's new opens; the first Escape then closes that, and only the second opens the menu.
 
 The window exists about two seconds after launch, when the log has `gpu renderer` and `display refresh`. Title music will start (`D_INTRO`, then the selected preset). That is the normal music path, not a hang. `INPUT_COOLDOWN` (0.45 s) applies after a game returns, not at startup.
 

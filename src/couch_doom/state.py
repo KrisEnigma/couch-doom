@@ -29,6 +29,7 @@ class State:
         self.update_check = True  # set false in the file to never contact GitHub
         self.update_skip: str | None = None  # a release the player said not to be reminded about
         self.seen_version: str | None = None  # the last CouchDoom version that ran with this file
+        self.cache_dir: str | None = None  # optional art/music cache root; None uses the platform default
         self.returning = False  # a settings file already existed: not a first run
         self._load()
 
@@ -63,6 +64,8 @@ class State:
             self.update_skip = skip if isinstance(skip, str) else None
             seen = data.get("seen_version")
             self.seen_version = seen if isinstance(seen, str) else None
+            cache = data.get("cache_dir")
+            self.cache_dir = cache if isinstance(cache, str) and cache.strip() else None
         lang = data.get("language")
         source = data.get("language_source")
         if source in ("auto", "menu"):
@@ -160,6 +163,7 @@ class State:
             "update_check": self.update_check,
             "update_skip": self.update_skip,
             "seen_version": self.seen_version,
+            "cache_dir": self.cache_dir,
         }
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
