@@ -708,6 +708,7 @@ app.input.resume()
 assert app.input.pad_count == pads and pygame.joystick.get_init()  # pads come back after a game
 
 # Launch order: pads off before the splash, window back before audio/pads on, and never resumed while the game runs.
+# Mac minimizes the same window for the game. Windows and Linux destroy it and open another.
 order = []
 
 
@@ -769,7 +770,11 @@ finally:
         setattr(pygame.display, name, old)
 
 assert order.index("suspend") < order.index("hold") < order.index("wait"), order
-assert order.index("wait") < order.index("window") < order.index("audio-up") < order.index("resume"), order
+assert order.index("wait") < order.index("audio-up") < order.index("resume"), order
+if sys.platform != "darwin":
+    assert order.index("wait") < order.index("window") < order.index("audio-up"), order
+else:
+    assert "window" not in order, order  # the minimized window is restored, not recreated
 assert order.index("suspend") < order.index("wait") < order.index("resume"), order  # pads stay off while the game runs
 assert order.count("resume") == 1, order
 from couch_doom.launch import presented_files  # noqa: E402

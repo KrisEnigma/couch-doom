@@ -377,6 +377,12 @@ class _ToggleWindow:
         self.minimum_size = (0, 0)
         self.calls = []
 
+    def __setattr__(self, name, value):
+        # Record resizable after calls exists, so the constructor's own assignment stays quiet.
+        if name == "resizable" and "calls" in self.__dict__:
+            self.calls.append(("resizable", bool(value)))
+        object.__setattr__(self, name, value)
+
     def set_windowed(self):
         self.calls.append("windowed")
 
@@ -573,6 +579,181 @@ def test_windowed_window_opens_resizable_at_the_saved_size(monkeypatch, platform
     assert app.window.minimum_size == ui.WINDOWED_MIN
 
 
+def test_windowed_window_on_mac_opens_resizable(monkeypatch):
+    monkeypatch.setattr(ui.sys, "platform", "darwin")
+    monkeypatch.setattr(ui.pygame.display, "get_desktop_sizes", lambda: [(2560, 1440)])
+    monkeypatch.setattr(ui, "display_refresh_rate", lambda: 120)
+    monkeypatch.setattr(ui, "_set_window_icon", lambda window=None: None)
+    monkeypatch.setattr(ui, "_force_foreground", lambda handle=None: None)
+    monkeypatch.setattr(ui.log, "write", lambda *a: None)
+    monkeypatch.setattr(ui.pygame.key, "start_text_input", lambda: None)
+    styled = []
+    monkeypatch.setattr(ui, "_macos_apply_windowed_style", lambda window: styled.append(window))
+    created = []
+
+    class FakeWindow:
+        handle = 0
+        minimum_size = (0, 0)
+
+        def __init__(self, title, size, **kwargs):
+            created.append((size, kwargs))
+            self.size = size
+
+    monkeypatch.setattr(ui.pygame, "Window", FakeWindow)
+    app = window_app()
+    app.windowed = True
+    app.state = SimpleNamespace(window_size=(1700, 1000))
+    app._window_target = lambda window: SimpleNamespace(get_width=lambda: 1700)
+    app._mouse_off = lambda: None
+    app._layout = lambda: None
+
+    app._create_window()
+
+    size, kwargs = created[0]
+    assert size == (1700, 1000)
+    assert kwargs["resizable"] is True
+    assert styled == [app.window]
+    assert app.window.minimum_size == ui.WINDOWED_MIN
+
+
+def test_mac_minimizes_for_a_game_instead_of_closing(monkeypatch):
+    monkeypatch.setattr(ui.sys, "platform", "darwin")
+    app = window_app()
+    calls = []
+    app.window = SimpleNamespace(handle=0, minimize=lambda: calls.append("minimize"))
+    closed = []
+    app._close_window = lambda: closed.append("close")
+    prepared = []
+    monkeypatch.setattr(ui, "_macos_prepare_miniaturize", lambda window: prepared.append(window) or False)
+    monkeypatch.setattr(ui.pygame.event, "pump", lambda: calls.append("pump"))
+
+    assert app._park_for_game() is True
+
+    assert closed == []
+    assert prepared == [app.window]
+    assert calls[:2] == ["minimize", "pump"]
+    assert app.hidden is True
+
+
+def test_windows_closes_the_window_while_a_game_runs(monkeypatch):
+    monkeypatch.setattr(ui.sys, "platform", "win32")
+    app = window_app()
+    app.window = object()
+    closed = []
+    app._close_window = lambda: closed.append("close")
+
+    assert app._park_for_game() is False
+    assert closed == ["close"]
+
+
+def test_mac_comes_back_from_a_game_in_desktop_fullscreen(monkeypatch):
+    monkeypatch.setattr(ui.sys, "platform", "darwin")
+    app = window_app()
+    app.windowed = False
+    app.hidden = True
+
+    class Window:
+        handle = 0
+        calls = []
+
+        def restore(self):
+            self.calls.append("restore")
+
+        def show(self):
+            self.calls.append("show")
+
+        def set_windowed(self):
+            self.calls.append("windowed")
+
+        def set_fullscreen(self, desktop=False):
+            self.calls.append(("fullscreen", desktop))
+
+    app.window = Window()
+    shadows = []
+    monkeypatch.setattr(ui, "_disable_macos_fullscreen_shadow", lambda: shadows.append("shadow"))
+    monkeypatch.setattr(ui, "_force_foreground", lambda handle=None: shadows.append(("front", handle)))
+    monkeypatch.setattr(ui.pygame.event, "pump", lambda: None)
+    monkeypatch.setattr(ui.pygame.event, "get", lambda: [])
+
+    app._unpark_after_game()
+
+    assert app.window.calls == ["restore", "show", "windowed", ("fullscreen", True)]
+    assert shadows == ["shadow", ("front", None)]
+    assert app.hidden is False
+    assert app.window is not None
+
+
+def test_mac_does_not_retoggle_fullscreen_when_restore_already_raised_it(monkeypatch):
+    monkeypatch.setattr(ui.sys, "platform", "darwin")
+    app = window_app()
+    app.windowed = False
+
+    class Window:
+        handle = 5
+        calls = []
+
+        def restore(self):
+            self.calls.append("restore")
+
+        def show(self):
+            self.calls.append("show")
+
+        def set_windowed(self):
+            self.calls.append("windowed")
+
+        def set_fullscreen(self, desktop=False):
+            self.calls.append("fullscreen")
+
+    app.window = Window()
+    monkeypatch.setattr(ui, "_macos_is_miniaturized", lambda handle: False)
+    monkeypatch.setattr(ui, "_macos_is_shielding", lambda handle: True)
+    monkeypatch.setattr(ui, "_disable_macos_fullscreen_shadow", lambda: app.window.calls.append("shadow"))
+    monkeypatch.setattr(ui, "_force_foreground", lambda handle=None: None)
+    monkeypatch.setattr(ui.pygame.event, "pump", lambda: None)
+    monkeypatch.setattr(ui.pygame.event, "get", lambda: [])
+
+    app._unpark_after_game()
+
+    assert app.window.calls == ["restore", "show", "shadow"]
+
+
+def test_mac_comes_back_from_a_game_with_a_resizable_window(monkeypatch):
+    monkeypatch.setattr(ui.sys, "platform", "darwin")
+    app = window_app()
+    app.windowed = True
+    styled = []
+
+    class Window:
+        handle = 0
+        size = (1600, 900)
+        resizable = False
+        minimum_size = (0, 0)
+        calls = []
+
+        def restore(self):
+            self.calls.append("restore")
+
+        def show(self):
+            self.calls.append("show")
+
+        def set_fullscreen(self, desktop=False):
+            self.calls.append("fullscreen")
+
+    app.window = Window()
+    monkeypatch.setattr(ui, "_macos_apply_windowed_style", lambda window: styled.append(window))
+    monkeypatch.setattr(ui, "_force_foreground", lambda handle=None: None)
+    monkeypatch.setattr(ui.pygame.event, "pump", lambda: None)
+    monkeypatch.setattr(ui.pygame.event, "get", lambda: [])
+
+    app._unpark_after_game()
+
+    assert app.window.calls == ["restore", "show"]
+    assert app.window.resizable is True
+    assert app.window.minimum_size == ui.WINDOWED_MIN
+    assert styled == [app.window]
+    assert app.hidden is False
+
+
 def test_a_saved_window_size_stays_on_screen(monkeypatch):
     monkeypatch.setattr(ui.pygame.display, "get_desktop_sizes", lambda: [(1280, 800)])
     app = window_app()
@@ -585,24 +766,29 @@ def test_a_saved_window_size_stays_on_screen(monkeypatch):
 def test_alt_enter_on_mac_uses_desktop_fullscreen_not_a_mode_change(monkeypatch):
     monkeypatch.setattr(ui.sys, "platform", "darwin")
     shadows = []
+    styled = []
     monkeypatch.setattr(ui, "_disable_macos_fullscreen_shadow", lambda: shadows.append("shadow"))
+    monkeypatch.setattr(ui, "_macos_apply_windowed_style", lambda window: styled.append(window))
     app = _toggle_app((2560, 1440), windowed=False, monkeypatch=monkeypatch)
 
     app._toggle_window()
 
     assert app.windowed is True
-    assert app.window.calls == ["windowed"]
+    # Resizable is requested after leaving fullscreen. SDL drops the change while that flag is still set.
+    assert app.window.calls == ["windowed", ("resizable", True)]
     assert app.window.size == ui.WINDOWED_SIZE
     assert app.window.resizable is True
     assert app.window.minimum_size == ui.WINDOWED_MIN
+    assert styled == [app.window]
     assert shadows == []
 
     app._toggle_window()
 
     assert app.windowed is False
-    assert app.window.calls == ["windowed", ("fullscreen", True)]
+    assert app.window.calls == ["windowed", ("resizable", True), ("resizable", False), ("fullscreen", True)]
     assert app.window.size == (2560, 1440)
     assert app.window.resizable is False
+    assert styled == [app.window]
     assert shadows == ["shadow"]
 
 

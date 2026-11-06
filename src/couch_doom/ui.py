@@ -596,6 +596,92 @@ def _appkit():
     return (objc, send, NSApp) if NSApp else None
 
 
+# titled | closable | miniaturizable | resizable. Borderless fullscreen drops the last three.
+_MAC_STYLE_WINDOWED = 1 | 2 | 4 | 8
+_MAC_STYLE_MINIATURIZABLE = 4
+# Managed, and not a fullscreen auxiliary. MoveToActiveSpace would follow a desktop switch.
+_MAC_COLLECTION_PINNED = 4 | 512
+
+
+def _macos_configure_window(handle, *, style: int | None = None, level: int | None = None,
+                            collection: int | None = None) -> bool:
+    """Change one NSWindow. `handle` is pygame's Cocoa pointer; 0 means there is no Cocoa window (the dummy driver)."""
+    if not handle or sys.platform != "darwin":
+        return False
+    try:
+        kit = _appkit()
+        if not kit:
+            return False
+        _, send, _app = kit
+        if style is not None:
+            send(handle, b"setStyleMask:", ctypes.c_ulong(style), restype=None, argtypes=[ctypes.c_ulong])
+        if level is not None:
+            send(handle, b"setLevel:", ctypes.c_long(level), restype=None, argtypes=[ctypes.c_long])
+        if collection is not None:
+            send(handle, b"setCollectionBehavior:", ctypes.c_ulong(collection), restype=None,
+                 argtypes=[ctypes.c_ulong])
+        return True
+    except (AttributeError, OSError, TypeError, ValueError, ctypes.ArgumentError):
+        return False
+
+
+def _macos_apply_windowed_style(window) -> None:
+    """Put the resize frame back. SDL ignores a resizable change while the fullscreen flag is still set, and
+    leaving fullscreen then builds the title bar from that stale flag, so the mask is applied again here."""
+    handle = getattr(window, "handle", None) or 0
+    if not _macos_configure_window(handle, style=_MAC_STYLE_WINDOWED):
+        return
+    try:
+        window.title = "CouchDoom"  # setStyleMask clears the title
+    except (AttributeError, pygame.error):
+        pass
+
+
+def _macos_prepare_miniaturize(window) -> bool:
+    """Desktop fullscreen is borderless at the shielding level, which is above every Space and cannot miniaturize.
+    Drop it to a normal window that stays on the Space it already occupies."""
+    handle = getattr(window, "handle", None) or 0
+    if not handle:
+        return False
+    try:
+        kit = _appkit()
+        if not kit:
+            return False
+        _, send, _app = kit
+        style = int(send(handle, b"styleMask", restype=ctypes.c_ulong) or 0)
+    except (AttributeError, OSError, TypeError, ValueError, ctypes.ArgumentError):
+        return False
+    return _macos_configure_window(handle, style=style | _MAC_STYLE_MINIATURIZABLE, level=0,
+                                   collection=_MAC_COLLECTION_PINNED)
+
+
+def _macos_is_miniaturized(handle) -> bool:
+    if not handle:
+        return True
+    try:
+        kit = _appkit()
+        if not kit:
+            return True
+        _, send, _app = kit
+        return bool(send(handle, b"isMiniaturized", restype=ctypes.c_bool))
+    except (AttributeError, OSError, TypeError, ValueError, ctypes.ArgumentError):
+        return True
+
+
+def _macos_is_shielding(handle) -> bool:
+    """Desktop fullscreen sits at CGShieldingWindowLevel, far above a normal window."""
+    if not handle:
+        return False
+    try:
+        kit = _appkit()
+        if not kit:
+            return False
+        _, send, _app = kit
+        return int(send(handle, b"level", restype=ctypes.c_long) or 0) > 1000
+    except (AttributeError, OSError, TypeError, ValueError, ctypes.ArgumentError):
+        return False
+
+
 def _disable_macos_fullscreen_shadow() -> None:
     """Avoid Tahoe's visible one-pixel fullscreen edge from the SDL Cocoa window shadow."""
     try:
@@ -1376,6 +1462,8 @@ class App:
                     time.sleep(0.01)
                 _disable_macos_fullscreen_shadow()
             self._arm_window_resize()
+            if self.windowed:
+                _macos_apply_windowed_style(self.window)  # creation can still omit the resize bit on Tahoe
             self.screen = self._window_target(self.window)
             self.dpi = self.screen.get_width() / self.window.size[0]
             _set_window_icon(self.window)  # Window() just installed pygame's Dock icon
@@ -1564,8 +1652,11 @@ class App:
         else:
             if sys.platform == "darwin":
                 if self.windowed:
-                    self._arm_window_resize()
+                    # SDL_SetWindowResizable does nothing while the fullscreen flag is set, and does not
+                    # even store the flag. Leave fullscreen first, then ask for the resize frame.
                     self.window.set_windowed()
+                    self._arm_window_resize()
+                    _macos_apply_windowed_style(self.window)
                     self.window.size = self._windowed_size()
                 else:
                     self.window.resizable = False
@@ -3111,6 +3202,90 @@ class App:
 
     # ---------- launching ----------
 
+    def _park_for_game(self) -> bool:
+        """Get this window off the desktop before we block on the game. True when it stays alive, minimized.
+
+        Windows and Linux destroy the window; that actually removes it. On Mac, desktop fullscreen is a
+        shielding-level window, so it is visible on every Space. Destroying it and then blocking in
+        ``proc.wait()`` never pumps Cocoa, and the last frame — the loading screen — stays there.
+        """
+        if sys.platform != "darwin" or self.window is None:
+            self._close_window()
+            return False
+        _macos_prepare_miniaturize(self.window)
+        try:
+            self.window.minimize()
+        except pygame.error:
+            try:
+                self.window.hide()
+            except pygame.error:
+                self._close_window()
+                return False
+        self._wait_until_miniaturized()
+        self.hidden = True
+        return True
+
+    def _wait_until_miniaturized(self) -> None:
+        """miniaturize: is animated. Without a pump the window is still on screen when we block."""
+        handle = getattr(self.window, "handle", None) or 0
+        for _ in range(40):
+            pygame.event.pump()
+            if not handle or _macos_is_miniaturized(handle):
+                return
+            time.sleep(0.01)
+
+    def _reopen_after_game(self) -> None:
+        pygame.display.init()
+        pygame.display.set_caption("CouchDoom")
+        self._open_window()
+        self.hidden = False  # a fresh window; any minimize event belonged to the old one
+
+    def _unpark_after_game(self) -> None:
+        """Bring the minimized Mac window back. Minimize leaves desktop fullscreen, so re-enter it."""
+        window = self.window
+        if window is None:
+            self._reopen_after_game()
+            return
+        try:
+            window.restore()
+        except pygame.error:
+            self._close_window()
+            self._reopen_after_game()
+            return
+        try:
+            window.show()  # a hide() fallback never sets the minimized flag, so restore() would leave it hidden
+        except pygame.error:
+            pass
+        handle = getattr(window, "handle", None) or 0
+        for _ in range(20):
+            pygame.event.pump()
+            if not handle or not _macos_is_miniaturized(handle):
+                break
+            time.sleep(0.01)
+        if not self.windowed:
+            # Restore already raises a surviving fullscreen window back to the shielding level.
+            # Leaving and re-entering here would flash a normal window on the way back from a game.
+            if not _macos_is_shielding(handle):
+                try:
+                    window.set_windowed()
+                    window.set_fullscreen(desktop=True)
+                except pygame.error:
+                    pass
+            _disable_macos_fullscreen_shadow()
+        else:
+            self._arm_window_resize()
+            _macos_apply_windowed_style(window)
+        if getattr(self, "screen", None) is not None:
+            self._sync_resized_window()
+        self.hidden = False
+        # Drop keys that arrived while the game was up. Apply a resize from the restore first.
+        for event in pygame.event.get():
+            if event.type in (pygame.WINDOWRESIZED, pygame.WINDOWSIZECHANGED,
+                              pygame.WINDOWDISPLAYCHANGED, pygame.WINDOWMOVED):
+                self._on_window_event(event)
+        self.hidden = False
+        _force_foreground(getattr(window, "handle", None) or None)
+
     def _launch_selected(self) -> None:
         if not self.rows:
             return
@@ -3143,7 +3318,7 @@ class App:
         # The engine inherits foreground rights from the spawn above. Keep our loading frame up until it has a
         # window of its own, or a large WAD would show the desktop for as long as it takes to load.
         self._hold_loading(preset.name, proc)
-        self._close_window()
+        parked = self._park_for_game()
         code, elapsed = proc.wait()
         if needs_extract_retry(cmd.argv, cmd.env, proc.output, code, elapsed):
             # No FUSE on this system: run the AppImage by unpacking it instead, and say so in the log.
@@ -3155,12 +3330,13 @@ class App:
                 pass
         self._warm_allowed.set()
 
-        # Recreate our window first: audio and pads can take a moment, and every one of those milliseconds is
-        # desktop showing through after the engine has already torn its own window down.
-        pygame.display.init()
-        pygame.display.set_caption("CouchDoom")
-        self._open_window()
-        self.hidden = False  # a fresh window; any minimize event belonged to the old one
+        # The window comes back before audio and pads: both can take a moment, and every one of those
+        # milliseconds is desktop showing through after the engine has already torn its own window down.
+        if parked:
+            self._unpark_after_game()
+        else:
+            self._reopen_after_game()
+        self.hidden = False
         self._audio_up()
         self.input.resume()
         pygame.event.clear()
