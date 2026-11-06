@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from couch_doom import asset_cache, i18n, music_cache, ui
 from couch_doom.options import Preset, unpack
-from couch_doom.ui import WARM_PROGRESS_DELAY, App, Row
+from couch_doom.ui import App, Row
 
 
 class InlineThread:
@@ -112,15 +112,15 @@ def test_a_retired_pass_leaves_the_new_count_alone(monkeypatch):
     assert app._warm_progress == (4, 9)
 
 
-def test_the_count_stays_hidden_until_the_walk_has_lasted_a_second():
+def test_opening_the_app_never_shows_the_count():
     i18n.set_language("en")
     app = App.__new__(App)
     app._warm_begun = 10.0
     app._warm_progress = (2, 9)
     app._warm_immediate = False
 
-    assert app._warm_status(10.0 + WARM_PROGRESS_DELAY - 0.01) is None
-    assert app._warm_status(10.0 + WARM_PROGRESS_DELAY) == "Caching 2/9"
+    assert app._warm_status(10.0) is None
+    assert app._warm_status(30.0) is None
     app._warm_progress = None
     assert app._warm_status(12.0) is None
     app._warm_progress = (0, 0)

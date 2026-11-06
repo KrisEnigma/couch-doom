@@ -82,7 +82,6 @@ WINDOW_EVENTS = {
     pygame.RENDER_DEVICE_RESET, pygame.WINDOWRESIZED, pygame.WINDOWSIZECHANGED,
 }
 ART_FADE_SECONDS = 0.15
-WARM_PROGRESS_DELAY = 1.0  # a walk that finishes sooner stays quiet
 ART_CACHE_SIZE = 24
 ART_CACHE_BYTES = 96 * 1024 * 1024  # 24 panels at 1080p, but only ~8 at 4K
 # Each theme holds a full-screen background plus an art-panel veil (~11 MB at 1080p, ~45 MB at 4K).
@@ -885,7 +884,7 @@ class App:
         self._warm_allowed.set()
         self._warm_begun = 0.0
         self._warm_progress: tuple[int, int] | None = None  # (done, total) while a pass is walking presets
-        self._warm_immediate = False  # a refresh shows the count at once; a startup walk waits
+        self._warm_immediate = False  # only a refresh from the menu shows the count
         self._warm_announce = False  # this pass should say "Refreshed" when it finishes
 
         self.rows: list[Row] = []
@@ -2465,10 +2464,10 @@ class App:
         pos = rows.index(sel)
         return [self.rows[rows[p]].preset for p in (pos - 1, pos + 1) if 0 <= p < len(rows)]
 
-    def _warm_status(self, now: float) -> str | None:
-        """The walk's count. A refresh shows it at once; a startup walk waits, so a fast one stays quiet."""
+    def _warm_status(self, _now: float) -> str | None:
+        """The walk's count. Only a refresh from the menu shows it. Opening the app stays quiet."""
         progress = self._warm_progress
-        if progress is None or (not self._warm_immediate and now - self._warm_begun < WARM_PROGRESS_DELAY):
+        if progress is None or not self._warm_immediate:
             return None
         done, total = progress
         if total <= 0:
