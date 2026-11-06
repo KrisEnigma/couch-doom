@@ -55,18 +55,26 @@ if override := os.environ.get("COUCHDOOM_DATA_DIR"):
 DEV_LAUNCHERS = Path(r"D:\Standalone\UZDoom") if SOURCE_TREE and os.name == "nt" else None
 DEFAULT_OPTIONS = Path(r"D:\Standalone\UZDoom\DoomRunner\options.json")
 STATE_DIR = DATA_DIR / "state"
-STATE_FILE = STATE_DIR / "settings.json"
-LEGACY_STATE_FILE = STATE_DIR / "last_played.json"
+STATE_FILE = STATE_DIR / "settings.ini"
+# Released builds used last_played.json; a brief main-only settings.json never shipped.
+LEGACY_STATE_FILES = (STATE_DIR / "last_played.json", STATE_DIR / "settings.json")
 LOG_FILE = STATE_DIR / "couch-doom.log"
 
 
 def migrate_legacy_state_file() -> None:
-    """Rename last_played.json → settings.json when the new name is absent."""
-    if STATE_FILE.exists() or not LEGACY_STATE_FILE.exists():
+    """Convert last_played.json (or an unreleased settings.json) into settings.ini when needed."""
+    if STATE_FILE.exists():
         return
-    try:
-        LEGACY_STATE_FILE.replace(STATE_FILE)
-    except OSError as exc:
-        from . import log
+    from .state import adopt_legacy_json_settings
 
-        log.write("settings migrate failed", f"{LEGACY_STATE_FILE} → {STATE_FILE}: {exc}")
+    for legacy in LEGACY_STATE_FILES:
+        if not legacy.is_file():
+            continue
+        try:
+            adopt_legacy_json_settings(legacy, STATE_FILE)
+            return
+        except (OSError, ValueError) as exc:
+            from . import log
+
+            log.write("settings migrate failed", f"{legacy} → {STATE_FILE}: {exc}")
+            return

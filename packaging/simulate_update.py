@@ -13,7 +13,6 @@ Run from the repo root:  uv run python packaging/simulate_update.py quick
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import platform
 import shutil
@@ -28,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 from couch_doom import __version__  # noqa: E402
+from couch_doom.state import _parse_settings, dumps_settings  # noqa: E402
 from couch_doom.update import asset_for_platform  # noqa: E402
 from tests.make_update_test_manifest import write_manifest  # noqa: E402
 
@@ -37,13 +37,15 @@ RELEASES = "https://github.com/KrisEnigma/couch-doom/releases/download"
 def _settings(seen: str | None) -> dict:
     """Your own settings file, minus the version it last saw (that's what the simulation sets)."""
     data: dict = {}
-    try:
-        data = json.loads((ROOT / "state" / "settings.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    for name in ("settings.ini", "settings.json", "last_played.json"):
+        path = ROOT / "state" / name
         try:
-            data = json.loads((ROOT / "state" / "last_played.json").read_text(encoding="utf-8"))
+            data = _parse_settings(path.read_text(encoding="utf-8"))
+            break
         except (OSError, ValueError):
-            data = {"language": "en", "language_source": "menu"}  # still a returning player, just without your list
+            continue
+    else:
+        data = {"language": "en", "language_source": "menu"}  # still a returning player, just without your list
     data.pop("seen_version", None)
     if seen:
         data["seen_version"] = seen
@@ -52,7 +54,7 @@ def _settings(seen: str | None) -> dict:
 
 def _write_state(state_dir: Path, seen: str | None) -> None:
     state_dir.mkdir(parents=True, exist_ok=True)
-    (state_dir / "settings.json").write_text(json.dumps(_settings(seen), indent=2), encoding="utf-8")
+    (state_dir / "settings.ini").write_text(dumps_settings(_settings(seen)), encoding="utf-8")
 
 
 def quick(sandbox: Path, previous: str) -> None:

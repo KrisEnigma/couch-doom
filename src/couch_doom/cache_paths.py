@@ -9,7 +9,7 @@ _settings_cache_dir: str | None = None
 
 
 def configure(cache_dir_setting: str | None) -> None:
-    """Remember an optional cache_dir from settings.json (env still wins at lookup time)."""
+    """Remember an optional cache_dir from settings.ini (env still wins at lookup time)."""
     global _settings_cache_dir
     _settings_cache_dir = cache_dir_setting if cache_dir_setting else None
 

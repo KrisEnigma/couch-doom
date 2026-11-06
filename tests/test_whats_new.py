@@ -61,7 +61,7 @@ def test_pending_without_a_changelog_is_quiet(tmp_path):
 
 
 def test_state_remembers_the_seen_version(tmp_path):
-    path = tmp_path / "settings.json"
+    path = tmp_path / "settings.ini"
     first = State(path)
     assert first.seen_version is None and not first.returning
     first.set_seen_version("1.2.4")
