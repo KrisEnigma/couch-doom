@@ -164,7 +164,8 @@ jobs:
             exit 1
           fi
           {\
-            cat packaging/release-header.md
+            # __TAG__ becomes this release so the header's download links stay clickable and Windows-first.
+            sed "s/__TAG__/${GITHUB_REF_NAME}/g" packaging/release-header.md
             printf '\n%s\n\n' "$section"
             echo 'Controls and setup details are in `How to use.txt`, inside every ZIP and tar.gz download.'
           } > notes.md

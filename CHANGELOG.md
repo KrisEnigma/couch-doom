@@ -2,6 +2,11 @@
 
 Each release's notes on GitHub are its own section below, behind the download instructions in `packaging/release-header.md`. Keep the `**New in X.Y.Z**` heading format: the release workflow and the in-app update notice both look for it.
 
+**New in 1.2.11**
+
+- Windows: art and music cache writes retry when antivirus or another reader briefly locks a file, so a custom `cache_dir` next to CouchDoom no longer stalls the cache walk or drops titles and readmes.
+- Release notes put direct download links first (Windows, then macOS, Linux, Steam Deck), so you do not have to dig through the alphabetical asset list.
+
 **New in 1.2.10**
 
 - Windows: when an update can't replace the CouchDoom folder because another program still has it open, CouchDoom waits longer and explains what went wrong more clearly.
