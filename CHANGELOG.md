@@ -4,8 +4,8 @@ Each release's notes on GitHub are its own section below, behind the download in
 
 **New in 1.2.11**
 
-- Windows: art and music cache writes retry when antivirus or another reader briefly locks a file, so a custom `cache_dir` next to CouchDoom no longer stalls the cache walk or drops titles and readmes.
-- Release notes put direct download links first (Windows, then macOS, Linux, Steam Deck), so you do not have to dig through the alphabetical asset list.
+- Windows: if antivirus or another program briefly locks a cache file, CouchDoom retries the write instead of stalling Refresh or dropping titles and readmes. This also helps when `cache_dir` sits next to the install.
+- Release notes now lead with direct download links (Windows, then macOS, Linux, Steam Deck), so you do not have to dig through the alphabetical asset list.
 
 **New in 1.2.10**
 
