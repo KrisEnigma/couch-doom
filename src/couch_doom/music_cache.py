@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Collection, Sequence
 
 from .archive import ArchiveSource
+from .atomic import replace_when_free
 from .cache_paths import cache_dir
 
 MAX_STREAM_BYTES = 256 * 1024 * 1024
@@ -49,35 +50,38 @@ def selection_key(asset_key: str, iwad: Path | None = None, files: Sequence[Path
 
 
 def get_selection(key: str) -> tuple[bool, dict | None]:
-    try:
-        path = _manifest_path(key)
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict) or data.get("version") != MANIFEST_VERSION or not isinstance(data.get("result"), dict):
-            return False, None
+    with _LOCK:
         try:
-            os.utime(path, None)
-        except OSError:
-            pass
-        return True, data["result"]
-    except (OSError, ValueError, TypeError):
-        return False, None
+            path = _manifest_path(key)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or data.get("version") != MANIFEST_VERSION or not isinstance(data.get("result"), dict):
+                return False, None
+            try:
+                os.utime(path, None)
+            except OSError:
+                pass
+            return True, data["result"]
+        except (OSError, ValueError, TypeError):
+            return False, None
 
 
 def put_selection(key: str, result: dict) -> None:
     path = _manifest_path(key)
     temp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent,
-                                         prefix=path.name + ".", suffix=".part", delete=False) as f:
-            temp_path = Path(f.name)
-            json.dump({"version": MANIFEST_VERSION, "result": result}, f, separators=(",", ":"))
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(temp_path, path)
-    except Exception:
-        if temp_path:
-            temp_path.unlink(missing_ok=True)
-        raise
+    with _LOCK:
+        try:
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent,
+                                             prefix=path.name + ".", suffix=".part", delete=False) as f:
+                temp_path = Path(f.name)
+                json.dump({"version": MANIFEST_VERSION, "result": result}, f, separators=(",", ":"))
+                f.flush()
+                os.fsync(f.fileno())
+            replace_when_free(temp_path, path)
+            temp_path = None
+        except Exception:
+            if temp_path:
+                temp_path.unlink(missing_ok=True)
+            raise
 
 
 def invalidate_selections(present_keys: set[str]) -> None:
@@ -128,7 +132,7 @@ def cache_stream(source: ArchiveSource, suffix: str, cancel: threading.Event,
                 raise OSError(f"incomplete music extraction: expected {source.size}, copied {copied}")
             if cancel.is_set():
                 raise InterruptedError("music cache population cancelled")
-            os.replace(temp_path, path)
+            replace_when_free(temp_path, path)
             temp_path = None
             prune({*protected, path})
             return path

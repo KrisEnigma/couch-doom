@@ -15,6 +15,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from .atomic import replace_when_free
 from .endoom import Endoom
 from .options import Preset
 from .readme import Readme
@@ -130,7 +131,7 @@ def name_cache_file(key: str, label: str) -> None:
     if current is None or current == dest:
         return
     try:
-        current.replace(dest)
+        replace_when_free(current, dest)
     except OSError:
         return
     _drop_other_copies(key, keep=dest)
@@ -267,7 +268,7 @@ def put(key: str, assets: CachedAssets, label: str | None = None) -> None:
             "ts": time.time(),
         }
         tmp.write_text(json.dumps(data), encoding="utf-8")
-        os.replace(tmp, path)
+        replace_when_free(tmp, path)
         if slug:
             _drop_other_copies(key, keep=path)
         with _INDEX_LOCK:
@@ -303,7 +304,7 @@ def save_preset_keys(mapping: dict[str, str]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(f"preset_keys.{os.getpid()}-{threading.get_ident()}.tmp")
         tmp.write_text(json.dumps(mapping), encoding="utf-8")
-        os.replace(tmp, path)
+        replace_when_free(tmp, path)
     except Exception:
         if tmp is not None:
             try:
